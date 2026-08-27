@@ -7,6 +7,7 @@ import hashlib
 import importlib.metadata
 import json
 import math
+import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,7 @@ from tdwm.methods.rf_successor_lewm import (
 )
 from tdwm.training.block_sampler import BlockShuffleBatchSampler
 from tdwm.training.cube_data import validate_cube_training_dataset
+from tdwm.training.decoded_frame_store import DecodedFrameStore
 from tdwm.training.gt_lewm_support import (
     LeWMTransform,
     build_metrics_logger,
@@ -94,6 +96,244 @@ SEQUENCE_METHODS = frozenset(
     )
 )
 SUPPORTED_METHODS = frozenset((METHOD, *SEQUENCE_METHODS))
+DECODED_FRAME_STORE_ENV = "TDWM_DECODED_FRAME_STORE"
+DECODED_FRAME_ROW_MAPPING = "binary frame i is decoded from Lance pixels row i"
+DECODED_FRAME_DECODER_API = "torchvision.io.decode_jpeg"
+
+
+def _canonical_int64_sha256(values: Any, *, label: str) -> str:
+    array = np.asarray(values, dtype=np.int64)
+    if array.ndim != 1:
+        raise ValueError(f"{label} must be a one-dimensional integer array.")
+    return hashlib.sha256(np.ascontiguousarray(array).tobytes()).hexdigest()
+
+
+def _prepare_decoded_frame_store(
+    protocol: dict[str, Any],
+    dataset_source: dict[str, Any],
+    dataset: Any,
+) -> tuple[DecodedFrameStore | None, dict[str, Any] | None]:
+    """Bind, validate, and preload the optional decoded-frame store."""
+
+    configured_path = os.environ.get(DECODED_FRAME_STORE_ENV)
+    if configured_path is None:
+        return None, None
+    if not configured_path.strip():
+        raise ValueError(f"{DECODED_FRAME_STORE_ENV} cannot be empty when set.")
+
+    manifest_path = Path(configured_path).expanduser().resolve()
+    store = DecodedFrameStore.from_manifest(manifest_path)
+    expected_rows = int(protocol["dataset"]["expected_transitions"])
+    image_size = int(protocol["image_preprocessing"]["size"])
+    expected_frame_shape = (3, image_size, image_size)
+    expected_shape = (expected_rows, *expected_frame_shape)
+
+    if int(store.row_count) != expected_rows:
+        raise ValueError(
+            "Decoded frame store row_count differs from dataset.expected_transitions: "
+            f"expected {expected_rows}, found {store.row_count}."
+        )
+    if tuple(int(value) for value in store.shape) != expected_shape:
+        raise ValueError(
+            "Decoded frame store shape differs from the locked image protocol: "
+            f"expected {expected_shape}, found {tuple(store.shape)}."
+        )
+    if tuple(int(value) for value in store.frame_shape) != expected_frame_shape:
+        raise ValueError(
+            "Decoded frame store frame shape differs from the locked image protocol: "
+            f"expected {expected_frame_shape}, found {tuple(store.frame_shape)}."
+        )
+    if np.dtype(store.dtype) != np.dtype(np.uint8):
+        raise ValueError(
+            "Decoded frame store dtype must be uint8, "
+            f"found {np.dtype(store.dtype).name}."
+        )
+
+    if dataset_source.get("format") != "lance":
+        raise ValueError("Decoded frame store source binding requires a Lance dataset.")
+    conversion_manifest_value = dataset_source.get("conversion_manifest_path")
+    if not isinstance(conversion_manifest_value, str) or not conversion_manifest_value:
+        raise ValueError(
+            "The Lance dataset source must provide conversion_manifest_path."
+        )
+    conversion_manifest_path = Path(conversion_manifest_value).expanduser().resolve()
+    if not conversion_manifest_path.is_file():
+        raise FileNotFoundError(
+            f"Lance conversion manifest not found: {conversion_manifest_path}"
+        )
+    conversion_manifest_sha256 = _file_sha256(conversion_manifest_path)
+
+    source = store.source
+    if source.get("format") != "lance":
+        raise ValueError("Decoded frame store source.format must be 'lance'.")
+    if source.get("manifest_sha256") != conversion_manifest_sha256:
+        raise ValueError(
+            "Decoded frame store source.manifest_sha256 does not match the "
+            "current Lance conversion manifest."
+        )
+    if source.get("pixel_column") != "pixels":
+        raise ValueError("Decoded frame store source.pixel_column must be 'pixels'.")
+    if source.get("row_mapping") != DECODED_FRAME_ROW_MAPPING:
+        raise ValueError(
+            "Decoded frame store source.row_mapping does not match the locked "
+            "Lance row mapping."
+        )
+    if source.get("row_count") != expected_rows:
+        raise ValueError(
+            "Decoded frame store source.row_count differs from the locked dataset."
+        )
+
+    lengths = np.asarray(dataset.lengths, dtype=np.int64)
+    offsets = np.asarray(dataset.offsets, dtype=np.int64)
+    if lengths.ndim != 1 or offsets.ndim != 1 or len(offsets) != len(lengths):
+        raise ValueError(
+            "The current Lance dataset must expose aligned one-dimensional "
+            "lengths and offsets."
+        )
+    if int(lengths.sum()) != expected_rows:
+        raise ValueError(
+            "The current Lance dataset lengths do not sum to expected_transitions."
+        )
+    episode_count = len(lengths)
+    expected_episodes = int(protocol["dataset"]["expected_episodes"])
+    if episode_count != expected_episodes:
+        raise ValueError(
+            "The current Lance dataset episode count differs from the protocol."
+        )
+    if source.get("episode_count") != episode_count:
+        raise ValueError(
+            "Decoded frame store source.episode_count differs from the current "
+            "Lance dataset."
+        )
+    lengths_sha256 = _canonical_int64_sha256(
+        lengths,
+        label="dataset.lengths",
+    )
+    offsets_sha256 = _canonical_int64_sha256(
+        offsets,
+        label="dataset.offsets",
+    )
+    if source.get("episode_lengths_sha256") != lengths_sha256:
+        raise ValueError(
+            "Decoded frame store source.episode_lengths_sha256 differs from the "
+            "current Lance dataset."
+        )
+    if source.get("episode_offsets_sha256") != offsets_sha256:
+        raise ValueError(
+            "Decoded frame store source.episode_offsets_sha256 differs from the "
+            "current Lance dataset."
+        )
+    episode_payload_bytes = source.get("episode_jpeg_payload_bytes")
+    if (
+        not isinstance(episode_payload_bytes, list)
+        or len(episode_payload_bytes) != episode_count
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in episode_payload_bytes
+        )
+    ):
+        raise ValueError(
+            "Decoded frame store source.episode_jpeg_payload_bytes must contain "
+            "one positive integer per current Lance episode."
+        )
+
+    store_metadata = store.metadata
+    decoder = store_metadata.get("decoder")
+    if not isinstance(decoder, dict):
+        raise ValueError("Decoded frame store decoder metadata must be an object.")
+    if decoder.get("api") != DECODED_FRAME_DECODER_API:
+        raise ValueError(
+            "Decoded frame store decoder.api must be "
+            f"{DECODED_FRAME_DECODER_API!r}."
+        )
+    if decoder.get("mode") != "RGB":
+        raise ValueError("Decoded frame store decoder.mode must be 'RGB'.")
+
+    pixel_verification = store_metadata.get("source_pixel_verification")
+    if not isinstance(pixel_verification, dict):
+        raise ValueError(
+            "Decoded frame store source_pixel_verification must be an object."
+        )
+    if pixel_verification.get("row_count") != expected_rows:
+        raise ValueError(
+            "Decoded frame store source_pixel_verification.row_count differs "
+            "from the locked dataset."
+        )
+    for digest_key in ("decoded_sha256", "data_sha256"):
+        if pixel_verification.get(digest_key) != store.sha256:
+            raise ValueError(
+                "Decoded frame store source_pixel_verification."
+                f"{digest_key} differs from the decoded data SHA-256."
+            )
+    if pixel_verification.get("matches_data_sha256") is not True:
+        raise ValueError(
+            "Decoded frame store source_pixel_verification."
+            "matches_data_sha256 must be true."
+        )
+    verification_decoder = pixel_verification.get("decoder")
+    if not isinstance(verification_decoder, dict):
+        raise ValueError(
+            "Decoded frame store source_pixel_verification.decoder must be an "
+            "object."
+        )
+    if verification_decoder.get("api") != DECODED_FRAME_DECODER_API:
+        raise ValueError(
+            "Decoded frame store source_pixel_verification.decoder.api differs "
+            "from the locked decoder."
+        )
+    if verification_decoder.get("mode") != "RGB":
+        raise ValueError(
+            "Decoded frame store source_pixel_verification.decoder.mode must be "
+            "'RGB'."
+        )
+
+    current_dataset_path = str(Path(dataset_source["path"]).expanduser().resolve())
+    store_source_path = source.get("path")
+    path_match = False
+    if isinstance(store_source_path, str) and store_source_path:
+        path_match = (
+            Path(store_source_path).expanduser().resolve()
+            == Path(current_dataset_path)
+        )
+
+    store.preload(verify_sha256=True)
+    if not store.page_cache_warmed:
+        raise RuntimeError("Decoded frame store preload did not warm the page cache.")
+    if not store.sha256_verified:
+        raise RuntimeError("Decoded frame store preload did not verify its SHA-256.")
+    source_binding = {
+        "verified": True,
+        "conversion_manifest_path": str(conversion_manifest_path),
+        "conversion_manifest_sha256": conversion_manifest_sha256,
+        "dataset_path": current_dataset_path,
+        "store_source_path": store_source_path,
+        "path_match": path_match,
+        "row_count": expected_rows,
+        "episode_count": episode_count,
+        "episode_lengths_sha256": lengths_sha256,
+        "episode_offsets_sha256": offsets_sha256,
+        "episode_payload_count": len(episode_payload_bytes),
+        "pixel_column": "pixels",
+        "row_mapping": DECODED_FRAME_ROW_MAPPING,
+        "decoder": {
+            "api": DECODED_FRAME_DECODER_API,
+            "mode": "RGB",
+        },
+        "source_pixel_verification": pixel_verification,
+    }
+    return store, {
+        "manifest_path": str(store.manifest_path),
+        "manifest_sha256": store.manifest_sha256,
+        "data_path": str(store.data_path),
+        "data_sha256": store.sha256,
+        "data_sha256_verified": bool(store.sha256_verified),
+        "row_count": int(store.row_count),
+        "shape": [int(value) for value in store.shape],
+        "dtype": np.dtype(store.dtype).name,
+        "preloaded": True,
+        "page_cache_warmed": bool(store.page_cache_warmed),
+        "source_binding": source_binding,
+    }
 
 
 def load_rf_successor_training_protocol(path: str | Path) -> dict[str, Any]:
@@ -1631,8 +1871,19 @@ def train_rf_successor_lewm(
         columns=statistics,
         preprocess_images=not device_preprocessing,
     )
+    decoded_frame_store_metadata = None
     if dataset_source["format"] == "lance":
-        dataset = StrideAwareLanceDataset(dataset)
+        decoded_frame_store, decoded_frame_store_metadata = (
+            _prepare_decoded_frame_store(protocol, dataset_source, dataset)
+        )
+        dataset = StrideAwareLanceDataset(
+            dataset,
+            decoded_frame_store=decoded_frame_store,
+        )
+    elif os.environ.get(DECODED_FRAME_STORE_ENV) is not None:
+        raise ValueError(
+            f"{DECODED_FRAME_STORE_ENV} is only supported for Lance datasets."
+        )
 
     generator = torch.Generator().manual_seed(seed)
     train_set, validation_set = torch.utils.data.random_split(
@@ -1881,6 +2132,13 @@ def train_rf_successor_lewm(
     }
     if torch.cuda.is_available():
         runtime["cuda_device"] = torch.cuda.get_device_name(0)
+    dataset_manifest = {
+        **dataset_source,
+        "sequence_samples": len(dataset),
+        "split": split_manifest,
+    }
+    if decoded_frame_store_metadata is not None:
+        dataset_manifest["decoded_frame_store"] = decoded_frame_store_metadata
     write_json(
         run_dir / "training_manifest.json",
         {
@@ -1888,11 +2146,7 @@ def train_rf_successor_lewm(
             "protocol": protocol,
             "protocol_path": str(Path(protocol_path).resolve()),
             "seed": seed,
-            "dataset": {
-                **dataset_source,
-                "sequence_samples": len(dataset),
-                "split": split_manifest,
-            },
+            "dataset": dataset_manifest,
             "model": {
                 "config": model_config,
                 "initialization": initialization_info,

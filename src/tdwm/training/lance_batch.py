@@ -167,7 +167,7 @@ class StrideAwareLanceDataset:
     complete temporal span; observation and image columns use strided rows.
     """
 
-    def __init__(self, dataset: Any) -> None:
+    def __init__(self, dataset: Any, decoded_frame_store: Any | None = None) -> None:
         required = (
             "clip_indices",
             "offsets",
@@ -189,7 +189,64 @@ class StrideAwareLanceDataset:
             raise ValueError(
                 "The stride-aware LeWM loader requires pixels and action columns."
             )
+        image_columns = {
+            name for name in columns if name == "pixels" or name.startswith("pixels_")
+        }
+        if decoded_frame_store is not None:
+            if not callable(getattr(decoded_frame_store, "take", None)):
+                raise TypeError("decoded_frame_store must provide take(global_rows).")
+            if image_columns != {"pixels"}:
+                raise ValueError(
+                    "decoded_frame_store currently requires exactly one pixels column."
+                )
+            payload_bytes = getattr(
+                decoded_frame_store, "episode_jpeg_payload_bytes", None
+            )
+            if not isinstance(payload_bytes, (tuple, list)):
+                raise TypeError(
+                    "decoded_frame_store.episode_jpeg_payload_bytes must be a "
+                    "tuple or list."
+                )
+            episode_count = len(getattr(dataset, "lengths", ()))
+            if len(payload_bytes) != episode_count:
+                raise ValueError(
+                    "decoded_frame_store episode count differs from the Lance "
+                    f"dataset: expected {episode_count}, found {len(payload_bytes)}."
+                )
+            episode_jpeg_payload_bytes = tuple(int(value) for value in payload_bytes)
+            if any(value < 0 for value in episode_jpeg_payload_bytes):
+                raise ValueError(
+                    "decoded_frame_store episode JPEG payload sizes must be "
+                    "non-negative."
+                )
+        else:
+            episode_jpeg_payload_bytes = None
         self.dataset = dataset
+        self.decoded_frame_store = decoded_frame_store
+        self._episode_jpeg_payload_bytes = episode_jpeg_payload_bytes
+
+    def _take_decoded_frames(self, global_rows: Sequence[int]):
+        """Gather raw uint8 NCHW frames from the optional decoded store."""
+
+        import torch
+
+        if self.decoded_frame_store is None:
+            raise RuntimeError("No decoded_frame_store is configured.")
+        rows = [int(row) for row in global_rows]
+        frames = self.decoded_frame_store.take(rows)
+        if not isinstance(frames, torch.Tensor):
+            raise TypeError("decoded_frame_store.take() must return a torch.Tensor.")
+        if frames.dtype != torch.uint8:
+            raise TypeError("decoded_frame_store.take() must return torch.uint8 frames.")
+        if frames.ndim != 4:
+            raise ValueError(
+                "decoded_frame_store.take() must return NCHW frames."
+            )
+        if frames.shape[0] != len(rows):
+            raise ValueError(
+                "decoded_frame_store.take() returned the wrong number of frames."
+            )
+        return frames
 
     def __getattr__(self, name: str) -> Any:
         dataset = self.__dict__.get("dataset")
@@ -216,16 +273,29 @@ class StrideAwareLanceDataset:
             num_steps=int(self.dataset.num_steps),
         )
         frame_rows = list(plan.unique_frame_rows)
-        row_data = self.dataset.get_row_data(frame_rows)
         image_columns = {
             name
             for name in self.dataset.column_names
             if name == "pixels" or name.startswith("pixels_")
         }
-        decoded_images = {
-            name: _decode_images(np.asarray(row_data[name], dtype=object).tolist())
-            for name in image_columns
-        }
+        if self.decoded_frame_store is None:
+            row_data = self.dataset.get_row_data(frame_rows)
+            decoded_images = {
+                name: _decode_images(np.asarray(row_data[name], dtype=object).tolist())
+                for name in image_columns
+            }
+        else:
+            # Do not ask Lance for any JPEG-bearing rows when raw frames are
+            # already resident. Numeric columns remain on the dataset's public
+            # column API; actions are kept dense for each clip's full span.
+            row_data = {
+                name: np.asarray(self.dataset.get_col_data(name))[frame_rows]
+                for name in self.dataset.column_names
+                if name not in image_columns and name != "action"
+            }
+            decoded_images = {
+                "pixels": self._take_decoded_frames(frame_rows),
+            }
         return PrefetchedStrideBlock(
             global_starts=plan.global_starts,
             frame_gathers=plan.frame_gathers,
@@ -460,13 +530,28 @@ class EpisodeStreamingBatchDataset(IterableDataset):
         last_row = int(source.offsets[last_episode]) + int(
             source.lengths[last_episode]
         )
-        rows = list(range(first_row, last_row))
-        row_data = {
-            name: np.asarray(values, dtype=object)
-            if np.asarray(values).dtype == object
-            else np.asarray(values)
-            for name, values in source.get_row_data(rows).items()
-        }
+        if self._dataset.decoded_frame_store is None:
+            rows = list(range(first_row, last_row))
+            row_data = {
+                name: np.asarray(values, dtype=object)
+                if np.asarray(values).dtype == object
+                else np.asarray(values)
+                for name, values in source.get_row_data(rows).items()
+            }
+        else:
+            image_columns = {
+                name
+                for name in source.column_names
+                if name == "pixels" or name.startswith("pixels_")
+            }
+            # Keep only compact numeric episode metadata in the bounded cache.
+            # In particular, never copy the decoded frame store into an episode
+            # because that would change both the 6-GiB budget and sampling flow.
+            row_data = {
+                name: np.asarray(source.get_col_data(name))[first_row:last_row]
+                for name in source.column_names
+                if name not in image_columns
+            }
 
         episodes: list[CachedEpisode] = []
         for episode in episode_ids:
@@ -482,6 +567,13 @@ class EpisodeStreamingBatchDataset(IterableDataset):
             byte_size = int(starts.nbytes) + sum(
                 _payload_nbytes(values) for values in columns.values()
             )
+            if self._dataset.decoded_frame_store is not None:
+                # Preserve the original compressed-JPEG cache accounting even
+                # though the JPEG objects themselves are no longer resident.
+                # This keeps admission/refill and therefore sampling identical.
+                byte_size += int(
+                    self._dataset._episode_jpeg_payload_bytes[episode]
+                ) + int(source.lengths[episode]) * np.dtype(object).itemsize
             episodes.append(
                 CachedEpisode(
                     episode=episode,
@@ -559,12 +651,24 @@ class EpisodeStreamingBatchDataset(IterableDataset):
         batch: dict[str, Any] = {}
         for column in source.column_names:
             if column in image_columns:
-                blobs = [
-                    episode.columns[column][position]
-                    for (episode, _), positions in zip(selections, frame_positions)
-                    for position in positions
-                ]
-                decoded = _decode_images(blobs)
+                if self._dataset.decoded_frame_store is None:
+                    blobs = [
+                        episode.columns[column][position]
+                        for (episode, _), positions in zip(
+                            selections, frame_positions
+                        )
+                        for position in positions
+                    ]
+                    decoded = _decode_images(blobs)
+                else:
+                    global_rows = [
+                        int(source.offsets[episode.episode]) + int(position)
+                        for (episode, _), positions in zip(
+                            selections, frame_positions
+                        )
+                        for position in positions
+                    ]
+                    decoded = self._dataset._take_decoded_frames(global_rows)
                 batch[column] = decoded.reshape(
                     len(selections), num_steps, *decoded.shape[1:]
                 )

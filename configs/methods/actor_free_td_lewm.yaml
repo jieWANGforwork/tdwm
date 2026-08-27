@@ -1,0 +1,56 @@
+schema_version: 1
+id: actor_free_td_lewm
+display_name: Actor-Free TD-LeWM
+family: latent_world_model
+protocol: offline_goal_free_td
+
+implementation:
+  package: stable-worldmodel[all]
+  version: 0.1.1
+  base_model: swm.wm.lewm.LeWM
+  successor_head: tdwm.methods.actor_free_td_lewm.ActorFreeSuccessorHead
+  training: tdwm.training.actor_free_td_lewm.train_actor_free_td_lewm
+
+input:
+  history: real_or_teacher_forced_predicted_latent_history
+  action: externally_supplied_dataset_or_planner_action
+  bootstrap_action: recorded_dataset_next_action
+  goal_during_training: false
+  reward_during_training: false
+
+targets:
+  immediate_feature: augmented_ema_next_latent_squared_distance_basis
+  bootstrap: ema_successor_on_real_ema_next_history
+  terminal: recorded_next_action_is_non_finite
+  clip_boundary_is_terminal: false
+
+variants:
+  serial_decoupled:
+    td_branches: [predicted_context]
+    predicted_context_detach: true
+  serial_coupled:
+    td_branches: [predicted_context]
+    predicted_context_detach: false
+  hybrid:
+    td_branches: [real_context, predicted_context]
+    predicted_context_detach: false
+
+loss:
+  retained_lewm: prediction_mse_plus_0.09_sigreg
+  td: one_step_ema_successor_feature_bellman_mse
+  goal_loss: false
+  actor_loss: false
+
+inference:
+  goal_query: linear_projection_of_successor_moments
+  action_selection: stable_worldmodel_cem_mpc
+  learned_actor: false
+
+checkpoint:
+  method: actor_free_td_lewm
+  objective_version: 1
+  deployment_checkpoint_version: 1
+  self_contained_world_and_successor: true
+
+provenance:
+  note: The three variants differ only in TD context coupling and the hybrid real-context branch.

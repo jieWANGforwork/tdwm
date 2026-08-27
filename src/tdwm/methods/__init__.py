@@ -1,5 +1,12 @@
 """Research method components implemented by TDWM."""
 
+from .actor_free_td_lewm import (
+    ActorFreeSuccessorHead,
+    ActorFreeTDOutput,
+    ActorFreeTDVariant,
+    actor_free_successor_td_target,
+    actor_free_td_objective,
+)
 from .goal_tail import (
     GoalTailTDOutput,
     GoalTailValue,
@@ -17,6 +24,11 @@ from .local_successor import (
     future_goal_successor_objective,
     successor_td_target,
 )
+from .residual_policy_lewm import (
+    ExpertActionWindows,
+    ResidualLeWM,
+    build_expert_action_windows,
+)
 from .rf_successor_lewm import (
     ActionPrefixMomentHead,
     ActionPrefixSuccessorHead,
@@ -31,11 +43,6 @@ from .rf_successor_lewm import (
     successor_moments_from_sequence,
     successor_recurrence_residual,
     successor_sequence_objective,
-)
-from .residual_policy_lewm import (
-    ExpertActionWindows,
-    ResidualLeWM,
-    build_expert_action_windows,
 )
 from .successor_geometry import (
     goal_cost_weights,
@@ -52,6 +59,9 @@ from .successor_geometry_lewm import (
 )
 
 __all__ = [
+    "ActorFreeSuccessorHead",
+    "ActorFreeTDOutput",
+    "ActorFreeTDVariant",
     "ActionPrefixMomentHead",
     "ActionPrefixSuccessorHead",
     "DirectedSuccessorGeometry",
@@ -68,6 +78,8 @@ __all__ = [
     "SuccessorSequenceOutput",
     "SuccessorTDOutput",
     "build_expert_action_windows",
+    "actor_free_successor_td_target",
+    "actor_free_td_objective",
     "discounted_goal_tail_target",
     "discounted_horizon_weights",
     "ema_update",

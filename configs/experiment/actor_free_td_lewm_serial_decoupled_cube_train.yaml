@@ -1,7 +1,8 @@
 schema_version: 1
-id: rf_successor_lewm_cube_v1
-method: rf_successor_lewm
-display_name: Reward-Free Successor LeWM
+id: actor_free_td_lewm_serial_decoupled_cube_v1
+method: actor_free_td_lewm
+variant: serial_decoupled
+display_name: Actor-Free TD-LeWM Serial Decoupled
 environment: cube
 stage: full_training
 initialization: random_from_scratch
@@ -55,8 +56,6 @@ sequence:
   frame_skip: 5
   history_frames: 3
   prediction_frames: 1
-  rollout_horizon: 5
-  # Sixteen local windows preserve the existing 8 x 16 SIGReg effective batch.
   num_steps: 19
 
 image_preprocessing:
@@ -85,35 +84,33 @@ model:
 
 joint_objective:
   local_prediction: original_lewm_one_step_mse
-  multi_step_prediction: open_loop_latent_mse_all_horizons
-  successor: direct_mc_all_prefix_horizons
-  consistency: successor_increment_equals_rollout_feature
+  regularization: original_lewm_sigreg
+  td_target: ema_next_latent_plus_ema_successor_dataset_next_action
   target_encoder: ema_world_model
+  bootstrap_action: dataset_next_action
+  terminal_mask: next_action_nan_invalid
   goal_conditioning: none
-  policy: none
-  bootstrap: none
+  actor: none
+  reward: none
   local_prediction_weight: 1.0
-  multi_step_prediction_weight: 1.0
-  successor_weight: 1.0
-  recurrence_weight: 0.25
+  real_td_weight: 0.0
+  predicted_td_weight: 1.0
+  predicted_context_detach: true
 
 successor:
-  objective_version: 12
-  architecture: masked_history_causal_gru_action_prefix
-  history_padding: left_zero
-  history_masking: explicit_validity
-  history_supervision: all_prefix_lengths
+  objective_version: 1
+  architecture: actor_free_successor_head
   hidden_dim: 256
-  max_horizon: 5
   gamma: 0.95
   feature_basis: augmented_latent_squared_distance
-  horizon_normalization: discounted_prefix_mean
-  target: direct_monte_carlo
-  action_conditioning: causal_prefix
+  action_conditioning: dataset_current_action
+  bootstrap_action: dataset_next_action
+  terminal_source: next_action_nan_invalid
   goal_conditioning: none
-  continuation_policy: none
-  td_bootstrap: false
+  actor: none
+  reward: none
   target_world_ema_decay: 0.995
+  target_successor_ema_decay: 0.995
   loss_warmup_fraction: 0.05
   planning_weight: 1.0
   terminal_weight: 0.0
@@ -177,7 +174,6 @@ training:
 
 provenance:
   base_protocol: configs/experiment/lewm_cube_train.yaml
-  old_method_kept_for_audit: configs/experiment/ls_lewm_cube_train.yaml
-  method_definition: configs/methods/rf_successor_lewm.yaml
+  method_definition: configs/methods/actor_free_td_lewm.yaml
   status: implementation_ready_untrained
-  note: No performance claim is made before controlled multi-seed experiments.
+  note: Predicted TD history is detached, so TD trains only the successor head.

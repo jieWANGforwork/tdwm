@@ -20,6 +20,27 @@ except ImportError:
     Image = None
 
 
+class FakeDecodedFrameStore:
+    def __init__(self, frames, episode_jpeg_payload_bytes=(0,)):
+        self.frames = frames
+        self.episode_jpeg_payload_bytes = episode_jpeg_payload_bytes
+        self.requests = []
+
+    def take(self, global_rows):
+        rows = [int(row) for row in global_rows]
+        self.requests.append(rows)
+        return self.frames[torch.tensor(rows, dtype=torch.long)]
+
+
+def decoded_test_frames(blobs):
+    frames = []
+    for blob in blobs:
+        with Image.open(BytesIO(blob)) as image:
+            array = np.array(image.convert("RGB"), copy=True)
+        frames.append(torch.from_numpy(array).permute(2, 0, 1))
+    return torch.stack(frames)
+
+
 class StrideBatchPlanTest(unittest.TestCase):
     def test_only_requests_frames_consumed_by_the_stride(self):
         plan = build_stride_batch_plan(
@@ -101,6 +122,7 @@ class StrideAwareLanceDatasetTest(unittest.TestCase):
                 self.pixels.append(buffer.getvalue())
             self.requested_rows = None
             self.row_requests = 0
+            self.col_requests = []
             self.transform_calls = 0
             self.transform = self._transform
 
@@ -117,6 +139,7 @@ class StrideAwareLanceDatasetTest(unittest.TestCase):
             }
 
         def get_col_data(self, column):
+            self.col_requests.append(column)
             if column == "action":
                 return self.action
             if column == "observation":
@@ -164,6 +187,36 @@ class StrideAwareLanceDatasetTest(unittest.TestCase):
             second_batch[1]["action"],
             torch.tensor(source.action[3:9]).reshape(3, 4),
         )
+
+    def test_decoded_store_matches_jpeg_path_without_reading_images(self):
+        baseline_source = self.FakeLanceDataset()
+        baseline = StrideAwareLanceDataset(baseline_source).__getitems__([0, 2])
+
+        source = self.FakeLanceDataset()
+        store = FakeDecodedFrameStore(decoded_test_frames(source.pixels))
+        dataset = StrideAwareLanceDataset(source, decoded_frame_store=store)
+        with patch(
+            "tdwm.training.lance_batch._decode_images",
+            side_effect=AssertionError("decoded store must bypass JPEG decoding"),
+        ):
+            accelerated = dataset.__getitems__([0, 2])
+
+        self.assertEqual(source.row_requests, 0)
+        self.assertNotIn("pixels", source.col_requests)
+        self.assertEqual(store.requests, [[0, 2, 4, 6]])
+        for expected, actual in zip(baseline, accelerated):
+            torch.testing.assert_close(actual["pixels"], expected["pixels"])
+            torch.testing.assert_close(actual["action"], expected["action"])
+            torch.testing.assert_close(actual["observation"], expected["observation"])
+
+    def test_decoded_store_episode_count_must_match_lance_dataset(self):
+        source = self.FakeLanceDataset()
+        store = FakeDecodedFrameStore(
+            decoded_test_frames(source.pixels), episode_jpeg_payload_bytes=[]
+        )
+
+        with self.assertRaisesRegex(ValueError, "episode count differs"):
+            StrideAwareLanceDataset(source, decoded_frame_store=store)
 
     def test_block_prefetch_yields_every_source_clip_once(self):
         source = self.FakeLanceDataset()
@@ -256,6 +309,7 @@ class EpisodeStreamingBatchDatasetTest(unittest.TestCase):
                 Image.fromarray(array).save(buffer, format="JPEG", quality=100)
                 self.pixels.append(buffer.getvalue())
             self.row_requests = []
+            self.col_requests = []
             self.transform = self._transform
 
         def __len__(self):
@@ -271,6 +325,7 @@ class EpisodeStreamingBatchDatasetTest(unittest.TestCase):
             }
 
         def get_col_data(self, column):
+            self.col_requests.append(column)
             if column == "action":
                 return self.action
             if column == "observation":
@@ -284,14 +339,39 @@ class EpisodeStreamingBatchDatasetTest(unittest.TestCase):
             batch["action"] = batch["action"] / 2
             return batch
 
-    def _stream(self, *, cache_bytes=1024 * 1024):
-        source = self.FakeEpisodeDataset()
+    def _stream(
+        self,
+        *,
+        cache_bytes=1024 * 1024,
+        use_store=False,
+        episodes=4,
+        steps=8,
+        read_episodes=2,
+    ):
+        source = self.FakeEpisodeDataset(episodes=episodes, steps=steps)
+        store = None
+        if use_store:
+            payload_bytes = tuple(
+                sum(
+                    len(source.pixels[row])
+                    for row in range(
+                        int(source.offsets[episode]),
+                        int(source.offsets[episode] + source.lengths[episode]),
+                    )
+                )
+                for episode in range(len(source.lengths))
+            )
+            store = FakeDecodedFrameStore(
+                decoded_test_frames(source.pixels),
+                episode_jpeg_payload_bytes=payload_bytes,
+            )
+        source.decoded_frame_store = store
         dataset = EpisodeStreamingBatchDataset(
-            StrideAwareLanceDataset(source),
+            StrideAwareLanceDataset(source, decoded_frame_store=store),
             list(range(len(source))),
             batch_size=4,
             active_episodes=4,
-            read_episodes=2,
+            read_episodes=read_episodes,
             cache_bytes=cache_bytes,
             prefetch_blocks=1,
             seed=7,
@@ -325,6 +405,62 @@ class EpisodeStreamingBatchDatasetTest(unittest.TestCase):
         second_starts = [batch["action"][:, 0, 0].tolist() for batch in second]
 
         self.assertEqual(first_starts, second_starts)
+
+    def test_decoded_store_matches_stream_without_caching_jpegs(self):
+        _, baseline = self._stream()
+        source, accelerated = self._stream(use_store=True)
+
+        expected_batches = list(baseline)
+        with patch(
+            "tdwm.training.lance_batch._decode_images",
+            side_effect=AssertionError("decoded store must bypass JPEG decoding"),
+        ):
+            actual_batches = list(accelerated)
+
+        self.assertEqual(source.row_requests, [])
+        self.assertNotIn("pixels", source.col_requests)
+        self.assertTrue(source.decoded_frame_store.requests)
+        self.assertEqual(len(actual_batches), len(expected_batches))
+        for expected, actual in zip(expected_batches, actual_batches):
+            torch.testing.assert_close(actual["pixels"], expected["pixels"])
+            torch.testing.assert_close(actual["action"], expected["action"])
+            torch.testing.assert_close(
+                actual["_tdwm_episode_id"], expected["_tdwm_episode_id"]
+            )
+            self.assertEqual(
+                actual["_tdwm_cache_bytes"], expected["_tdwm_cache_bytes"]
+            )
+
+    def test_decoded_store_preserves_order_and_accounting_at_cache_limit(self):
+        _, probe = self._stream(read_episodes=4)
+        cache_bytes = sum(
+            episode.byte_size for episode in probe._read_episode_block((0, 1, 2, 3))
+        )
+        _, baseline = self._stream(cache_bytes=cache_bytes, read_episodes=4)
+        source, accelerated = self._stream(
+            cache_bytes=cache_bytes,
+            read_episodes=4,
+            use_store=True,
+        )
+
+        expected_batches = list(baseline)
+        actual_batches = list(accelerated)
+
+        self.assertEqual(
+            max(batch["_tdwm_cache_bytes"] for batch in expected_batches),
+            cache_bytes,
+        )
+        self.assertEqual(len(actual_batches), len(expected_batches))
+        for expected, actual in zip(expected_batches, actual_batches):
+            torch.testing.assert_close(actual["pixels"], expected["pixels"])
+            torch.testing.assert_close(actual["action"], expected["action"])
+            torch.testing.assert_close(
+                actual["_tdwm_episode_id"], expected["_tdwm_episode_id"]
+            )
+            self.assertEqual(
+                actual["_tdwm_cache_bytes"], expected["_tdwm_cache_bytes"]
+            )
+        self.assertEqual(source.row_requests, [])
 
     def test_later_epoch_rotates_the_sequential_episode_stream(self):
         first_source, first = self._stream()

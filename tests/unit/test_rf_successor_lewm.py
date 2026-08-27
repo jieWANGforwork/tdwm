@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
+import numpy as np
 import pytest
 import torch
 from torch import nn
 
+import tdwm.training.rf_successor_lewm as rf_successor_training
 from tdwm.adapters.rf_successor_lewm import (
     RewardFreeSuccessorLeWM,
     load_rf_successor_checkpoint,
@@ -25,7 +30,9 @@ from tdwm.methods.successor_geometry import (
     successor_feature_basis,
 )
 from tdwm.training.rf_successor_lewm import (
+    DECODED_FRAME_STORE_ENV,
     _encode_online_and_target,
+    _prepare_decoded_frame_store,
     build_history_context_batch,
     build_multi_horizon_windows,
     load_rf_successor_training_protocol,
@@ -58,6 +65,259 @@ class FixedSuccessor(nn.Module):
         return self.value.to(actions).expand(
             *actions.shape[:-1], self.value.shape[-1]
         )
+
+
+class _FakeDecodedFrameStore:
+    def __init__(
+        self,
+        manifest_path: Path,
+        *,
+        row_count: int = 4,
+        shape: tuple[int, ...] = (4, 3, 2, 2),
+        dtype: object = np.uint8,
+        source: dict | None = None,
+    ) -> None:
+        self.manifest_path = manifest_path
+        self.manifest_sha256 = "b" * 64
+        self.data_path = manifest_path.with_suffix(".bin")
+        self.sha256 = "a" * 64
+        self.row_count = row_count
+        self.shape = shape
+        self.frame_shape = shape[1:]
+        self.dtype = np.dtype(dtype)
+        self.source = source or {}
+        self.metadata = {
+            "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB",
+            },
+            "source_pixel_verification": {
+                "method": "full_redecode_audit",
+                "row_count": row_count,
+                "decoded_sha256": self.sha256,
+                "data_sha256": self.sha256,
+                "matches_data_sha256": True,
+                "decoder": {
+                    "api": "torchvision.io.decode_jpeg",
+                    "mode": "RGB",
+                },
+                "completed_at_utc": "2026-08-27T00:00:00+00:00",
+            },
+        }
+        self.preload_calls = 0
+        self.preload_verify_sha256 = None
+        self.sha256_verified = False
+        self.page_cache_warmed = False
+
+    def preload(self, *, verify_sha256=False):
+        self.preload_calls += 1
+        self.preload_verify_sha256 = verify_sha256
+        self.sha256_verified = bool(verify_sha256)
+        self.page_cache_warmed = True
+        return self
+
+
+class _FakeUnwrappedLanceDataset:
+    def __init__(self) -> None:
+        self.lengths = np.array([2, 2], dtype=np.int32)
+        self.offsets = np.array([0, 2], dtype=np.int32)
+
+
+def _decoded_store_protocol() -> dict:
+    return {
+        "dataset": {"expected_transitions": 4, "expected_episodes": 2},
+        "image_preprocessing": {"size": 2},
+    }
+
+
+def _valid_decoded_store_inputs(monkeypatch, tmp_path):
+    conversion_manifest = tmp_path / "cube.lance.manifest.json"
+    conversion_manifest.write_text('{"fixture": true}\n', encoding="utf-8")
+    conversion_sha256 = hashlib.sha256(conversion_manifest.read_bytes()).hexdigest()
+    dataset = _FakeUnwrappedLanceDataset()
+    dataset_source = {
+        "path": str(tmp_path / "current-copy.lance"),
+        "format": "lance",
+        "conversion_manifest_path": str(conversion_manifest),
+    }
+    source = {
+        "path": str(tmp_path / "builder-machine.lance"),
+        "format": "lance",
+        "row_count": 4,
+        "manifest_sha256": conversion_sha256,
+        "pixel_column": "pixels",
+        "row_mapping": "binary frame i is decoded from Lance pixels row i",
+        "episode_count": 2,
+        "episode_lengths_sha256": rf_successor_training._canonical_int64_sha256(
+            dataset.lengths,
+            label="fixture.lengths",
+        ),
+        "episode_offsets_sha256": rf_successor_training._canonical_int64_sha256(
+            dataset.offsets,
+            label="fixture.offsets",
+        ),
+        "episode_jpeg_payload_bytes": [100, 120],
+    }
+    manifest_path = (tmp_path / "frames.json").resolve()
+    store = _FakeDecodedFrameStore(manifest_path, source=source)
+    monkeypatch.setenv(DECODED_FRAME_STORE_ENV, str(manifest_path))
+    monkeypatch.setattr(
+        rf_successor_training.DecodedFrameStore,
+        "from_manifest",
+        lambda path: store if path == manifest_path else None,
+    )
+    return dataset_source, dataset, store, conversion_sha256
+
+
+def test_decoded_frame_store_is_disabled_without_environment_variable(monkeypatch):
+    monkeypatch.delenv(DECODED_FRAME_STORE_ENV, raising=False)
+
+    store, metadata = _prepare_decoded_frame_store(
+        _decoded_store_protocol(),
+        {},
+        object(),
+    )
+
+    assert store is None
+    assert metadata is None
+
+
+def test_decoded_frame_store_is_strictly_validated_preloaded_and_recorded(
+    monkeypatch, tmp_path
+):
+    dataset_source, dataset, store, conversion_sha256 = (
+        _valid_decoded_store_inputs(monkeypatch, tmp_path)
+    )
+
+    loaded, metadata = _prepare_decoded_frame_store(
+        _decoded_store_protocol(),
+        dataset_source,
+        dataset,
+    )
+
+    assert loaded is store
+    assert store.preload_calls == 1
+    assert store.preload_verify_sha256 is True
+    assert metadata == {
+        "manifest_path": str(store.manifest_path),
+        "manifest_sha256": "b" * 64,
+        "data_path": str(store.data_path),
+        "data_sha256": "a" * 64,
+        "data_sha256_verified": True,
+        "row_count": 4,
+        "shape": [4, 3, 2, 2],
+        "dtype": "uint8",
+        "preloaded": True,
+        "page_cache_warmed": True,
+        "source_binding": {
+            "verified": True,
+            "conversion_manifest_path": str(
+                Path(dataset_source["conversion_manifest_path"]).resolve()
+            ),
+            "conversion_manifest_sha256": conversion_sha256,
+            "dataset_path": str(Path(dataset_source["path"]).resolve()),
+            "store_source_path": store.source["path"],
+            "path_match": False,
+            "row_count": 4,
+            "episode_count": 2,
+            "episode_lengths_sha256": store.source[
+                "episode_lengths_sha256"
+            ],
+            "episode_offsets_sha256": store.source[
+                "episode_offsets_sha256"
+            ],
+            "episode_payload_count": 2,
+            "pixel_column": "pixels",
+            "row_mapping": "binary frame i is decoded from Lance pixels row i",
+            "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB",
+            },
+            "source_pixel_verification": store.metadata[
+                "source_pixel_verification"
+            ],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value", "message"),
+    [
+        ("row_count", 3, "row_count differs"),
+        ("shape", (4, 3, 3, 3), "shape differs"),
+        ("dtype", np.dtype(np.float32), "dtype must be uint8"),
+    ],
+)
+def test_decoded_frame_store_rejects_protocol_mismatches(
+    monkeypatch, tmp_path, attribute, value, message
+):
+    dataset_source, dataset, store, _ = _valid_decoded_store_inputs(
+        monkeypatch,
+        tmp_path,
+    )
+    setattr(store, attribute, value)
+    if attribute == "shape":
+        store.frame_shape = value[1:]
+
+    with pytest.raises(ValueError, match=message):
+        _prepare_decoded_frame_store(
+            _decoded_store_protocol(),
+            dataset_source,
+            dataset,
+        )
+
+    assert store.preload_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("location", "field", "value", "message"),
+    [
+        ("source", "format", "hdf5", "source.format"),
+        ("source", "manifest_sha256", "0" * 64, "manifest_sha256"),
+        ("source", "pixel_column", "pixels_alt", "pixel_column"),
+        ("source", "row_mapping", "episode-local rows", "row_mapping"),
+        ("source", "episode_lengths_sha256", "1" * 64, "episode_lengths"),
+        ("source", "episode_offsets_sha256", "2" * 64, "episode_offsets"),
+        ("source", "episode_jpeg_payload_bytes", [100], "episode_jpeg_payload"),
+        ("decoder", "api", "PIL.Image.open", "decoder.api"),
+        ("decoder", "mode", "BGR", "decoder.mode"),
+        (
+            "source_pixel_verification",
+            "decoded_sha256",
+            "0" * 64,
+            "source_pixel_verification.decoded_sha256",
+        ),
+        (
+            "source_pixel_verification",
+            "matches_data_sha256",
+            False,
+            "matches_data_sha256",
+        ),
+    ],
+)
+def test_decoded_frame_store_rejects_wrong_source_binding(
+    monkeypatch,
+    tmp_path,
+    location,
+    field,
+    value,
+    message,
+):
+    dataset_source, dataset, store, _ = _valid_decoded_store_inputs(
+        monkeypatch,
+        tmp_path,
+    )
+    target = store.source if location == "source" else store.metadata[location]
+    target[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        _prepare_decoded_frame_store(
+            _decoded_store_protocol(),
+            dataset_source,
+            dataset,
+        )
+
+    assert store.preload_calls == 0
 
 
 def test_direct_successor_targets_include_single_and_all_multi_step_values():
