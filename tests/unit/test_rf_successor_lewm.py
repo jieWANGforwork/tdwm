@@ -15,6 +15,7 @@ from tdwm.methods.rf_successor_lewm import (
     ActionPrefixMomentHead,
     ActionPrefixSuccessorHead,
     finite_horizon_successor_targets,
+    left_pad_latent_history,
     multi_horizon_successor_objective,
     successor_recurrence_residual,
 )
@@ -25,6 +26,7 @@ from tdwm.methods.successor_geometry import (
 )
 from tdwm.training.rf_successor_lewm import (
     _encode_online_and_target,
+    build_history_context_batch,
     build_multi_horizon_windows,
     load_rf_successor_training_protocol,
 )
@@ -107,6 +109,45 @@ def test_action_prefix_head_is_causal_and_has_no_goal_or_policy_api():
     assert not hasattr(head, "policy")
 
 
+def test_masked_history_head_left_pads_without_repeating_observations():
+    torch.manual_seed(31)
+    head = ActionPrefixSuccessorHead(
+        embed_dim=2,
+        action_dim=1,
+        history_size=3,
+        hidden_dim=8,
+        masked_history=True,
+    ).eval()
+    current = torch.tensor([[[2.0, -1.0]]])
+    actions = torch.randn(1, 2, 1)
+    padded, mask = left_pad_latent_history(current, history_size=3)
+
+    inferred = head(current, actions)
+    explicit = head(padded, actions, history_mask=mask)
+
+    assert padded.tolist() == [[[0.0, 0.0], [0.0, 0.0], [2.0, -1.0]]]
+    assert mask.tolist() == [[0.0, 0.0, 1.0]]
+    assert torch.allclose(inferred, explicit)
+    assert head.history_encoder[0].in_features == 3 * 2 + 3
+
+
+def test_masked_history_requires_a_binary_right_aligned_validity_suffix():
+    history = torch.randn(1, 3, 2)
+
+    with pytest.raises(ValueError, match="right-aligned suffix"):
+        left_pad_latent_history(
+            history,
+            history_size=3,
+            history_mask=torch.tensor([[1.0, 0.0, 1.0]]),
+        )
+    with pytest.raises(ValueError, match="binary"):
+        left_pad_latent_history(
+            history,
+            history_size=3,
+            history_mask=torch.tensor([[0.0, 0.5, 1.0]]),
+        )
+
+
 def test_joint_objective_updates_world_rollout_and_not_target_latents():
     torch.manual_seed(4)
     head = ActionPrefixSuccessorHead(
@@ -152,10 +193,53 @@ def test_multi_horizon_windows_align_history_actions_and_targets():
 
     assert windows.count_per_clip == 5
     assert torch.equal(windows.history[0, :, 0], torch.tensor([0.0, 1.0, 2.0]))
-    assert torch.equal(windows.rollout_actions[0, :, 0], torch.tensor([0.0, 1.0, 2.0, 3.0]))
+    assert torch.equal(
+        windows.rollout_actions[0, :, 0], torch.tensor([0.0, 1.0, 2.0, 3.0])
+    )
     assert torch.equal(windows.action_prefix[0, :, 0], torch.tensor([2.0, 3.0]))
     assert torch.equal(windows.target_future[0, :, 0], torch.tensor([103.0, 104.0]))
     assert torch.equal(windows.history[-1, :, 0], torch.tensor([4.0, 5.0, 6.0]))
+
+
+def test_history_context_batch_aligns_h1_h2_h3_with_the_same_future():
+    latents = torch.arange(8, dtype=torch.float32).reshape(1, 8, 1)
+    windows = build_multi_horizon_windows(
+        latents,
+        latents + 100.0,
+        latents + 200.0,
+        history_size=3,
+        horizon=2,
+    )
+    one_window = type(windows)(
+        history=windows.history[:1],
+        rollout_actions=windows.rollout_actions[:1],
+        action_prefix=windows.action_prefix[:1],
+        target_future=windows.target_future[:1],
+        count_per_clip=1,
+    )
+
+    contexts = build_history_context_batch(one_window)
+
+    assert contexts.padded_history.squeeze(-1).tolist() == [
+        [0.0, 0.0, 2.0],
+        [0.0, 1.0, 2.0],
+        [0.0, 1.0, 2.0],
+    ]
+    assert contexts.history_mask.tolist() == [
+        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ]
+    assert contexts.action_prefix[:, :, 0].tolist() == [
+        [202.0, 203.0],
+        [202.0, 203.0],
+        [202.0, 203.0],
+    ]
+    assert contexts.target_future[:, :, 0].tolist() == [
+        [103.0, 104.0],
+        [103.0, 104.0],
+        [103.0, 104.0],
+    ]
 
 
 class _MutatingEncoder(nn.Module):
@@ -348,6 +432,50 @@ def test_reward_free_successor_checkpoint_round_trip(tmp_path):
         assert torch.equal(value, restored.state_dict()[name])
 
 
+def test_masked_history_successor_checkpoint_round_trip(tmp_path):
+    head = ActionPrefixSuccessorHead(
+        embed_dim=4,
+        action_dim=3,
+        history_size=2,
+        hidden_dim=6,
+        masked_history=True,
+    )
+    config = {
+        "objective_version": 12,
+        "architecture": "masked_history_causal_gru_action_prefix",
+        "embed_dim": 4,
+        "action_dim": 3,
+        "history_size": 2,
+        "hidden_dim": 6,
+        "max_horizon": 5,
+        "goal_conditioning": "none",
+        "action_conditioning": "causal_prefix",
+        "history_padding": "left_zero",
+        "history_masking": "explicit_validity",
+        "history_supervision": "all_prefix_lengths",
+    }
+    checkpoint = tmp_path / "rf_successor_masked.pt"
+    torch.save(
+        {
+            "method": "rf_successor_lewm",
+            "objective_version": 12,
+            "deployment_checkpoint_version": 1,
+            "world_model_state_dict": {},
+            "successor_state_dict": head.state_dict(),
+            "successor_config": config,
+        },
+        checkpoint,
+    )
+
+    restored, restored_config, payload = load_rf_successor_checkpoint(checkpoint)
+
+    assert restored_config == config
+    assert payload["objective_version"] == 12
+    assert restored.masked_history is True
+    for name, value in head.state_dict().items():
+        assert torch.equal(value, restored.state_dict()[name])
+
+
 def test_training_protocol_locks_reward_free_multi_horizon_semantics():
     protocol = load_rf_successor_training_protocol(
         "configs/experiment/rf_successor_lewm_cube_train.yaml"
@@ -358,6 +486,8 @@ def test_training_protocol_locks_reward_free_multi_horizon_semantics():
     assert protocol["successor"]["goal_conditioning"] == "none"
     assert protocol["successor"]["continuation_policy"] == "none"
     assert protocol["successor"]["td_bootstrap"] is False
+    assert protocol["successor"]["objective_version"] == 12
+    assert protocol["successor"]["history_supervision"] == "all_prefix_lengths"
     assert protocol["joint_objective"]["multi_step_prediction"] == (
         "open_loop_latent_mse_all_horizons"
     )

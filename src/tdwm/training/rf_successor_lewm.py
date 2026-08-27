@@ -23,10 +23,13 @@ from tdwm.methods.rf_successor_lewm import (
     ActionPrefixSuccessorHead,
     LeWMResidualTransformerHead,
     ManifoldTransformerMomentHead,
+    balanced_successor_mse,
+    finite_horizon_successor_targets,
+    left_pad_latent_history,
     manifold_sequence_objective,
     moment_sequence_objective,
-    multi_horizon_successor_objective,
     residual_manifold_sequence_objective,
+    successor_recurrence_residual,
     successor_sequence_objective,
 )
 from tdwm.training.block_sampler import BlockShuffleBatchSampler
@@ -278,7 +281,7 @@ def validate_rf_successor_training_protocol(protocol: dict[str, Any]) -> None:
     successor = protocol.get("successor", {})
     locked = {
         "objective_version": {
-            METHOD: 1,
+            METHOD: 12,
             S_ONLY_METHOD: 2,
             BALANCED_SEQUENCE_METHOD: 3,
             EMA_BALANCED_SEQUENCE_METHOD: 4,
@@ -291,7 +294,7 @@ def validate_rf_successor_training_protocol(protocol: dict[str, Any]) -> None:
             ANCHORED_E2E_MANIFOLD_PREFIX_METHOD: 11,
         }[method],
         "architecture": {
-            METHOD: "causal_gru_action_prefix",
+            METHOD: "masked_history_causal_gru_action_prefix",
             S_ONLY_METHOD: "causal_gru_successor_increments",
             BALANCED_SEQUENCE_METHOD: "causal_gru_successor_increments",
             EMA_BALANCED_SEQUENCE_METHOD: "causal_gru_successor_increments",
@@ -323,6 +326,14 @@ def validate_rf_successor_training_protocol(protocol: dict[str, Any]) -> None:
         "continuation_policy": "none",
         "td_bootstrap": False,
     }
+    if method == METHOD:
+        locked.update(
+            {
+                "history_padding": "left_zero",
+                "history_masking": "explicit_validity",
+                "history_supervision": "all_prefix_lengths",
+            }
+        )
     if method in SEQUENCE_METHODS:
         if method == FROZEN_RESIDUAL_PREFIX_METHOD:
             locked["latent_recovery"] = "base_plus_residual_manifold_latents"
@@ -493,6 +504,17 @@ class MultiHorizonWindows:
     count_per_clip: int
 
 
+@dataclass(frozen=True)
+class HistoryContextBatch:
+    """The same decision point conditioned on every valid history suffix."""
+
+    padded_history: torch.Tensor
+    history_mask: torch.Tensor
+    action_prefix: torch.Tensor
+    target_future: torch.Tensor
+    contexts_per_window: int
+
+
 def build_multi_horizon_windows(
     online_latents: torch.Tensor,
     target_latents: torch.Tensor,
@@ -546,6 +568,35 @@ def build_multi_horizon_windows(
         action_prefix=action_prefix,
         target_future=target_future,
         count_per_clip=count,
+    )
+
+
+def build_history_context_batch(
+    windows: MultiHorizonWindows,
+) -> HistoryContextBatch:
+    """Build H=1..Hmax contexts ending at each window's current latent."""
+
+    if windows.history.ndim != 3 or windows.history.shape[-2] <= 0:
+        raise ValueError("windows.history must have shape (batch, time, dim).")
+    history_size = int(windows.history.shape[-2])
+
+    padded_histories = []
+    history_masks = []
+    for length in range(1, history_size + 1):
+        actual = windows.history[..., -length:, :]
+        padded, mask = left_pad_latent_history(
+            actual,
+            history_size=history_size,
+        )
+        padded_histories.append(padded)
+        history_masks.append(mask)
+
+    return HistoryContextBatch(
+        padded_history=torch.cat(padded_histories, dim=0),
+        history_mask=torch.cat(history_masks, dim=0),
+        action_prefix=torch.cat([windows.action_prefix] * history_size, dim=0),
+        target_future=torch.cat([windows.target_future] * history_size, dim=0),
+        contexts_per_window=history_size,
     )
 
 
@@ -630,6 +681,7 @@ def _build_joint_training_module(
                 action_dim=action_block_dim,
                 history_size=int(protocol["sequence"]["history_frames"]),
                 hidden_dim=int(successor["hidden_dim"]),
+                masked_history=True,
             )
             self.history_size = int(protocol["sequence"]["history_frames"])
             self.horizon = int(protocol["sequence"]["rollout_horizon"])
@@ -726,6 +778,7 @@ def _build_joint_training_module(
                 history_size=self.history_size,
                 horizon=self.horizon,
             )
+            contexts = build_history_context_batch(windows)
             pred_proj_was_training = self.model.pred_proj.training
             self.model.pred_proj.eval()
             try:
@@ -742,21 +795,41 @@ def _build_joint_training_module(
             predicted_future = rollout[
                 ..., self.history_size : self.history_size + self.horizon, :
             ]
-            multi = multi_horizon_successor_objective(
-                self.successor,
-                windows.history,
-                windows.action_prefix,
+
+            successor_prediction = self.successor(
+                contexts.padded_history,
+                contexts.action_prefix,
+                history_mask=contexts.history_mask,
+            )
+            successor_target = finite_horizon_successor_targets(
+                contexts.target_future.detach(), gamma=self.gamma
+            )
+            successor_loss = balanced_successor_mse(
+                successor_prediction, successor_target
+            )
+            full_history_count = int(windows.history.shape[0])
+            recurrence = successor_recurrence_residual(
+                successor_prediction[-full_history_count:],
                 predicted_future,
-                windows.target_future,
                 gamma=self.gamma,
             )
+            recurrence_loss = balanced_successor_mse(
+                recurrence, torch.zeros_like(recurrence)
+            )
+            detached_future = windows.target_future.detach()
+            latent_error = predicted_future - detached_future
+            successor_error = successor_prediction - successor_target
+            latent_loss = latent_error.square().mean()
+            latent_mse_by_horizon = latent_error.square().mean(dim=(0, 2))
+            successor_mse_by_horizon = successor_error.square().mean(dim=(0, 2))
+            recurrence_mse_by_horizon = recurrence.square().mean(dim=(0, 2))
 
             auxiliary_scale = self._auxiliary_scale()
             objective = protocol["joint_objective"]
             auxiliary_loss = (
-                float(objective["multi_step_prediction_weight"]) * multi.latent_loss
-                + float(objective["successor_weight"]) * multi.successor_loss
-                + float(objective["recurrence_weight"]) * multi.recurrence_loss
+                float(objective["multi_step_prediction_weight"]) * latent_loss
+                + float(objective["successor_weight"]) * successor_loss
+                + float(objective["recurrence_weight"]) * recurrence_loss
             )
             loss = (
                 local_prediction_loss
@@ -767,26 +840,33 @@ def _build_joint_training_module(
                 f"{stage}/loss": loss.detach(),
                 f"{stage}/local_prediction_loss": local_prediction_loss.detach(),
                 f"{stage}/sigreg_loss": sigreg_loss.detach(),
-                f"{stage}/multi_step_latent_loss": multi.latent_loss.detach(),
-                f"{stage}/successor_loss": multi.successor_loss.detach(),
-                f"{stage}/recurrence_loss": multi.recurrence_loss.detach(),
-                f"{stage}/latent_mse_h1": multi.latent_mse_by_horizon[0].detach(),
-                f"{stage}/latent_mse_hK": multi.latent_mse_by_horizon[-1].detach(),
+                f"{stage}/multi_step_latent_loss": latent_loss.detach(),
+                f"{stage}/successor_loss": successor_loss.detach(),
+                f"{stage}/recurrence_loss": recurrence_loss.detach(),
+                f"{stage}/latent_mse_h1": latent_mse_by_horizon[0].detach(),
+                f"{stage}/latent_mse_hK": latent_mse_by_horizon[-1].detach(),
                 f"{stage}/successor_mse_h1": (
-                    multi.successor_mse_by_horizon[0].detach()
+                    successor_mse_by_horizon[0].detach()
                 ),
                 f"{stage}/successor_mse_hK": (
-                    multi.successor_mse_by_horizon[-1].detach()
+                    successor_mse_by_horizon[-1].detach()
                 ),
                 f"{stage}/recurrence_mse_h1": (
-                    multi.recurrence_mse_by_horizon[0].detach()
+                    recurrence_mse_by_horizon[0].detach()
                 ),
                 f"{stage}/recurrence_mse_hK": (
-                    multi.recurrence_mse_by_horizon[-1].detach()
+                    recurrence_mse_by_horizon[-1].detach()
                 ),
                 f"{stage}/auxiliary_weight_scale": loss.new_tensor(auxiliary_scale),
                 f"{stage}/multi_horizon_windows": loss.new_tensor(
                     float(windows.count_per_clip * batch_size)
+                ),
+                f"{stage}/multi_history_contexts": loss.new_tensor(
+                    float(
+                        windows.count_per_clip
+                        * batch_size
+                        * contexts.contexts_per_window
+                    )
                 ),
             }
             if episode_ids is not None:
@@ -1337,6 +1417,13 @@ def _successor_config(
         "base_export_run_name": base_export_run_name,
         "base_checkpoint_sha256": base_checkpoint_sha256,
     }
+    if protocol["method"] == METHOD:
+        for key in (
+            "history_padding",
+            "history_masking",
+            "history_supervision",
+        ):
+            config[key] = successor[key]
     if protocol["method"] in MANIFOLD_PREFIX_METHODS:
         for key in (
             "prefix_depth",
@@ -1872,7 +1959,9 @@ __all__ = [
     "PRETRAINED_METHODS",
     "SEQUENCE_METHODS",
     "S_ONLY_METHOD",
+    "HistoryContextBatch",
     "MultiHorizonWindows",
+    "build_history_context_batch",
     "build_multi_horizon_windows",
     "ema_update_world_model",
     "load_rf_successor_training_protocol",

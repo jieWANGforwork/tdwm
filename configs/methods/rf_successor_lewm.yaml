@@ -13,6 +13,9 @@ implementation:
 
 input:
   history: latent_observation_history
+  history_padding: left_zero
+  history_masking: explicit_validity
+  history_supervision: all_prefix_lengths
   action: externally_supplied_candidate_prefix
   goal_during_training: false
   reward_during_training: false

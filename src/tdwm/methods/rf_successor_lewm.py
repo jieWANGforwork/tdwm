@@ -167,6 +167,56 @@ def balanced_successor_mse(
     return (vector + squared_norm + constant) / 3.0
 
 
+def left_pad_latent_history(
+    latent_history: torch.Tensor,
+    *,
+    history_size: int,
+    history_mask: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Left-pad a non-empty latent suffix and return its binary validity mask."""
+
+    if latent_history.ndim < 3 or latent_history.shape[-1] <= 0:
+        raise ValueError("latent_history must contain time and latent dimensions.")
+    if history_size <= 0:
+        raise ValueError("history_size must be positive.")
+    observed = int(latent_history.shape[-2])
+    if not 0 < observed <= history_size:
+        raise ValueError(
+            "latent_history time must lie between one and the configured maximum."
+        )
+    expected_mask_shape = latent_history.shape[:-1]
+    if history_mask is None:
+        valid = torch.ones(
+            expected_mask_shape,
+            dtype=torch.bool,
+            device=latent_history.device,
+        )
+    else:
+        if history_mask.shape != expected_mask_shape:
+            raise ValueError("history_mask must match the latent history time axes.")
+        valid = history_mask.to(device=latent_history.device, dtype=torch.bool)
+        if torch.any(history_mask.to(device=latent_history.device) != valid):
+            raise ValueError("history_mask must contain only binary values.")
+        invalid_order = valid[..., :-1] & ~valid[..., 1:]
+        if torch.any(~valid[..., -1]) or torch.any(invalid_order):
+            raise ValueError("history_mask must be a non-empty right-aligned suffix.")
+
+    missing = history_size - observed
+    if missing:
+        latent_padding = latent_history.new_zeros(
+            *latent_history.shape[:-2], missing, latent_history.shape[-1]
+        )
+        mask_padding = torch.zeros(
+            *valid.shape[:-1], missing, dtype=torch.bool, device=valid.device
+        )
+        latent_history = torch.cat((latent_padding, latent_history), dim=-2)
+        valid = torch.cat((mask_padding, valid), dim=-1)
+    padded = torch.where(
+        valid.unsqueeze(-1), latent_history, torch.zeros_like(latent_history)
+    )
+    return padded, valid.to(dtype=latent_history.dtype)
+
+
 class ActionPrefixSuccessorHead(nn.Module):
     """Causally summarize each supplied action prefix without seeing a goal."""
 
@@ -177,6 +227,7 @@ class ActionPrefixSuccessorHead(nn.Module):
         action_dim: int,
         history_size: int,
         hidden_dim: int,
+        masked_history: bool = False,
     ) -> None:
         super().__init__()
         if min(embed_dim, action_dim, history_size, hidden_dim) <= 0:
@@ -185,10 +236,14 @@ class ActionPrefixSuccessorHead(nn.Module):
         self.action_dim = int(action_dim)
         self.history_size = int(history_size)
         self.hidden_dim = int(hidden_dim)
+        self.masked_history = bool(masked_history)
         self.output_dim = self.embed_dim + 2
 
+        history_dim = self.history_size * self.embed_dim
+        if self.masked_history:
+            history_dim += self.history_size
         self.history_encoder = nn.Sequential(
-            nn.Linear(self.history_size * self.embed_dim, self.hidden_dim),
+            nn.Linear(history_dim, self.hidden_dim),
             nn.LayerNorm(self.hidden_dim),
             nn.GELU(),
             nn.Linear(self.hidden_dim, self.hidden_dim),
@@ -213,14 +268,20 @@ class ActionPrefixSuccessorHead(nn.Module):
         self,
         latent_history: torch.Tensor,
         action_prefix: torch.Tensor,
+        *,
+        history_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if latent_history.ndim < 3 or action_prefix.ndim != latent_history.ndim:
             raise ValueError("history and action prefix must have matching ranks.")
-        if latent_history.shape[-2:] != (self.history_size, self.embed_dim):
+        if latent_history.shape[-1] != self.embed_dim:
+            raise ValueError("latent_history has the wrong latent dimension.")
+        if not self.masked_history and latent_history.shape[-2] != self.history_size:
             raise ValueError(
                 "latent_history must end with "
                 f"({self.history_size}, {self.embed_dim})."
             )
+        if not self.masked_history and history_mask is not None:
+            raise ValueError("This legacy successor head does not use a history mask.")
         if action_prefix.shape[:-2] != latent_history.shape[:-2]:
             raise ValueError("history and action prefix leading shapes must match.")
         if action_prefix.shape[-2] <= 0 or action_prefix.shape[-1] != self.action_dim:
@@ -228,7 +289,21 @@ class ActionPrefixSuccessorHead(nn.Module):
 
         leading = latent_history.shape[:-2]
         flat_batch = math.prod(leading) if leading else 1
-        history = latent_history.reshape(flat_batch, -1)
+        if self.masked_history:
+            padded, valid = left_pad_latent_history(
+                latent_history,
+                history_size=self.history_size,
+                history_mask=history_mask,
+            )
+            history = torch.cat(
+                (
+                    padded.reshape(flat_batch, -1),
+                    valid.reshape(flat_batch, -1),
+                ),
+                dim=-1,
+            )
+        else:
+            history = latent_history.reshape(flat_batch, -1)
         actions = action_prefix.reshape(flat_batch, action_prefix.shape[-2], -1)
         initial = self.history_encoder(history).unsqueeze(0)
         encoded_actions = self.action_encoder(actions)
@@ -700,6 +775,7 @@ def multi_horizon_successor_objective(
     target_future: torch.Tensor,
     *,
     gamma: float,
+    history_mask: torch.Tensor | None = None,
 ) -> MultiHorizonSuccessorOutput:
     """Supervise latent rollout, direct successor, and their exact overlap."""
 
@@ -711,7 +787,11 @@ def multi_horizon_successor_objective(
         raise ValueError("future and action-prefix horizons must match.")
     detached_target = target_future.detach()
     target = finite_horizon_successor_targets(detached_target, gamma=gamma)
-    prediction = head(latent_history, action_prefix)
+    prediction = head(
+        latent_history,
+        action_prefix,
+        history_mask=history_mask,
+    )
     recurrence = successor_recurrence_residual(
         prediction, predicted_future, gamma=gamma
     )
@@ -935,6 +1015,7 @@ __all__ = [
     "finite_horizon_successor_from_moments",
     "finite_horizon_successor_targets",
     "latent_sequence_from_successor",
+    "left_pad_latent_history",
     "manifold_sequence_objective",
     "multi_horizon_successor_objective",
     "moment_sequence_objective",

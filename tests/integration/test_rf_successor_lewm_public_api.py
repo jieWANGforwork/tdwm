@@ -35,7 +35,7 @@ class TinyPredictor(nn.Module):
         return embeddings + action_embeddings
 
 
-def test_public_lewm_0_1_1_rejects_missing_three_frame_planning_history():
+def test_public_lewm_0_1_1_accepts_masked_one_frame_planning_history():
     torch.manual_seed(5)
     embed_dim = 4
     action_dim = 2
@@ -49,6 +49,7 @@ def test_public_lewm_0_1_1_rejects_missing_three_frame_planning_history():
         action_dim=action_dim,
         history_size=3,
         hidden_dim=8,
+        masked_history=True,
     )
     method = RewardFreeSuccessorLeWM(
         world_model,
@@ -63,8 +64,10 @@ def test_public_lewm_0_1_1_rejects_missing_three_frame_planning_history():
     }
     candidates = torch.randn(2, 3, 4, action_dim)
 
-    with pytest.raises(RuntimeError, match="expected 3 latent frames, found 1"):
-        method.get_cost(info, candidates)
+    cost = method.get_cost(info, candidates)
+
+    assert cost.shape == (2, 3)
+    assert torch.isfinite(cost).all()
 
 
 def test_joint_training_loss_backpropagates_through_public_lewm():
@@ -94,6 +97,7 @@ def test_joint_training_loss_backpropagates_through_public_lewm():
         device_image_preprocessing=False,
     )
     module.log_dict = lambda *args, **kwargs: None
+    assert module.successor.masked_history is True
     batch = {
         "pixels": torch.randn(2, 5, 3, 8, 8),
         "action": torch.randn(2, 5, 2),

@@ -285,11 +285,22 @@ class RewardFreeSuccessorLeWM(nn.Module):
     def _require_training_history(self, history: torch.Tensor) -> torch.Tensor:
         if history.shape[-1] != self.successor.embed_dim:
             raise ValueError("Unexpected latent history dimension.")
-        if history.shape[-2] != self.history_size:
+        observed = int(history.shape[-2])
+        masked_history = bool(getattr(self.successor, "masked_history", False))
+        valid_length = (
+            0 < observed <= self.history_size
+            if masked_history
+            else observed == self.history_size
+        )
+        if not valid_length:
+            expected = (
+                f"between 1 and {self.history_size}"
+                if masked_history
+                else str(self.history_size)
+            )
             raise RuntimeError(
                 "Planning history does not match training history: "
-                f"expected {self.history_size} latent frames, "
-                f"found {history.shape[-2]}."
+                f"expected {expected} latent frames, found {observed}."
             )
         return history
 
@@ -361,7 +372,7 @@ def load_rf_successor_checkpoint(
     }:
         raise ValueError("The checkpoint is not a supported reward-free successor model.")
     objective_version = payload.get("objective_version")
-    if objective_version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
+    if objective_version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
         raise ValueError("Unsupported reward-free successor objective version.")
     if payload.get("deployment_checkpoint_version") != 1:
         raise ValueError("Unsupported RF-Successor-LeWM checkpoint version.")
@@ -483,9 +494,33 @@ def load_rf_successor_checkpoint(
         )
     else:
         if method != "rf_successor_lewm":
-            raise ValueError("Objective version 1 requires RF-Successor-LeWM.")
+            raise ValueError("The direct successor objective requires RF-Successor-LeWM.")
+        if objective_version == 12:
+            expected = {
+                "objective_version": 12,
+                "architecture": "masked_history_causal_gru_action_prefix",
+                "history_padding": "left_zero",
+                "history_masking": "explicit_validity",
+                "history_supervision": "all_prefix_lengths",
+            }
+            for key, value in expected.items():
+                if config.get(key) != value:
+                    raise ValueError(
+                        f"The masked-history checkpoint {key} differs."
+                    )
+            masked_history = True
+        elif objective_version == 1:
+            if config.get("architecture", "causal_gru_action_prefix") != (
+                "causal_gru_action_prefix"
+            ):
+                raise ValueError("The legacy successor architecture differs.")
+            masked_history = False
+        else:
+            raise ValueError("Unsupported direct successor objective version.")
         head = ActionPrefixSuccessorHead(
-            hidden_dim=int(config["hidden_dim"]), **head_kwargs
+            hidden_dim=int(config["hidden_dim"]),
+            masked_history=masked_history,
+            **head_kwargs,
         )
     head.load_state_dict(payload["successor_state_dict"])
     head.eval()

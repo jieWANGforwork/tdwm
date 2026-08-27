@@ -95,7 +95,7 @@ def validate_rf_successor_evaluation_protocol(protocol: dict[str, Any]) -> None:
     successor = protocol.get("successor", {})
     expected = {
         "objective_version": {
-            METHOD: 1,
+            METHOD: 12,
             S_ONLY_METHOD: 2,
             BALANCED_SEQUENCE_METHOD: 3,
             EMA_BALANCED_SEQUENCE_METHOD: 4,
@@ -108,7 +108,7 @@ def validate_rf_successor_evaluation_protocol(protocol: dict[str, Any]) -> None:
             ANCHORED_E2E_MANIFOLD_PREFIX_METHOD: 11,
         }[method],
         "architecture": {
-            METHOD: "causal_gru_action_prefix",
+            METHOD: "masked_history_causal_gru_action_prefix",
             S_ONLY_METHOD: "causal_gru_successor_increments",
             BALANCED_SEQUENCE_METHOD: "causal_gru_successor_increments",
             EMA_BALANCED_SEQUENCE_METHOD: "causal_gru_successor_increments",
@@ -140,6 +140,14 @@ def validate_rf_successor_evaluation_protocol(protocol: dict[str, Any]) -> None:
         "continuation_policy": "none",
         "td_bootstrap": False,
     }
+    if method == METHOD:
+        expected.update(
+            {
+                "history_padding": "left_zero",
+                "history_masking": "explicit_validity",
+                "history_supervision": "all_prefix_lengths",
+            }
+        )
     if method in SEQUENCE_METHODS:
         if method == FROZEN_RESIDUAL_PREFIX_METHOD:
             expected["latent_recovery"] = "base_plus_residual_manifold_latents"
@@ -316,6 +324,13 @@ def _validate_successor_config(
     for key in architecture_keys:
         expected[key] = successor[key]
     for key in ("latent_recovery", "feature_group_reduction"):
+        if key in successor:
+            expected[key] = successor[key]
+    for key in (
+        "history_padding",
+        "history_masking",
+        "history_supervision",
+    ):
         if key in successor:
             expected[key] = successor[key]
     if protocol["method"] in PRETRAINED_METHODS:

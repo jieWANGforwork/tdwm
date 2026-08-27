@@ -98,8 +98,11 @@ joint_objective:
   recurrence_weight: 0.25
 
 successor:
-  objective_version: 1
-  architecture: causal_gru_action_prefix
+  objective_version: 12
+  architecture: masked_history_causal_gru_action_prefix
+  history_padding: left_zero
+  history_masking: explicit_validity
+  history_supervision: all_prefix_lengths
   hidden_dim: 256
   max_horizon: 5
   gamma: 0.95
