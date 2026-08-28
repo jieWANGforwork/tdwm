@@ -12,7 +12,9 @@ from tdwm.adapters.actor_free_td_lewm import (
 )
 from tdwm.methods.actor_free_td_lewm import (
     ActorFreeSuccessorHead,
+    actor_free_goal_future_offset_limits,
     actor_free_td_objective,
+    sample_actor_free_goal_offsets,
 )
 from tdwm.methods.successor_geometry import successor_feature_basis
 
@@ -34,6 +36,23 @@ class ActionEchoSuccessor(nn.Module):
         self.queried_actions = current_action.detach().clone()
         zeros = torch.zeros_like(current_action)
         return torch.cat((self.scale * current_action, zeros, zeros), dim=-1)
+
+
+class CoefficientEchoSuccessor(nn.Module):
+    """Put the queried action on the goal-independent quadratic coefficient."""
+
+    def __init__(self, *, history_size: int = 2) -> None:
+        super().__init__()
+        self.embed_dim = 1
+        self.action_dim = 1
+        self.history_size = history_size
+        self.output_dim = 3
+        self.scale = nn.Parameter(torch.ones(()))
+
+    def forward(self, latent_history, previous_actions, current_action):
+        del latent_history, previous_actions
+        zeros = torch.zeros_like(current_action)
+        return torch.cat((zeros, self.scale * current_action, zeros), dim=-1)
 
 
 class FixedRolloutWorld(nn.Module):
@@ -161,6 +180,7 @@ def test_td_target_uses_next_real_ema_latent_and_dataset_next_action():
         ("serial_decoupled", False, False),
         ("serial_coupled", True, False),
         ("hybrid", True, True),
+        ("goal_hybrid", True, True),
     ],
 )
 def test_td_variants_have_the_intended_world_model_gradient_paths(
@@ -206,9 +226,9 @@ def test_td_variants_have_the_intended_world_model_gradient_paths(
     )
     assert all(parameter.grad is None for parameter in target.parameters())
     assert (output.real_td_loss is not None) is (
-        variant in {"parallel_real", "hybrid"}
+        variant in {"parallel_real", "hybrid", "goal_hybrid"}
     )
-    if variant == "hybrid":
+    if variant in {"hybrid", "goal_hybrid"}:
         assert torch.allclose(
             output.td_loss,
             output.predicted_td_loss + output.real_td_loss,
@@ -219,6 +239,97 @@ def test_td_variants_have_the_intended_world_model_gradient_paths(
         assert torch.equal(output.td_loss, output.real_td_loss)
     else:
         assert torch.equal(output.td_loss, output.predicted_td_loss)
+
+
+def test_goal_hybrid_uses_hindsight_goal_bellman_target_without_clamping():
+    online = CoefficientEchoSuccessor()
+    target = CoefficientEchoSuccessor().requires_grad_(False)
+    real = torch.zeros(1, 6, 1, requires_grad=True)
+    predicted = torch.zeros_like(real, requires_grad=True)
+    real_ema = torch.tensor(
+        [[[0.0], [0.0], [0.0], [2.0], [5.0], [9.0]]],
+        requires_grad=True,
+    )
+    actions = torch.arange(6, dtype=torch.float32).reshape(1, 6, 1)
+    offsets = torch.tensor([[2, 1, 1]])
+
+    output = actor_free_td_objective(
+        online,
+        target,
+        real,
+        predicted,
+        real_ema,
+        actions,
+        gamma=0.5,
+        variant="goal_hybrid",
+        goal_offsets=offsets,
+    )
+
+    # At t=2, g=z4=5: y=.5*(2-5)^2 + .5*Gbar(a3)^T w(g)=6.
+    # At t=3 and t=4 the sampled goal is the real next state, hence y=0.
+    expected_branch = torch.tensor(((2.0 - 6.0) ** 2 + 3.0**2 + 4.0**2) / 3.0)
+    assert torch.allclose(output.predicted_goal_td_loss, expected_branch)
+    assert torch.allclose(output.real_goal_td_loss, expected_branch)
+    assert torch.allclose(output.goal_td_loss, 2.0 * expected_branch)
+    assert torch.allclose(output.goal_target_mean, torch.tensor(2.0))
+    assert torch.allclose(output.goal_prediction_mean, torch.tensor(3.0))
+    assert torch.allclose(output.goal_terminal_fraction, torch.tensor(2.0 / 3.0))
+    assert output.goal_pair_count.item() == 3
+
+    output.goal_td_loss.backward()
+    assert online.scale.grad is not None and torch.count_nonzero(online.scale.grad)
+    assert real_ema.grad is None
+    assert all(parameter.grad is None for parameter in target.parameters())
+
+
+def test_goal_validation_is_exact_per_transition_uniform_expectation():
+    online = CoefficientEchoSuccessor()
+    target = CoefficientEchoSuccessor().requires_grad_(False)
+    real = torch.zeros(1, 5, 1)
+    real_ema = torch.tensor([[[0.0], [0.0], [0.0], [2.0], [5.0]]])
+    actions = torch.arange(5, dtype=torch.float32).reshape(1, 5, 1)
+
+    output = actor_free_td_objective(
+        online,
+        target,
+        real,
+        real,
+        real_ema,
+        actions,
+        gamma=0.5,
+        variant="goal_hybrid",
+    )
+
+    # t=2 has two equiprobable goals: z3 gives y=0, z4 gives y=6.
+    # t=3 has one goal z4 and y=0. Average goals within each t first.
+    expected_branch = torch.tensor(
+        ((((2.0 - 0.0) ** 2 + (2.0 - 6.0) ** 2) / 2.0) + 3.0**2) / 2.0
+    )
+    assert torch.allclose(output.predicted_goal_td_loss, expected_branch)
+    assert torch.allclose(output.real_goal_td_loss, expected_branch)
+    assert output.goal_pair_count.item() == 3
+
+
+def test_hindsight_goal_sampling_stops_at_first_terminal_and_is_reproducible():
+    terminals = torch.zeros(1, 8, dtype=torch.bool)
+    terminals[:, 4] = True
+    limits = actor_free_goal_future_offset_limits(terminals, first_current_index=2)
+
+    # t=2..4 may reach only through z5; t>4 is outside the terminated episode.
+    assert limits.tolist() == [[3, 2, 1, 0, 0]]
+    first = sample_actor_free_goal_offsets(
+        terminals,
+        first_current_index=2,
+        generator=torch.Generator().manual_seed(77),
+    )
+    second = sample_actor_free_goal_offsets(
+        terminals,
+        first_current_index=2,
+        generator=torch.Generator().manual_seed(77),
+    )
+    assert torch.equal(first, second)
+    assert torch.all(first[:, :3] <= limits[:, :3])
+    assert torch.all(first >= 1)
 
 
 def test_parallel_real_does_not_read_predicted_context_values():
@@ -291,7 +402,7 @@ def test_cem_cost_splices_h_minus_one_explicit_steps_and_final_action_tail():
     assert torch.allclose(successor.current_action, actions[..., 2, :])
 
 
-@pytest.mark.parametrize("variant", ["serial_coupled", "parallel_real"])
+@pytest.mark.parametrize("variant", ["serial_coupled", "parallel_real", "goal_hybrid"])
 def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
     tmp_path,
     variant,
@@ -305,7 +416,7 @@ def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
     )
     successor_config = {
         "method": "actor_free_td_lewm",
-        "objective_version": 1,
+        "objective_version": 2 if variant == "goal_hybrid" else 1,
         "deployment_checkpoint_version": 1,
         "embed_dim": 2,
         "action_dim": 1,
@@ -323,12 +434,27 @@ def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
         "reward": "none",
         "predicted_context_detach": False,
     }
+    if variant == "goal_hybrid":
+        successor_config.update(
+            {
+                "goal_readout_training": True,
+                "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+                "goal_offset_weighting": "uniform_per_transition",
+                "goal_terminal_condition": ("dataset_terminal_or_next_state_is_goal"),
+                "goal_readout_branches": ["real_context", "predicted_context"],
+                "goal_readout_precision": "float32",
+                "goal_cost": "normalized_discounted_latent_mse",
+                "goal_enters_successor_head": False,
+                "predicted_goal_td_weight": 1.0,
+                "real_goal_td_weight": 1.0,
+            }
+        )
     checkpoint = tmp_path / "actor_free_td.pt"
     torch.save(
         {
             "method": "actor_free_td_lewm",
             "variant": variant,
-            "objective_version": 1,
+            "objective_version": 2 if variant == "goal_hybrid" else 1,
             "deployment_checkpoint_version": 1,
             "successor_state_dict": successor.state_dict(),
             "successor_config": successor_config,

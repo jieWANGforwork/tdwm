@@ -24,6 +24,7 @@ from tdwm.methods.actor_free_td_lewm import (
     ActorFreeSuccessorHead,
     actor_free_td_objective,
     ema_update,
+    sample_actor_free_goal_offsets,
 )
 from tdwm.training.block_sampler import BlockShuffleBatchSampler
 from tdwm.training.cube_data import validate_cube_training_dataset
@@ -50,8 +51,16 @@ from tdwm.training.rf_successor_lewm import (
 
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
+GOAL_OBJECTIVE_VERSION = 2
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 FORMAL_OPTIMIZER_UPDATES = 127_960
+GOAL_VARIANT = "goal_hybrid"
+
+
+def objective_version_for_variant(variant: str) -> int:
+    """Return the locked semantic objective version for a TD variant."""
+
+    return GOAL_OBJECTIVE_VERSION if variant == GOAL_VARIANT else OBJECTIVE_VERSION
 
 
 def load_actor_free_td_training_protocol(path: str | Path) -> dict[str, Any]:
@@ -91,10 +100,11 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
         raise ValueError("sequence.frame_skip must be positive.")
 
     expected_weights = {
-        "parallel_real": (1.0, 0.0, False),
-        "serial_decoupled": (0.0, 1.0, True),
-        "serial_coupled": (0.0, 1.0, False),
-        "hybrid": (1.0, 1.0, False),
+        "parallel_real": (1.0, 0.0, False, 0.0, 0.0),
+        "serial_decoupled": (0.0, 1.0, True, 0.0, 0.0),
+        "serial_coupled": (0.0, 1.0, False, 0.0, 0.0),
+        "hybrid": (1.0, 1.0, False, 0.0, 0.0),
+        "goal_hybrid": (1.0, 1.0, False, 1.0, 1.0),
     }[variant]
     objective = protocol.get("joint_objective", {})
     expected_objective = {
@@ -116,9 +126,30 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
         if objective.get(key) != expected:
             raise ValueError(f"joint_objective.{key} must be {expected!r}.")
 
+    for key, expected in {
+        "real_goal_td_weight": expected_weights[3],
+        "predicted_goal_td_weight": expected_weights[4],
+    }.items():
+        if float(objective.get(key, 0.0)) != expected:
+            raise ValueError(f"joint_objective.{key} must be {expected!r}.")
+    if variant == GOAL_VARIANT:
+        goal_objective = {
+            "goal_readout_td": "hindsight_future_ema_latent_bellman_cost",
+            "goal_enters_successor_head": False,
+            "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+            "goal_validation": "exact_conditional_uniform_future_expectation",
+            "goal_terminal": "dataset_terminal_or_next_state_is_goal",
+            "goal_cost": "normalized_discounted_latent_mse",
+            "goal_readout_precision": "float32",
+            "goal_sampling_seed_offset": 1,
+        }
+        for key, expected in goal_objective.items():
+            if objective.get(key) != expected:
+                raise ValueError(f"joint_objective.{key} must be {expected!r}.")
+
     successor = protocol.get("successor", {})
     locked_successor = {
-        "objective_version": OBJECTIVE_VERSION,
+        "objective_version": objective_version_for_variant(str(variant)),
         "architecture": "actor_free_successor_head",
         "feature_basis": "augmented_latent_squared_distance",
         "action_conditioning": "dataset_current_action",
@@ -131,6 +162,18 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
     for key, expected in locked_successor.items():
         if successor.get(key) != expected:
             raise ValueError(f"successor.{key} must be {expected!r}.")
+    if variant == GOAL_VARIANT:
+        goal_successor = {
+            "goal_readout_training": True,
+            "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+            "goal_offset_weighting": "uniform_per_transition",
+            "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
+            "goal_readout_branches": ["real_context", "predicted_context"],
+            "goal_readout_precision": "float32",
+        }
+        for key, expected in goal_successor.items():
+            if successor.get(key) != expected:
+                raise ValueError(f"successor.{key} must be {expected!r}.")
     if int(successor.get("hidden_dim", 0)) <= 0:
         raise ValueError("successor.hidden_dim must be positive.")
     if not 0.0 <= float(successor.get("gamma", -1.0)) < 1.0:
@@ -323,6 +366,7 @@ def _build_training_module(
     *,
     action_block_dim: int,
     device_image_preprocessing: bool,
+    goal_generator: torch.Generator | None = None,
 ):
     import lightning as pl
     import stable_worldmodel as swm
@@ -343,6 +387,9 @@ def _build_training_module(
             self.target_successor = self.successor.make_target()
             self.target_successor.eval()
             self.variant = str(protocol["variant"])
+            self.goal_generator = goal_generator
+            if self.variant == GOAL_VARIANT and self.goal_generator is None:
+                raise ValueError("goal_hybrid requires a dedicated goal generator.")
             self.history_size = int(protocol["sequence"]["history_frames"])
             self.gamma = float(successor_cfg["gamma"])
             self.target_world_ema_decay = float(successor_cfg["target_world_ema_decay"])
@@ -462,6 +509,14 @@ def _build_training_module(
                 local_prediction,
                 history_size=self.history_size,
             )
+            goal_offsets = None
+            if self.variant == GOAL_VARIANT and stage == "train":
+                assert self.goal_generator is not None
+                goal_offsets = sample_actor_free_goal_offsets(
+                    td_inputs.terminals,
+                    first_current_index=self.history_size,
+                    generator=self.goal_generator,
+                )
             td_output = actor_free_td_objective(
                 self.successor,
                 self.target_successor,
@@ -473,6 +528,7 @@ def _build_training_module(
                 variant=self.variant,
                 terminals=td_inputs.terminals,
                 first_current_index=self.history_size,
+                goal_offsets=goal_offsets,
             )
             real_td_loss = (
                 td_output.real_td_loss
@@ -484,19 +540,47 @@ def _build_training_module(
                 float(objective["predicted_td_weight"]) * td_output.predicted_td_loss
                 + float(objective["real_td_weight"]) * real_td_loss
             )
+            real_goal_td_loss = (
+                td_output.real_goal_td_loss
+                if td_output.real_goal_td_loss is not None
+                else prediction_loss.new_zeros((), dtype=torch.float32)
+            )
+            weighted_goal_td = (
+                float(objective.get("predicted_goal_td_weight", 0.0))
+                * td_output.predicted_goal_td_loss
+                + float(objective.get("real_goal_td_weight", 0.0)) * real_goal_td_loss
+            )
+            weighted_auxiliary = weighted_td + weighted_goal_td
             auxiliary_scale = self._auxiliary_scale()
             loss = (
                 prediction_loss
                 + float(protocol["loss"]["sigreg"]["weight"]) * sigreg_loss
-                + auxiliary_scale * weighted_td
+                + auxiliary_scale * weighted_auxiliary
             )
             metrics = {
                 f"{stage}/loss": loss.detach(),
                 f"{stage}/prediction_loss": prediction_loss.detach(),
                 f"{stage}/sigreg_loss": sigreg_loss.detach(),
-                f"{stage}/td_loss": weighted_td.detach(),
+                f"{stage}/td_loss": weighted_auxiliary.detach(),
+                f"{stage}/successor_td_loss": weighted_td.detach(),
                 f"{stage}/predicted_td_loss": td_output.predicted_td_loss.detach(),
                 f"{stage}/real_td_loss": real_td_loss.detach(),
+                f"{stage}/goal_td_loss": weighted_goal_td.detach(),
+                f"{stage}/predicted_goal_td_loss": (
+                    td_output.predicted_goal_td_loss.detach()
+                ),
+                f"{stage}/real_goal_td_loss": real_goal_td_loss.detach(),
+                f"{stage}/goal_prediction_mean": (
+                    td_output.goal_prediction_mean.detach()
+                ),
+                f"{stage}/goal_target_mean": td_output.goal_target_mean.detach(),
+                f"{stage}/goal_terminal_fraction": (
+                    td_output.goal_terminal_fraction.detach()
+                ),
+                f"{stage}/goal_negative_prediction_fraction": (
+                    td_output.goal_negative_prediction_fraction.detach()
+                ),
+                f"{stage}/goal_pairs": td_output.goal_pair_count.detach().to(loss),
                 f"{stage}/td_prediction_mean": td_output.prediction_mean.detach(),
                 f"{stage}/td_target_mean": td_output.target_mean.detach(),
                 f"{stage}/terminal_fraction": td_output.terminal_fraction.detach(),
@@ -592,10 +676,11 @@ def _successor_config(
     base_checkpoint_sha256: str,
 ) -> dict[str, Any]:
     successor = protocol["successor"]
-    return {
+    variant = str(protocol["variant"])
+    config = {
         "method": METHOD,
-        "variant": protocol["variant"],
-        "objective_version": OBJECTIVE_VERSION,
+        "variant": variant,
+        "objective_version": objective_version_for_variant(variant),
         "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
         "architecture": successor["architecture"],
         "embed_dim": int(protocol["model"]["embed_dim"]),
@@ -621,6 +706,25 @@ def _successor_config(
         "base_export_run_name": base_export_run_name,
         "base_checkpoint_sha256": base_checkpoint_sha256,
     }
+    if variant == GOAL_VARIANT:
+        objective = protocol["joint_objective"]
+        config.update(
+            {
+                "goal_readout_training": successor["goal_readout_training"],
+                "goal_source": successor["goal_source"],
+                "goal_offset_weighting": successor["goal_offset_weighting"],
+                "goal_terminal_condition": successor["goal_terminal_condition"],
+                "goal_readout_branches": successor["goal_readout_branches"],
+                "goal_readout_precision": successor["goal_readout_precision"],
+                "goal_cost": objective["goal_cost"],
+                "goal_enters_successor_head": objective["goal_enters_successor_head"],
+                "predicted_goal_td_weight": float(
+                    objective["predicted_goal_td_weight"]
+                ),
+                "real_goal_td_weight": float(objective["real_goal_td_weight"]),
+            }
+        )
+    return config
 
 
 def _deployment_payload(
@@ -639,7 +743,7 @@ def _deployment_payload(
     return {
         "method": METHOD,
         "variant": protocol["variant"],
-        "objective_version": OBJECTIVE_VERSION,
+        "objective_version": objective_version_for_variant(str(protocol["variant"])),
         "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
         "epoch": int(epoch),
         "global_step": int(global_step),
@@ -707,7 +811,12 @@ def _build_export_callback(
     return ActorFreeTDExportCallback()
 
 
-def _build_generator_callback(generator: torch.Generator, *, variant: str):
+def _build_generator_callback(
+    generator: torch.Generator,
+    *,
+    variant: str,
+    goal_generator: torch.Generator | None = None,
+):
     import lightning as pl
 
     class DataLoaderGeneratorCallback(pl.Callback):
@@ -716,10 +825,19 @@ def _build_generator_callback(generator: torch.Generator, *, variant: str):
             return f"tdwm_{METHOD}_{variant}_dataloader_generator"
 
         def state_dict(self) -> dict[str, Any]:
-            return {"generator_state": generator.get_state()}
+            state = {"generator_state": generator.get_state()}
+            if goal_generator is not None:
+                state["goal_generator_state"] = goal_generator.get_state()
+            return state
 
         def load_state_dict(self, state_dict: dict[str, Any]) -> None:
             generator.set_state(state_dict["generator_state"])
+            if goal_generator is not None:
+                if "goal_generator_state" not in state_dict:
+                    raise RuntimeError(
+                        "Goal-TD checkpoint is missing its goal sampler RNG state."
+                    )
+                goal_generator.set_state(state_dict["goal_generator_state"])
 
     return DataLoaderGeneratorCallback()
 
@@ -746,7 +864,7 @@ def train_actor_free_td_lewm(
     max_steps: int | None = None,
     skip_validation: bool = False,
 ) -> dict[str, Any]:
-    """Train one goal-free Actor-Free TD-LeWM variant from raw Cube data."""
+    """Train one actor-free TD-LeWM variant from raw Cube data."""
 
     protocol = load_actor_free_td_training_protocol(protocol_path)
     if seed not in protocol["seeds"]:
@@ -822,6 +940,11 @@ def train_actor_free_td_lewm(
         )
 
     generator = torch.Generator().manual_seed(seed)
+    goal_generator = None
+    if protocol["variant"] == GOAL_VARIANT:
+        goal_generator = torch.Generator().manual_seed(
+            seed + int(protocol["joint_objective"]["goal_sampling_seed_offset"])
+        )
     train_set, validation_set = torch.utils.data.random_split(
         dataset,
         [
@@ -952,6 +1075,7 @@ def train_actor_free_td_lewm(
         schedule.total_scheduler_steps,
         action_block_dim=action_block_dim,
         device_image_preprocessing=device_preprocessing,
+        goal_generator=goal_generator,
     )
 
     checkpoint_dir = run_dir / "checkpoints" / "lightning"
@@ -965,7 +1089,11 @@ def train_actor_free_td_lewm(
     callbacks = [
         checkpoint_callback,
         _build_export_callback(run_dir, model_config, protocol, action_block_dim),
-        _build_generator_callback(generator, variant=str(protocol["variant"])),
+        _build_generator_callback(
+            generator,
+            variant=str(protocol["variant"]),
+            goal_generator=goal_generator,
+        ),
     ]
     if episode_train_dataset is not None:
         callbacks.append(_build_episode_epoch_callback(episode_train_dataset))
@@ -985,7 +1113,7 @@ def train_actor_free_td_lewm(
             previous_protocol.get("method") == METHOD
             and previous_protocol.get("variant") == protocol["variant"]
             and previous_protocol.get("successor", {}).get("objective_version")
-            == OBJECTIVE_VERSION
+            == objective_version_for_variant(str(protocol["variant"]))
             and previous.get("deployment_checkpoint_version")
             == DEPLOYMENT_CHECKPOINT_VERSION
         )
@@ -1015,7 +1143,9 @@ def train_actor_free_td_lewm(
         {
             "method": METHOD,
             "variant": protocol["variant"],
-            "objective_version": OBJECTIVE_VERSION,
+            "objective_version": objective_version_for_variant(
+                str(protocol["variant"])
+            ),
             "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
             "protocol": protocol,
             "protocol_path": str(Path(protocol_path).resolve()),
@@ -1093,10 +1223,13 @@ __all__ = [
     "ActorFreeTrainingSchedule",
     "DEPLOYMENT_CHECKPOINT_VERSION",
     "FORMAL_OPTIMIZER_UPDATES",
+    "GOAL_OBJECTIVE_VERSION",
+    "GOAL_VARIANT",
     "METHOD",
     "OBJECTIVE_VERSION",
     "build_actor_free_td_inputs",
     "load_actor_free_td_training_protocol",
+    "objective_version_for_variant",
     "resolve_actor_free_training_schedule",
     "train_actor_free_td_lewm",
     "validate_actor_free_td_training_protocol",

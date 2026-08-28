@@ -1,8 +1,9 @@
 """Goal-free, actor-free TD successor features for LeWM.
 
 The learned successor is conditioned on an observed/predicted latent history and
-an externally supplied action.  Goals never enter this module: they are linear
-queries of the learned successor features at planning time.
+an externally supplied action.  Goals never enter the successor head: they are
+fixed linear queries of its output, optionally Bellman-trained by Goal Hybrid
+and reused unchanged at planning time.
 """
 
 from __future__ import annotations
@@ -14,16 +15,27 @@ from typing import Literal
 import torch
 from torch import nn
 
-from tdwm.methods.successor_geometry import successor_feature_basis
+from tdwm.methods.successor_geometry import (
+    goal_cost_weights,
+    latent_goal_cost,
+    successor_feature_basis,
+)
 
 ActorFreeTDVariant = Literal[
     "parallel_real",
     "serial_decoupled",
     "serial_coupled",
     "hybrid",
+    "goal_hybrid",
 ]
 SUPPORTED_VARIANTS = frozenset(
-    {"parallel_real", "serial_decoupled", "serial_coupled", "hybrid"}
+    {
+        "parallel_real",
+        "serial_decoupled",
+        "serial_coupled",
+        "hybrid",
+        "goal_hybrid",
+    }
 )
 
 
@@ -114,6 +126,27 @@ class ActorFreeTDOutput:
     target_mean: torch.Tensor
     terminal_fraction: torch.Tensor
     pair_count: int
+    goal_td_loss: torch.Tensor
+    real_goal_td_loss: torch.Tensor | None
+    predicted_goal_td_loss: torch.Tensor
+    goal_prediction_mean: torch.Tensor
+    goal_target_mean: torch.Tensor
+    goal_terminal_fraction: torch.Tensor
+    goal_negative_prediction_fraction: torch.Tensor
+    goal_pair_count: torch.Tensor
+
+
+@dataclass(frozen=True)
+class _GoalTDContext:
+    """Detached hindsight-goal targets shared by the two online branches."""
+
+    weights: torch.Tensor
+    target: torch.Tensor
+    valid: torch.Tensor
+    denominator: torch.Tensor
+    transition_valid: torch.Tensor
+    terminal: torch.Tensor
+    pair_count: torch.Tensor
 
 
 def actor_free_successor_td_target(
@@ -225,6 +258,180 @@ def _normalize_terminals(
     return terminal_bool
 
 
+def actor_free_goal_future_offset_limits(
+    terminals: torch.Tensor,
+    *,
+    first_current_index: int,
+) -> torch.Tensor:
+    """Return each transition's largest reachable within-clip goal offset.
+
+    A terminal transition may still use its real next state as the goal, but no
+    goal may be sampled after that state.  In the normal episode-aware Cube
+    clips a terminal can only occur at the final transition; handling it here
+    also makes the boundary rule explicit and independently testable.
+    """
+
+    if terminals.ndim != 2:
+        raise ValueError("terminals must have shape (batch, time).")
+    first_current = int(first_current_index)
+    if first_current < 0 or first_current >= terminals.shape[1] - 1:
+        raise ValueError("first_current_index must leave at least one future state.")
+    terminal_bool = terminals.to(dtype=torch.bool)
+    if torch.any(terminals != terminal_bool):
+        raise ValueError("terminals must contain only binary values.")
+
+    current_count = terminals.shape[1] - first_current - 1
+    aligned = terminal_bool[:, first_current:-1]
+    limits: list[torch.Tensor] = []
+    for index in range(current_count):
+        remaining = aligned[:, index:]
+        active = ~aligned[:, :index].any(dim=-1)
+        has_terminal = remaining.any(dim=-1)
+        first_terminal = remaining.to(dtype=torch.int64).argmax(dim=-1) + 1
+        clip_limit = torch.full_like(first_terminal, current_count - index)
+        reachable_limit = torch.where(has_terminal, first_terminal, clip_limit)
+        limits.append(
+            torch.where(active, reachable_limit, torch.zeros_like(clip_limit))
+        )
+    return torch.stack(limits, dim=1)
+
+
+def sample_actor_free_goal_offsets(
+    terminals: torch.Tensor,
+    *,
+    first_current_index: int,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    """Uniformly sample one reachable future-goal offset per transition.
+
+    Sampling happens on CPU with a dedicated generator so it neither consumes
+    the model RNG (notably predictor dropout) nor depends on CUDA RNG state.
+    """
+
+    limits = actor_free_goal_future_offset_limits(
+        terminals, first_current_index=first_current_index
+    )
+    uniform = torch.rand(limits.shape, generator=generator, device="cpu")
+    sampled = (
+        torch.floor(uniform * limits.clamp_min(1).detach().cpu()).to(torch.int64) + 1
+    )
+    return sampled.to(device=terminals.device)
+
+
+@torch.no_grad()
+def _build_goal_td_context(
+    real_ema_latents: torch.Tensor,
+    bootstrap: torch.Tensor,
+    aligned_terminal: torch.Tensor,
+    *,
+    gamma: float,
+    first_current_index: int,
+    offset_limits: torch.Tensor,
+    goal_offsets: torch.Tensor | None,
+) -> _GoalTDContext:
+    """Build sampled or exactly enumerated hindsight-goal Bellman targets."""
+
+    batch, time, embed_dim = real_ema_latents.shape
+    current_count = time - first_current_index - 1
+    if offset_limits.shape != (batch, current_count):
+        raise ValueError("offset_limits must match the aligned transitions.")
+
+    if goal_offsets is None:
+        offsets = (
+            torch.arange(
+                1,
+                current_count + 1,
+                device=real_ema_latents.device,
+                dtype=torch.int64,
+            )
+            .reshape(1, 1, current_count)
+            .expand(batch, current_count, -1)
+        )
+        valid = (offsets <= offset_limits.unsqueeze(-1)) & offset_limits.unsqueeze(
+            -1
+        ).gt(0)
+        denominator = offset_limits.clamp_min(1).to(dtype=torch.float32)
+    else:
+        if goal_offsets.shape != (batch, current_count):
+            raise ValueError(
+                "goal_offsets must have shape (batch, aligned transitions)."
+            )
+        offsets_2d = goal_offsets.to(device=real_ema_latents.device, dtype=torch.int64)
+        if torch.any(goal_offsets.to(device=real_ema_latents.device) != offsets_2d):
+            raise ValueError("goal_offsets must contain integer values.")
+        transition_valid = offset_limits.gt(0)
+        if torch.any(offsets_2d < 1) or torch.any(
+            (offsets_2d > offset_limits) & transition_valid
+        ):
+            raise ValueError("goal_offsets must select reachable future states.")
+        offsets = offsets_2d.unsqueeze(-1)
+        valid = transition_valid.unsqueeze(-1)
+        denominator = torch.ones(
+            (batch, current_count),
+            device=real_ema_latents.device,
+            dtype=torch.float32,
+        )
+
+    current_indices = torch.arange(
+        first_current_index,
+        first_current_index + current_count,
+        device=real_ema_latents.device,
+        dtype=torch.int64,
+    ).reshape(1, current_count, 1)
+    goal_indices = (current_indices + offsets).clamp_max(time - 1)
+    flat_indices = goal_indices.reshape(batch, -1)
+    goals = (
+        real_ema_latents.detach()
+        .gather(
+            1,
+            flat_indices.unsqueeze(-1).expand(batch, flat_indices.shape[1], embed_dim),
+        )
+        .reshape(batch, current_count, offsets.shape[-1], embed_dim)
+    )
+
+    # All scalar goal geometry is intentionally FP32 under bf16 mixed training.
+    goals = goals.float()
+    weights = goal_cost_weights(goals)
+    next_latent = real_ema_latents[:, first_current_index + 1 :].detach().float()
+    immediate = (1.0 - gamma) * latent_goal_cost(next_latent.unsqueeze(-2), goals)
+    bootstrap_cost = (bootstrap.detach().float().unsqueeze(-2) * weights).sum(dim=-1)
+    continuation = (~aligned_terminal).unsqueeze(-1) & offsets.gt(1) & valid
+    target = immediate + gamma * continuation.to(torch.float32) * bootstrap_cost
+    terminal = (~continuation) & valid
+    return _GoalTDContext(
+        weights=weights,
+        target=target,
+        valid=valid,
+        denominator=denominator,
+        transition_valid=offset_limits.gt(0),
+        terminal=terminal,
+        pair_count=valid.sum().to(dtype=torch.float32),
+    )
+
+
+def _goal_td_branch(
+    prediction: torch.Tensor,
+    context: _GoalTDContext,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return conditional-uniform goal loss and prediction diagnostics."""
+
+    cost = (prediction.float().unsqueeze(-2) * context.weights).sum(dim=-1)
+    valid = context.valid.to(dtype=torch.float32)
+    squared_error = (cost - context.target).square()
+    transition_count = context.transition_valid.to(torch.float32).sum().clamp_min(1.0)
+    loss = (
+        (squared_error * valid).sum(dim=-1) / context.denominator
+    ).sum() / transition_count
+    prediction_mean = (
+        (cost.detach() * valid).sum(dim=-1) / context.denominator
+    ).sum() / transition_count
+    negative_fraction = (
+        ((cost.detach() < 0.0).to(torch.float32) * valid).sum(dim=-1)
+        / context.denominator
+    ).sum() / transition_count
+    return loss, prediction_mean, negative_fraction
+
+
 def actor_free_td_objective(
     successor: ActorFreeSuccessorHead,
     target_successor: ActorFreeSuccessorHead,
@@ -237,6 +444,7 @@ def actor_free_td_objective(
     variant: ActorFreeTDVariant,
     terminals: torch.Tensor | None = None,
     first_current_index: int | None = None,
+    goal_offsets: torch.Tensor | None = None,
 ) -> ActorFreeTDOutput:
     """Apply one-step TD to every aligned transition in a clip.
 
@@ -249,7 +457,11 @@ def actor_free_td_objective(
     parallel to the LeWM predictor. ``serial_decoupled`` stops the
     predicted-context gradient, ``serial_coupled`` lets it update the world
     predictor, and ``hybrid`` adds a real-context TD branch to the coupled
-    predicted-context branch.
+    predicted-context branch. ``goal_hybrid`` retains both hybrid successor-
+    feature losses and additionally Bellman-trains their fixed linear goal
+    readouts.  Passing ``goal_offsets`` samples one hindsight goal per aligned
+    transition; omitting it computes the exact conditional-uniform expectation
+    over every reachable future goal (used for deterministic validation).
     """
 
     if variant not in SUPPORTED_VARIANTS:
@@ -265,6 +477,8 @@ def actor_free_td_objective(
         actions,
     )
     terminal_mask = _normalize_terminals(terminals, real_latents=real_latents)
+    if variant != "goal_hybrid" and goal_offsets is not None:
+        raise ValueError("goal_offsets are only valid for the goal_hybrid variant.")
     history_size = successor.history_size
     first_current = (
         history_size if first_current_index is None else int(first_current_index)
@@ -321,6 +535,8 @@ def actor_free_td_objective(
     predicted_td_loss = real_latents.new_zeros(())
     real_td_loss: torch.Tensor | None = None
     predictions: list[torch.Tensor] = []
+    predicted: torch.Tensor | None = None
+    real_prediction: torch.Tensor | None = None
 
     if variant != "parallel_real":
         predicted_history = _latent_histories(
@@ -339,7 +555,7 @@ def actor_free_td_objective(
         predicted_td_loss = (predicted - target).square().mean()
         predictions.append(predicted.detach())
 
-    if variant in {"parallel_real", "hybrid"}:
+    if variant in {"parallel_real", "hybrid", "goal_hybrid"}:
         real_history = _latent_histories(
             real_latents,
             history_size=history_size,
@@ -357,11 +573,65 @@ def actor_free_td_objective(
     if variant == "parallel_real":
         assert real_td_loss is not None
         td_loss = real_td_loss
-    elif variant == "hybrid":
+    elif variant in {"hybrid", "goal_hybrid"}:
         assert real_td_loss is not None
         td_loss = predicted_td_loss + real_td_loss
     else:
         td_loss = predicted_td_loss
+
+    zero = real_latents.new_zeros((), dtype=torch.float32)
+    goal_td_loss = zero
+    predicted_goal_td_loss = zero
+    real_goal_td_loss: torch.Tensor | None = None
+    goal_prediction_mean = zero
+    goal_target_mean = zero
+    goal_terminal_fraction = zero
+    goal_negative_prediction_fraction = zero
+    goal_pair_count = zero
+    if variant == "goal_hybrid":
+        assert predicted is not None and real_prediction is not None
+        offset_limits = actor_free_goal_future_offset_limits(
+            terminal_mask, first_current_index=first_current
+        )
+        goal_context = _build_goal_td_context(
+            ema_latents,
+            bootstrap,
+            aligned_terminal,
+            gamma=gamma,
+            first_current_index=first_current,
+            offset_limits=offset_limits,
+            goal_offsets=goal_offsets,
+        )
+        (
+            predicted_goal_td_loss,
+            predicted_goal_mean,
+            predicted_negative_fraction,
+        ) = _goal_td_branch(predicted, goal_context)
+        (
+            real_goal_td_loss,
+            real_goal_mean,
+            real_negative_fraction,
+        ) = _goal_td_branch(real_prediction, goal_context)
+        goal_td_loss = predicted_goal_td_loss + real_goal_td_loss
+        goal_prediction_mean = 0.5 * (predicted_goal_mean + real_goal_mean)
+        goal_transition_count = (
+            goal_context.transition_valid.to(torch.float32).sum().clamp_min(1.0)
+        )
+        goal_target_mean = (
+            (
+                goal_context.target.detach()
+                * goal_context.valid.to(dtype=torch.float32)
+            ).sum(dim=-1)
+            / goal_context.denominator
+        ).sum() / goal_transition_count
+        goal_terminal_fraction = (
+            goal_context.terminal.to(dtype=torch.float32).sum(dim=-1)
+            / goal_context.denominator
+        ).sum() / goal_transition_count
+        goal_negative_prediction_fraction = 0.5 * (
+            predicted_negative_fraction + real_negative_fraction
+        )
+        goal_pair_count = goal_context.pair_count
 
     return ActorFreeTDOutput(
         td_loss=td_loss,
@@ -373,6 +643,14 @@ def actor_free_td_objective(
         target_mean=target.detach().mean(),
         terminal_fraction=aligned_terminal.float().mean(),
         pair_count=int(real_latents.shape[0] * current_count),
+        goal_td_loss=goal_td_loss,
+        real_goal_td_loss=real_goal_td_loss,
+        predicted_goal_td_loss=predicted_goal_td_loss,
+        goal_prediction_mean=goal_prediction_mean,
+        goal_target_mean=goal_target_mean,
+        goal_terminal_fraction=goal_terminal_fraction,
+        goal_negative_prediction_fraction=goal_negative_prediction_fraction,
+        goal_pair_count=goal_pair_count,
     )
 
 
@@ -405,7 +683,9 @@ __all__ = [
     "ActorFreeTDOutput",
     "ActorFreeTDVariant",
     "SUPPORTED_VARIANTS",
+    "actor_free_goal_future_offset_limits",
     "actor_free_successor_td_target",
     "actor_free_td_objective",
     "ema_update",
+    "sample_actor_free_goal_offsets",
 ]

@@ -31,8 +31,16 @@ from tdwm.evaluation.mc_gt_lewm import _load_action_processor
 
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
+GOAL_OBJECTIVE_VERSION = 2
+GOAL_VARIANT = "goal_hybrid"
 SUPPORTED_VARIANTS = frozenset(
-    {"parallel_real", "serial_decoupled", "serial_coupled", "hybrid"}
+    {
+        "parallel_real",
+        "serial_decoupled",
+        "serial_coupled",
+        "hybrid",
+        "goal_hybrid",
+    }
 )
 FORMAL_O50_PLANNING = {
     "horizon": 5,
@@ -90,8 +98,13 @@ def validate_actor_free_td_evaluation_protocol(
         raise ValueError("Evaluation requires stable-worldmodel 0.1.1.")
 
     successor = protocol.get("successor", {})
-    if int(successor.get("objective_version", -1)) != OBJECTIVE_VERSION:
-        raise ValueError("Actor-Free TD-LeWM requires objective_version 1.")
+    expected_objective_version = (
+        GOAL_OBJECTIVE_VERSION if variant == GOAL_VARIANT else OBJECTIVE_VERSION
+    )
+    if int(successor.get("objective_version", -1)) != expected_objective_version:
+        raise ValueError(
+            "Actor-Free TD-LeWM successor objective_version differs from its variant."
+        )
     for key, expected in CHECKPOINT_SEMANTICS.items():
         if successor.get(key) != expected:
             raise ValueError(f"successor.{key} must be {expected!r}.")
@@ -108,6 +121,19 @@ def validate_actor_free_td_evaluation_protocol(
         raise ValueError("Actor-Free TD-LeWM must use TD bootstrapping.")
     if successor.get("actor") != "none":
         raise ValueError("Actor-Free TD-LeWM must not contain a learned actor.")
+    if variant == GOAL_VARIANT:
+        goal_semantics = {
+            "goal_readout_training": True,
+            "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+            "goal_offset_weighting": "uniform_per_transition",
+            "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
+            "goal_readout_branches": ["real_context", "predicted_context"],
+            "goal_readout_precision": "float32",
+            "goal_cost": "normalized_discounted_latent_mse",
+        }
+        for key, expected in goal_semantics.items():
+            if successor.get(key) != expected:
+                raise ValueError(f"successor.{key} must be {expected!r}.")
 
     planning = protocol.get("planning", {})
     missing = REQUIRED_PLANNING_KEYS - planning.keys()
@@ -131,8 +157,13 @@ def validate_actor_free_td_evaluation_protocol(
     if evaluation.get("episodes") != 50 or evaluation.get("goal_offset") != 50:
         raise ValueError("The formal Actor-Free TD-LeWM protocol is Cube O50/50 episodes.")
     objective = protocol.get("inference_objective", {})
-    if objective.get("goal_usage") != "planning_linear_readout_only":
-        raise ValueError("The goal may only be used by the planning-time readout.")
+    expected_goal_usage = (
+        "training_goal_readout_and_planning_linear_readout"
+        if variant == GOAL_VARIANT
+        else "planning_linear_readout_only"
+    )
+    if objective.get("goal_usage") != expected_goal_usage:
+        raise ValueError("The configured goal-readout usage is inconsistent.")
     if objective.get("goal_enters_successor_head") is not False:
         raise ValueError("The goal-free successor head cannot accept the goal.")
     if objective.get("learned_actor") is not False:
@@ -163,7 +194,11 @@ def _validate_checkpoint(
     checks = {
         "method": METHOD,
         "variant": expected_variant,
-        "objective_version": OBJECTIVE_VERSION,
+        "objective_version": (
+            GOAL_OBJECTIVE_VERSION
+            if expected_variant == GOAL_VARIANT
+            else OBJECTIVE_VERSION
+        ),
         "deployment_checkpoint_version": 1,
     }
     for key, expected in checks.items():
@@ -193,6 +228,22 @@ def _validate_checkpoint(
         "feature_basis": successor["feature_basis"],
         **CHECKPOINT_SEMANTICS,
     }
+    if expected_variant == GOAL_VARIANT:
+        expected_config.update(
+            {
+                "objective_version": GOAL_OBJECTIVE_VERSION,
+                "goal_readout_training": True,
+                "goal_source": successor["goal_source"],
+                "goal_offset_weighting": successor["goal_offset_weighting"],
+                "goal_terminal_condition": successor["goal_terminal_condition"],
+                "goal_readout_branches": successor["goal_readout_branches"],
+                "goal_readout_precision": successor["goal_readout_precision"],
+                "goal_cost": successor["goal_cost"],
+                "goal_enters_successor_head": False,
+                "predicted_goal_td_weight": 1.0,
+                "real_goal_td_weight": 1.0,
+            }
+        )
     for key, expected in expected_config.items():
         actual = successor_config.get(key)
         if key == "gamma":

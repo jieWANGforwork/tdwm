@@ -14,8 +14,10 @@ from tdwm.methods.actor_free_td_lewm import (
 from tdwm.training.actor_free_td_lewm import (
     DEPLOYMENT_CHECKPOINT_VERSION,
     FORMAL_OPTIMIZER_UPDATES,
+    GOAL_OBJECTIVE_VERSION,
     METHOD,
     OBJECTIVE_VERSION,
+    _build_generator_callback,
     _deployment_payload,
     build_actor_free_td_inputs,
     load_actor_free_td_training_protocol,
@@ -34,11 +36,12 @@ CONFIGS = {
         "serial_decoupled",
         "serial_coupled",
         "hybrid",
+        "goal_hybrid",
     )
 }
 
 
-def test_four_variants_share_data_seed_budget_and_original_lewm_loss():
+def test_five_variants_share_data_seed_budget_and_original_lewm_loss():
     protocols = {
         variant: load_actor_free_td_training_protocol(path)
         for variant, path in CONFIGS.items()
@@ -74,6 +77,11 @@ def test_four_variants_share_data_seed_budget_and_original_lewm_loss():
         is False
     )
     assert protocols["hybrid"]["joint_objective"]["real_td_weight"] == 1.0
+    goal = protocols["goal_hybrid"]["joint_objective"]
+    assert goal["real_td_weight"] == goal["predicted_td_weight"] == 1.0
+    assert goal["real_goal_td_weight"] == goal["predicted_goal_td_weight"] == 1.0
+    assert goal["goal_enters_successor_head"] is False
+    assert protocols["goal_hybrid"]["successor"]["objective_version"] == 2
     assert protocols["serial_coupled"]["joint_objective"]["real_td_weight"] == 0.0
     parallel = protocols["parallel_real"]["joint_objective"]
     assert parallel["real_td_weight"] == 1.0
@@ -94,6 +102,23 @@ def test_parallel_real_protocol_rejects_a_predicted_td_branch():
     protocol["joint_objective"]["predicted_td_weight"] = 1.0
 
     with pytest.raises(ValueError, match="predicted_td_weight"):
+        validate_actor_free_td_training_protocol(protocol)
+
+
+def test_goal_hybrid_protocol_rejects_goal_semantic_drift():
+    protocol = load_actor_free_td_training_protocol(CONFIGS["goal_hybrid"])
+    protocol["joint_objective"]["goal_source"] = "final_frame_only"
+    with pytest.raises(ValueError, match="goal_source"):
+        validate_actor_free_td_training_protocol(protocol)
+
+    protocol = load_actor_free_td_training_protocol(CONFIGS["goal_hybrid"])
+    protocol["joint_objective"]["real_goal_td_weight"] = 0.5
+    with pytest.raises(ValueError, match="real_goal_td_weight"):
+        validate_actor_free_td_training_protocol(protocol)
+
+    protocol = load_actor_free_td_training_protocol(CONFIGS["goal_hybrid"])
+    protocol["successor"]["objective_version"] = 1
+    with pytest.raises(ValueError, match="objective_version"):
         validate_actor_free_td_training_protocol(protocol)
 
 
@@ -171,7 +196,10 @@ def _variant_backward(variant: str):
         terminals=inputs.terminals,
         first_current_index=history,
     )
-    output.td_loss.backward()
+    backward_loss = output.td_loss
+    if variant == "goal_hybrid":
+        backward_loss = backward_loss + output.goal_td_loss
+    backward_loss.backward()
     return output, local, real, successor, target_successor
 
 
@@ -221,6 +249,23 @@ def test_hybrid_adds_real_and_predicted_td_losses():
     assert real.grad is not None and torch.count_nonzero(real.grad) > 0
 
 
+def test_goal_hybrid_retains_hybrid_gradients_and_adds_two_goal_losses():
+    output, local, real, _, target_successor = _variant_backward("goal_hybrid")
+
+    assert output.real_td_loss is not None
+    assert output.real_goal_td_loss is not None
+    assert torch.allclose(
+        output.td_loss, output.predicted_td_loss + output.real_td_loss
+    )
+    assert torch.allclose(
+        output.goal_td_loss,
+        output.predicted_goal_td_loss + output.real_goal_td_loss,
+    )
+    assert local.grad is not None and torch.count_nonzero(local.grad) > 0
+    assert real.grad is not None and torch.count_nonzero(real.grad) > 0
+    assert all(parameter.grad is None for parameter in target_successor.parameters())
+
+
 def test_td_current_index_cannot_start_at_history_minus_one():
     history = 3
     real = torch.randn(1, 7, 2)
@@ -260,6 +305,30 @@ def test_smoke_resume_runs_a_second_epoch_on_one_four_step_schedule():
     assert resumed.max_epochs == 2
 
 
+def test_goal_hybrid_resume_restores_data_and_goal_rng_streams():
+    data_generator = torch.Generator().manual_seed(7)
+    goal_generator = torch.Generator().manual_seed(8)
+    callback = _build_generator_callback(
+        data_generator,
+        variant="goal_hybrid",
+        goal_generator=goal_generator,
+    )
+    state = callback.state_dict()
+    expected_data = torch.rand(5, generator=data_generator)
+    expected_goal = torch.rand(5, generator=goal_generator)
+
+    torch.rand(11, generator=data_generator)
+    torch.rand(13, generator=goal_generator)
+    callback.load_state_dict(state)
+
+    assert torch.equal(torch.rand(5, generator=data_generator), expected_data)
+    assert torch.equal(torch.rand(5, generator=goal_generator), expected_goal)
+
+    missing_goal_state = {"generator_state": state["generator_state"]}
+    with pytest.raises(RuntimeError, match="goal sampler RNG state"):
+        callback.load_state_dict(missing_goal_state)
+
+
 def test_joint_checkpoint_pairs_online_and_ema_world_and_successor():
     protocol = load_actor_free_td_training_protocol(CONFIGS["serial_coupled"])
     module = SimpleNamespace(
@@ -295,3 +364,34 @@ def test_joint_checkpoint_pairs_online_and_ema_world_and_successor():
         "target_successor_state_dict",
     ):
         assert key in payload and payload[key]
+
+
+def test_goal_hybrid_checkpoint_records_trained_readout_semantics():
+    protocol = load_actor_free_td_training_protocol(CONFIGS["goal_hybrid"])
+    module = SimpleNamespace(
+        model=nn.Linear(2, 3),
+        target_model=nn.Linear(2, 3),
+        successor=nn.Linear(3, 4),
+        target_successor=nn.Linear(3, 4),
+    )
+    payload = _deployment_payload(
+        module,
+        protocol=protocol,
+        model_config={"_target_": "example.WorldModel"},
+        action_block_dim=25,
+        epoch=1,
+        global_step=2,
+        base_export_run_name="epoch_01",
+        base_checkpoint_sha256="0" * 64,
+    )
+
+    assert payload["objective_version"] == GOAL_OBJECTIVE_VERSION
+    config = payload["successor_config"]
+    assert config["goal_readout_training"] is True
+    assert config["goal_enters_successor_head"] is False
+    assert config["goal_readout_branches"] == [
+        "real_context",
+        "predicted_context",
+    ]
+    assert config["real_goal_td_weight"] == 1.0
+    assert config["predicted_goal_td_weight"] == 1.0

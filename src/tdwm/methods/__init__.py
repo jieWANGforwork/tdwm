@@ -4,8 +4,10 @@ from .actor_free_td_lewm import (
     ActorFreeSuccessorHead,
     ActorFreeTDOutput,
     ActorFreeTDVariant,
+    actor_free_goal_future_offset_limits,
     actor_free_successor_td_target,
     actor_free_td_objective,
+    sample_actor_free_goal_offsets,
 )
 from .goal_tail import (
     GoalTailTDOutput,
@@ -78,6 +80,7 @@ __all__ = [
     "SuccessorSequenceOutput",
     "SuccessorTDOutput",
     "build_expert_action_windows",
+    "actor_free_goal_future_offset_limits",
     "actor_free_successor_td_target",
     "actor_free_td_objective",
     "discounted_goal_tail_target",
@@ -94,6 +97,7 @@ __all__ = [
     "latent_sequence_from_successor",
     "moment_sequence_objective",
     "multi_horizon_successor_objective",
+    "sample_actor_free_goal_offsets",
     "successor_feature_basis",
     "successor_goal_cost",
     "successor_geometry_cost",

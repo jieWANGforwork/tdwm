@@ -2,7 +2,7 @@ schema_version: 1
 id: actor_free_td_lewm
 display_name: Actor-Free TD-LeWM
 family: latent_world_model
-protocol: offline_goal_free_td
+protocol: offline_actor_free_successor_td
 
 implementation:
   package: stable-worldmodel[all]
@@ -15,7 +15,7 @@ input:
   history: real_or_teacher_forced_predicted_latent_history
   action: externally_supplied_dataset_or_planner_action
   bootstrap_action: recorded_dataset_next_action
-  goal_during_training: false
+  goal_during_training: goal_hybrid_uses_future_ema_latent_readout_only
   reward_during_training: false
 
 targets:
@@ -37,11 +37,16 @@ variants:
   hybrid:
     td_branches: [real_context, predicted_context]
     predicted_context_detach: false
+  goal_hybrid:
+    td_branches: [real_context, predicted_context]
+    goal_readout_td_branches: [real_context, predicted_context]
+    goal_enters_successor_head: false
+    predicted_context_detach: false
 
 loss:
   retained_lewm: prediction_mse_plus_0.09_sigreg
   td: one_step_ema_successor_feature_bellman_mse
-  goal_loss: false
+  goal_loss: goal_hybrid_hindsight_goal_bellman_mse
   actor_loss: false
 
 inference:
@@ -51,9 +56,9 @@ inference:
 
 checkpoint:
   method: actor_free_td_lewm
-  objective_version: 1
+  objective_version: {base_variants: 1, goal_hybrid: 2}
   deployment_checkpoint_version: 1
   self_contained_world_and_successor: true
 
 provenance:
-  note: The four variants differ only in real-versus-predicted TD context and its gradient coupling to the LeWM predictor.
+  note: The fifth variant retains Hybrid SF-TD and adds fixed-readout hindsight Goal-TD without an actor or goal input to the successor head.

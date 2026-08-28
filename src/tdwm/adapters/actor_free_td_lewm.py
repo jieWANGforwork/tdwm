@@ -16,7 +16,9 @@ from tdwm.methods.successor_geometry import latent_goal_cost, successor_goal_cos
 
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
+GOAL_OBJECTIVE_VERSION = 2
 DEPLOYMENT_CHECKPOINT_VERSION = 1
+GOAL_VARIANT = "goal_hybrid"
 
 
 class ActorFreeTDLeWM(nn.Module):
@@ -264,13 +266,16 @@ def load_actor_free_td_checkpoint(
     )
     if payload.get("method") != METHOD:
         raise ValueError("The checkpoint is not Actor-Free TD-LeWM.")
-    if payload.get("objective_version") != OBJECTIVE_VERSION:
-        raise ValueError("Unsupported Actor-Free TD-LeWM objective version.")
-    if payload.get("deployment_checkpoint_version") != DEPLOYMENT_CHECKPOINT_VERSION:
-        raise ValueError("Unsupported Actor-Free TD-LeWM deployment checkpoint.")
     payload_variant = payload.get("variant")
     if payload_variant not in SUPPORTED_VARIANTS:
         raise ValueError("Checkpoint contains an unsupported TD variant.")
+    expected_objective_version = (
+        GOAL_OBJECTIVE_VERSION if payload_variant == GOAL_VARIANT else OBJECTIVE_VERSION
+    )
+    if payload.get("objective_version") != expected_objective_version:
+        raise ValueError("Unsupported Actor-Free TD-LeWM objective version.")
+    if payload.get("deployment_checkpoint_version") != DEPLOYMENT_CHECKPOINT_VERSION:
+        raise ValueError("Unsupported Actor-Free TD-LeWM deployment checkpoint.")
     required = {
         "successor_state_dict",
         "successor_config",
@@ -299,7 +304,7 @@ def load_actor_free_td_checkpoint(
         raise ValueError("Checkpoint and successor_config variants differ.")
     metadata_checks = {
         "method": METHOD,
-        "objective_version": OBJECTIVE_VERSION,
+        "objective_version": expected_objective_version,
         "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
     }
     for key, expected in metadata_checks.items():
@@ -321,6 +326,22 @@ def load_actor_free_td_checkpoint(
     for key, expected in semantic_checks.items():
         if config.get(key) != expected:
             raise ValueError(f"successor_config.{key} must be {expected!r}.")
+    if payload_variant == GOAL_VARIANT:
+        goal_semantics = {
+            "goal_readout_training": True,
+            "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+            "goal_offset_weighting": "uniform_per_transition",
+            "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
+            "goal_readout_branches": ["real_context", "predicted_context"],
+            "goal_readout_precision": "float32",
+            "goal_cost": "normalized_discounted_latent_mse",
+            "goal_enters_successor_head": False,
+            "predicted_goal_td_weight": 1.0,
+            "real_goal_td_weight": 1.0,
+        }
+        for key, expected in goal_semantics.items():
+            if config.get(key) != expected:
+                raise ValueError(f"successor_config.{key} must be {expected!r}.")
 
     successor = ActorFreeSuccessorHead(
         embed_dim=int(config["embed_dim"]),
