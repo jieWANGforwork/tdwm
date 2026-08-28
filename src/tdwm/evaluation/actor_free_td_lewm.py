@@ -32,9 +32,9 @@ from tdwm.evaluation.mc_gt_lewm import _load_action_processor
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
-IMAGINARY_OBJECTIVE_VERSION = 3
+DIRECT_GOAL_OBJECTIVE_VERSION = 3
 GOAL_VARIANT = "goal_hybrid"
-IMAGINARY_VARIANT = "imaginary_hybrid"
+DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
 SUPPORTED_VARIANTS = frozenset(
     {
         "parallel_real",
@@ -42,7 +42,7 @@ SUPPORTED_VARIANTS = frozenset(
         "serial_coupled",
         "hybrid",
         "goal_hybrid",
-        "imaginary_hybrid",
+        "direct_goal_hybrid",
     }
 )
 FORMAL_O50_PLANNING = {
@@ -69,14 +69,15 @@ CHECKPOINT_SEMANTICS = {
     "actor": "none",
     "reward": "none",
 }
-
-
-def _objective_version_for_variant(variant: str) -> int:
-    if variant == GOAL_VARIANT:
-        return GOAL_OBJECTIVE_VERSION
-    if variant == IMAGINARY_VARIANT:
-        return IMAGINARY_OBJECTIVE_VERSION
-    return OBJECTIVE_VERSION
+DIRECT_CRITIC_SEMANTICS = {
+    "architecture": "direct_goal_critic_head",
+    "goal_conditioning": "direct_latent_input",
+    "action_conditioning": "dataset_current_action",
+    "bootstrap_action": "dataset_next_action",
+    "terminal_source": "next_action_nan_invalid",
+    "actor": "none",
+    "reward": "none",
+}
 
 
 def load_actor_free_td_evaluation_protocol(
@@ -97,7 +98,9 @@ def validate_actor_free_td_evaluation_protocol(
         raise ValueError("This evaluator only accepts Actor-Free TD-LeWM.")
     variant = protocol.get("variant")
     if variant not in SUPPORTED_VARIANTS:
-        raise ValueError(f"Unsupported Actor-Free TD-LeWM variant {variant!r}.")
+        raise ValueError(
+            f"Unsupported Actor-Free TD-LeWM variant {variant!r}."
+        )
     if (
         protocol.get("environment") != "cube"
         or protocol.get("stage") != "planner_evaluation"
@@ -106,31 +109,38 @@ def validate_actor_free_td_evaluation_protocol(
     if protocol.get("runtime", {}).get("stable_worldmodel_version") != "0.1.1":
         raise ValueError("Evaluation requires stable-worldmodel 0.1.1.")
 
-    successor = protocol.get("successor", {})
-    expected_objective_version = _objective_version_for_variant(str(variant))
-    if int(successor.get("objective_version", -1)) != expected_objective_version:
-        raise ValueError(
-            "Actor-Free TD-LeWM successor objective_version differs from its variant."
+    if variant == DIRECT_GOAL_VARIANT:
+        head = protocol.get("critic", {})
+        section = "critic"
+        expected_objective_version = DIRECT_GOAL_OBJECTIVE_VERSION
+        expected_semantics = DIRECT_CRITIC_SEMANTICS
+    else:
+        head = protocol.get("successor", {})
+        section = "successor"
+        expected_objective_version = (
+            GOAL_OBJECTIVE_VERSION if variant == GOAL_VARIANT else OBJECTIVE_VERSION
         )
-    for key, expected in CHECKPOINT_SEMANTICS.items():
-        if successor.get(key) != expected:
-            raise ValueError(f"successor.{key} must be {expected!r}.")
-    if (
-        min(
-            int(successor.get("history_size", 0)),
-            int(successor.get("hidden_dim", 0)),
-        )
-        <= 0
-    ):
-        raise ValueError("Successor history and hidden dimensions must be positive.")
-    if successor.get("feature_basis") != "augmented_latent_squared_distance":
-        raise ValueError("The successor feature basis differs from planning.")
-    if not 0.0 <= float(successor.get("gamma", -1.0)) < 1.0:
-        raise ValueError("successor.gamma must lie in [0, 1).")
-    if successor.get("td_bootstrap") is not True:
+        expected_semantics = CHECKPOINT_SEMANTICS
+    if int(head.get("objective_version", -1)) != expected_objective_version:
+        raise ValueError(f"{section}.objective_version differs from its variant.")
+    for key, expected in expected_semantics.items():
+        if head.get(key) != expected:
+            raise ValueError(f"{section}.{key} must be {expected!r}.")
+    if min(
+        int(head.get("history_size", 0)),
+        int(head.get("hidden_dim", 0)),
+    ) <= 0:
+        raise ValueError(f"{section} history and hidden dimensions must be positive.")
+    if not 0.0 <= float(head.get("gamma", -1.0)) < 1.0:
+        raise ValueError(f"{section}.gamma must lie in [0, 1).")
+    if head.get("td_bootstrap") is not True:
         raise ValueError("Actor-Free TD-LeWM must use TD bootstrapping.")
-    if successor.get("actor") != "none":
+    if head.get("actor") != "none":
         raise ValueError("Actor-Free TD-LeWM must not contain a learned actor.")
+    if variant != DIRECT_GOAL_VARIANT and head.get(
+        "feature_basis"
+    ) != "augmented_latent_squared_distance":
+        raise ValueError("The successor feature basis differs from planning.")
     if variant == GOAL_VARIANT:
         goal_semantics = {
             "goal_readout_training": True,
@@ -142,18 +152,19 @@ def validate_actor_free_td_evaluation_protocol(
             "goal_cost": "normalized_discounted_latent_mse",
         }
         for key, expected in goal_semantics.items():
-            if successor.get(key) != expected:
+            if head.get(key) != expected:
                 raise ValueError(f"successor.{key} must be {expected!r}.")
-    if variant == IMAGINARY_VARIANT:
-        imaginary_semantics = {
-            "immediate_feature_source": "real_ema_next_latent",
-            "bootstrap_state_source": ("ema_lewm_predicted_next_from_real_ema_history"),
-            "imaginary_horizon": 1,
-            "imaginary_predictor_gradient": "target_ema_stop_gradient",
+    elif variant == DIRECT_GOAL_VARIANT:
+        direct_semantics = {
+            "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+            "goal_offset_weighting": "uniform_per_transition",
+            "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
+            "td_branches": ["real_context", "predicted_context"],
+            "goal_cost": "normalized_discounted_latent_mse",
         }
-        for key, expected in imaginary_semantics.items():
-            if successor.get(key) != expected:
-                raise ValueError(f"successor.{key} must be {expected!r}.")
+        for key, expected in direct_semantics.items():
+            if head.get(key) != expected:
+                raise ValueError(f"critic.{key} must be {expected!r}.")
 
     planning = protocol.get("planning", {})
     missing = REQUIRED_PLANNING_KEYS - planning.keys()
@@ -175,18 +186,18 @@ def validate_actor_free_td_evaluation_protocol(
 
     evaluation = protocol.get("evaluation", {})
     if evaluation.get("episodes") != 50 or evaluation.get("goal_offset") != 50:
-        raise ValueError(
-            "The formal Actor-Free TD-LeWM protocol is Cube O50/50 episodes."
-        )
+        raise ValueError("The formal Actor-Free TD-LeWM protocol is Cube O50/50 episodes.")
     objective = protocol.get("inference_objective", {})
-    expected_goal_usage = (
-        "training_goal_readout_and_planning_linear_readout"
-        if variant == GOAL_VARIANT
-        else "planning_linear_readout_only"
-    )
+    expected_goal_usage = {
+        GOAL_VARIANT: "training_goal_readout_and_planning_linear_readout",
+        DIRECT_GOAL_VARIANT: "training_and_planning_direct_critic_input",
+    }.get(variant, "planning_linear_readout_only")
     if objective.get("goal_usage") != expected_goal_usage:
         raise ValueError("The configured goal-readout usage is inconsistent.")
-    if objective.get("goal_enters_successor_head") is not False:
+    if variant == DIRECT_GOAL_VARIANT:
+        if objective.get("goal_enters_critic_head") is not True:
+            raise ValueError("The direct critic must receive the goal latent.")
+    elif objective.get("goal_enters_successor_head") is not False:
         raise ValueError("The goal-free successor head cannot accept the goal.")
     if objective.get("learned_actor") is not False:
         raise ValueError("Actor-Free TD-LeWM cannot use a learned actor.")
@@ -216,70 +227,89 @@ def _validate_checkpoint(
     checks = {
         "method": METHOD,
         "variant": expected_variant,
-        "objective_version": _objective_version_for_variant(expected_variant),
+        "objective_version": {
+            GOAL_VARIANT: GOAL_OBJECTIVE_VERSION,
+            DIRECT_GOAL_VARIANT: DIRECT_GOAL_OBJECTIVE_VERSION,
+        }.get(expected_variant, OBJECTIVE_VERSION),
         "deployment_checkpoint_version": 1,
     }
     for key, expected in checks.items():
         if payload.get(key) != expected:
-            raise ValueError(f"Checkpoint {key} differs from the evaluation protocol.")
-    required_payload = {
-        "world_model_state_dict",
-        "successor_state_dict",
-        "world_model_config",
-        "successor_config",
-    }
+            raise ValueError(
+                f"Checkpoint {key} differs from the evaluation protocol."
+            )
+    required_payload = {"world_model_state_dict", "world_model_config"}
+    if expected_variant == DIRECT_GOAL_VARIANT:
+        required_payload.update({"critic_state_dict", "critic_config"})
+    else:
+        required_payload.update({"successor_state_dict", "successor_config"})
     missing = required_payload - payload.keys()
     if missing:
         raise ValueError(
             f"The joint deployment checkpoint is missing {sorted(missing)}."
         )
 
-    successor = protocol["successor"]
-    expected_config: dict[str, Any] = {
-        "embed_dim": protocol["model"]["embed_dim"],
-        "history_size": successor["history_size"],
-        "hidden_dim": successor["hidden_dim"],
-        "variant": expected_variant,
-        "gamma": successor["gamma"],
-        "feature_basis": successor["feature_basis"],
-        **CHECKPOINT_SEMANTICS,
-    }
+    if expected_variant == DIRECT_GOAL_VARIANT:
+        head = protocol["critic"]
+        expected_config: dict[str, Any] = {
+            "embed_dim": protocol["model"]["embed_dim"],
+            "history_size": head["history_size"],
+            "hidden_dim": head["hidden_dim"],
+            "variant": expected_variant,
+            "objective_version": DIRECT_GOAL_OBJECTIVE_VERSION,
+            "gamma": head["gamma"],
+            "goal_source": head["goal_source"],
+            "goal_offset_weighting": head["goal_offset_weighting"],
+            "goal_terminal_condition": head["goal_terminal_condition"],
+            "td_branches": head["td_branches"],
+            "goal_cost": head["goal_cost"],
+            "goal_enters_critic_head": True,
+            "predicted_context_detach": False,
+            "predicted_critic_td_weight": 1.0,
+            "real_critic_td_weight": 1.0,
+            **DIRECT_CRITIC_SEMANTICS,
+        }
+        checkpoint_label = "Critic"
+    else:
+        head = protocol["successor"]
+        expected_config = {
+            "embed_dim": protocol["model"]["embed_dim"],
+            "history_size": head["history_size"],
+            "hidden_dim": head["hidden_dim"],
+            "variant": expected_variant,
+            "gamma": head["gamma"],
+            "feature_basis": head["feature_basis"],
+            **CHECKPOINT_SEMANTICS,
+        }
+        checkpoint_label = "Successor"
     if expected_variant == GOAL_VARIANT:
         expected_config.update(
             {
                 "objective_version": GOAL_OBJECTIVE_VERSION,
                 "goal_readout_training": True,
-                "goal_source": successor["goal_source"],
-                "goal_offset_weighting": successor["goal_offset_weighting"],
-                "goal_terminal_condition": successor["goal_terminal_condition"],
-                "goal_readout_branches": successor["goal_readout_branches"],
-                "goal_readout_precision": successor["goal_readout_precision"],
-                "goal_cost": successor["goal_cost"],
+                "goal_source": head["goal_source"],
+                "goal_offset_weighting": head["goal_offset_weighting"],
+                "goal_terminal_condition": head["goal_terminal_condition"],
+                "goal_readout_branches": head["goal_readout_branches"],
+                "goal_readout_precision": head["goal_readout_precision"],
+                "goal_cost": head["goal_cost"],
                 "goal_enters_successor_head": False,
                 "predicted_goal_td_weight": 1.0,
                 "real_goal_td_weight": 1.0,
             }
         )
-    if expected_variant == IMAGINARY_VARIANT:
-        expected_config.update(
-            {
-                "objective_version": IMAGINARY_OBJECTIVE_VERSION,
-                "immediate_feature_source": successor["immediate_feature_source"],
-                "bootstrap_state_source": successor["bootstrap_state_source"],
-                "imaginary_horizon": successor["imaginary_horizon"],
-                "imaginary_predictor_gradient": successor[
-                    "imaginary_predictor_gradient"
-                ],
-            }
-        )
     for key, expected in expected_config.items():
         actual = successor_config.get(key)
         if key == "gamma":
-            matches = actual is not None and np.isclose(float(actual), float(expected))
+            matches = actual is not None and np.isclose(
+                float(actual), float(expected)
+            )
         else:
             matches = actual == expected
         if not matches:
-            raise ValueError(f"Successor checkpoint {key} differs from the protocol.")
+            raise ValueError(
+                f"{checkpoint_label} checkpoint {key} differs from the protocol."
+            )
 
 
 def configure_actor_free_td_evaluation_mode(
@@ -346,12 +376,12 @@ def evaluate_actor_free_td_lewm(
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"
     checkpoint_file = _resolve_joint_checkpoint(checkpoint_path)
-    world_model, successor, successor_config, payload = load_actor_free_td_checkpoint(
-        checkpoint_file, map_location=device
+    world_model, head, head_config, payload = (
+        load_actor_free_td_checkpoint(checkpoint_file, map_location=device)
     )
     _validate_checkpoint(
         payload=payload,
-        successor_config=successor_config,
+        successor_config=head_config,
         protocol=formal_protocol,
     )
 
@@ -370,8 +400,8 @@ def evaluate_actor_free_td_lewm(
     expected_action_dim = int(dataset.get_dim("action")) * int(
         protocol["planning"]["action_block"]
     )
-    if int(successor_config["action_dim"]) != expected_action_dim:
-        raise ValueError("The successor action-block dimension is incompatible.")
+    if int(head_config["action_dim"]) != expected_action_dim:
+        raise ValueError("The TD head action-block dimension is incompatible.")
 
     evaluation = protocol["evaluation"]
     planning = protocol["planning"]
@@ -394,14 +424,12 @@ def evaluate_actor_free_td_lewm(
 
     world_model = world_model.to(device).eval()
     world_model.requires_grad_(False)
-    successor = successor.to(device).eval()
-    successor.requires_grad_(False)
+    head = head.to(device).eval()
+    head.requires_grad_(False)
     world_parameter_count = sum(
         parameter.numel() for parameter in world_model.parameters()
     )
-    successor_parameter_count = sum(
-        parameter.numel() for parameter in successor.parameters()
-    )
+    head_parameter_count = sum(parameter.numel() for parameter in head.parameters())
 
     image = protocol["image_preprocessing"]
     image_transform = transforms.Compose(
@@ -412,15 +440,27 @@ def evaluate_actor_free_td_lewm(
             transforms.Resize(size=protocol["world"]["image_size"]),
         ]
     )
+    head_section = (
+        protocol["critic"]
+        if protocol["variant"] == DIRECT_GOAL_VARIANT
+        else protocol["successor"]
+    )
     policy = make_actor_free_td_policy(
         world_model=world_model,
-        successor=successor,
+        successor=head,
         planning=planning,
-        gamma=float(protocol["successor"]["gamma"]),
+        gamma=float(head_section["gamma"]),
         process={"action": action_processor},
         transform={"pixels": image_transform, "goal": image_transform},
         device=device,
-        clamp_tail_cost=bool(protocol["successor"].get("clamp_successor_cost", True)),
+        clamp_tail_cost=bool(
+            head_section.get(
+                "clamp_critic_cost"
+                if protocol["variant"] == DIRECT_GOAL_VARIANT
+                else "clamp_successor_cost",
+                True,
+            )
+        ),
     )
 
     runtime = {
@@ -450,7 +490,11 @@ def evaluate_actor_free_td_lewm(
             "method": payload["method"],
             "variant": payload["variant"],
             "objective_version": payload["objective_version"],
-            "successor_config": successor_config,
+            (
+                "critic_config"
+                if protocol["variant"] == DIRECT_GOAL_VARIANT
+                else "successor_config"
+            ): head_config,
         },
         "selection": selection,
         "normalization": {"action": action_stats},
@@ -505,7 +549,11 @@ def evaluate_actor_free_td_lewm(
         "metrics": metrics,
         "elapsed_seconds": time.time() - started,
         "world_model_parameter_count": world_parameter_count,
-        "successor_parameter_count": successor_parameter_count,
+        (
+            "critic_parameter_count"
+            if protocol["variant"] == DIRECT_GOAL_VARIANT
+            else "successor_parameter_count"
+        ): head_parameter_count,
         "method": METHOD,
         "variant": protocol["variant"],
         "smoke": smoke,
@@ -518,8 +566,6 @@ def evaluate_actor_free_td_lewm(
 
 __all__ = [
     "FORMAL_O50_PLANNING",
-    "IMAGINARY_OBJECTIVE_VERSION",
-    "IMAGINARY_VARIANT",
     "METHOD",
     "OBJECTIVE_VERSION",
     "SUPPORTED_VARIANTS",

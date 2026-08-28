@@ -9,6 +9,7 @@ implementation:
   version: 0.1.1
   base_model: swm.wm.lewm.LeWM
   successor_head: tdwm.methods.actor_free_td_lewm.ActorFreeSuccessorHead
+  direct_goal_critic_head: tdwm.methods.direct_goal_critic_lewm.DirectGoalCriticHead
   training: tdwm.training.actor_free_td_lewm.train_actor_free_td_lewm
 
 input:
@@ -43,6 +44,12 @@ variants:
     goal_readout_td_branches: [real_context, predicted_context]
     goal_enters_successor_head: false
     predicted_context_detach: false
+  direct_goal_hybrid:
+    critic_td_branches: [real_context, predicted_context]
+    critic_output: scalar_normalized_discounted_goal_cost
+    goal_enters_critic_head: true
+    successor_feature_factorization: false
+    predicted_context_detach: false
   imaginary_hybrid:
     td_branches: [real_context, predicted_context]
     immediate_feature_source: real_ema_next_latent
@@ -54,18 +61,20 @@ loss:
   retained_lewm: prediction_mse_plus_0.09_sigreg
   td: one_step_ema_successor_feature_bellman_mse
   goal_loss: goal_hybrid_hindsight_goal_bellman_mse
+  direct_critic_loss: direct_goal_hybrid_hindsight_goal_bellman_mse
   actor_loss: false
 
 inference:
   goal_query: linear_projection_of_successor_moments
+  direct_goal_hybrid_query: direct_goal_conditioned_scalar_critic
   action_selection: stable_worldmodel_cem_mpc
   learned_actor: false
 
 checkpoint:
   method: actor_free_td_lewm
-  objective_version: {base_variants: 1, goal_hybrid: 2, imaginary_hybrid: 3}
+  objective_version: {base_variants: 1, goal_hybrid: 2, imaginary_hybrid: 3, direct_goal_hybrid: 3}
   deployment_checkpoint_version: 1
   self_contained_world_and_successor: true
 
 provenance:
-  note: Goal Hybrid adds fixed-readout hindsight Goal-TD; Imaginary Hybrid changes only the one-step bootstrap history to an EMA LeWM-predicted next latent while retaining the real EMA immediate feature.
+  note: Goal Hybrid retains SF factorization; Imaginary Hybrid changes only the one-step bootstrap history to an EMA LeWM-predicted next latent while retaining the real EMA immediate feature; Direct Goal Hybrid instead learns C(H,a,z_goal) with the same hindsight targets, coupled Hybrid branches, LeWM budget, and actor-free CEM evaluation.

@@ -26,6 +26,10 @@ from tdwm.methods.actor_free_td_lewm import (
     ema_update,
     sample_actor_free_goal_offsets,
 )
+from tdwm.methods.direct_goal_critic_lewm import (
+    DirectGoalCriticHead,
+    direct_goal_critic_td_objective,
+)
 from tdwm.training.block_sampler import BlockShuffleBatchSampler
 from tdwm.training.cube_data import validate_cube_training_dataset
 from tdwm.training.gt_lewm_support import (
@@ -52,11 +56,12 @@ from tdwm.training.rf_successor_lewm import (
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
-IMAGINARY_OBJECTIVE_VERSION = 3
+DIRECT_GOAL_OBJECTIVE_VERSION = 3
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 FORMAL_OPTIMIZER_UPDATES = 127_960
 GOAL_VARIANT = "goal_hybrid"
-IMAGINARY_VARIANT = "imaginary_hybrid"
+DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
+HINDSIGHT_GOAL_VARIANTS = frozenset({GOAL_VARIANT, DIRECT_GOAL_VARIANT})
 
 
 def objective_version_for_variant(variant: str) -> int:
@@ -64,8 +69,8 @@ def objective_version_for_variant(variant: str) -> int:
 
     if variant == GOAL_VARIANT:
         return GOAL_OBJECTIVE_VERSION
-    if variant == IMAGINARY_VARIANT:
-        return IMAGINARY_OBJECTIVE_VERSION
+    if variant == DIRECT_GOAL_VARIANT:
+        return DIRECT_GOAL_OBJECTIVE_VERSION
     return OBJECTIVE_VERSION
 
 
@@ -105,46 +110,55 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
     if int(sequence.get("frame_skip", 0)) <= 0:
         raise ValueError("sequence.frame_skip must be positive.")
 
-    expected_weights = {
-        "parallel_real": (1.0, 0.0, False, 0.0, 0.0),
-        "serial_decoupled": (0.0, 1.0, True, 0.0, 0.0),
-        "serial_coupled": (0.0, 1.0, False, 0.0, 0.0),
-        "hybrid": (1.0, 1.0, False, 0.0, 0.0),
-        "goal_hybrid": (1.0, 1.0, False, 1.0, 1.0),
-        "imaginary_hybrid": (1.0, 1.0, False, 0.0, 0.0),
-    }[variant]
     objective = protocol.get("joint_objective", {})
-    expected_td_target = (
-        "real_ema_next_feature_plus_ema_successor_imagined_next_history_"
-        "dataset_next_action"
-        if variant == IMAGINARY_VARIANT
-        else "ema_next_latent_plus_ema_successor_dataset_next_action"
-    )
-    expected_objective = {
+    expected_objective: dict[str, Any] = {
         "local_prediction": "original_lewm_one_step_mse",
         "regularization": "original_lewm_sigreg",
-        "td_target": expected_td_target,
         "target_encoder": "ema_world_model",
         "bootstrap_action": "dataset_next_action",
         "terminal_mask": "next_action_nan_invalid",
-        "goal_conditioning": "none",
         "actor": "none",
         "reward": "none",
         "local_prediction_weight": 1.0,
-        "real_td_weight": expected_weights[0],
-        "predicted_td_weight": expected_weights[1],
-        "predicted_context_detach": expected_weights[2],
     }
+    if variant == DIRECT_GOAL_VARIANT:
+        expected_objective.update(
+            {
+                "td_target": "ema_next_goal_cost_plus_ema_critic_dataset_next_action",
+                "goal_conditioning": "direct_critic_input",
+                "predicted_context_detach": False,
+                "real_critic_td_weight": 1.0,
+                "predicted_critic_td_weight": 1.0,
+            }
+        )
+    else:
+        expected_weights = {
+            "parallel_real": (1.0, 0.0, False, 0.0, 0.0),
+            "serial_decoupled": (0.0, 1.0, True, 0.0, 0.0),
+            "serial_coupled": (0.0, 1.0, False, 0.0, 0.0),
+            "hybrid": (1.0, 1.0, False, 0.0, 0.0),
+            "goal_hybrid": (1.0, 1.0, False, 1.0, 1.0),
+        }[variant]
+        expected_objective.update(
+            {
+                "td_target": "ema_next_latent_plus_ema_successor_dataset_next_action",
+                "goal_conditioning": "none",
+                "real_td_weight": expected_weights[0],
+                "predicted_td_weight": expected_weights[1],
+                "predicted_context_detach": expected_weights[2],
+            }
+        )
     for key, expected in expected_objective.items():
         if objective.get(key) != expected:
             raise ValueError(f"joint_objective.{key} must be {expected!r}.")
 
-    for key, expected in {
-        "real_goal_td_weight": expected_weights[3],
-        "predicted_goal_td_weight": expected_weights[4],
-    }.items():
-        if float(objective.get(key, 0.0)) != expected:
-            raise ValueError(f"joint_objective.{key} must be {expected!r}.")
+    if variant != DIRECT_GOAL_VARIANT:
+        for key, expected in {
+            "real_goal_td_weight": expected_weights[3],
+            "predicted_goal_td_weight": expected_weights[4],
+        }.items():
+            if float(objective.get(key, 0.0)) != expected:
+                raise ValueError(f"joint_objective.{key} must be {expected!r}.")
     if variant == GOAL_VARIANT:
         goal_objective = {
             "goal_readout_td": "hindsight_future_ema_latent_bellman_cost",
@@ -159,76 +173,87 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
         for key, expected in goal_objective.items():
             if objective.get(key) != expected:
                 raise ValueError(f"joint_objective.{key} must be {expected!r}.")
-    if variant == IMAGINARY_VARIANT:
-        imaginary_objective = {
-            "imaginary_transition_model": "ema_lewm_predictor",
-            "imaginary_immediate_feature": "real_ema_next_latent",
-            "imaginary_bootstrap_history": (
-                "shift_real_ema_history_append_ema_predicted_next_latent"
-            ),
-            "imaginary_horizon": 1,
-            "imaginary_target_gradient": "stop_gradient",
+    if variant == DIRECT_GOAL_VARIANT:
+        direct_objective = {
+            "direct_goal_td": "hindsight_future_ema_latent_bellman_cost",
+            "goal_enters_critic_head": True,
+            "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+            "goal_validation": "exact_conditional_uniform_future_expectation",
+            "goal_terminal": "dataset_terminal_or_next_state_is_goal",
+            "goal_cost": "normalized_discounted_latent_mse",
+            "goal_sampling_seed_offset": 1,
         }
-        for key, expected in imaginary_objective.items():
+        for key, expected in direct_objective.items():
             if objective.get(key) != expected:
                 raise ValueError(f"joint_objective.{key} must be {expected!r}.")
 
-    successor = protocol.get("successor", {})
-    locked_successor = {
-        "objective_version": objective_version_for_variant(str(variant)),
-        "architecture": "actor_free_successor_head",
-        "feature_basis": "augmented_latent_squared_distance",
-        "action_conditioning": "dataset_current_action",
-        "bootstrap_action": "dataset_next_action",
-        "terminal_source": "next_action_nan_invalid",
-        "goal_conditioning": "none",
-        "actor": "none",
-        "reward": "none",
-    }
-    for key, expected in locked_successor.items():
-        if successor.get(key) != expected:
-            raise ValueError(f"successor.{key} must be {expected!r}.")
-    if variant == GOAL_VARIANT:
-        goal_successor = {
-            "goal_readout_training": True,
+        head = protocol.get("critic", {})
+        locked_head = {
+            "objective_version": DIRECT_GOAL_OBJECTIVE_VERSION,
+            "architecture": "direct_goal_critic_head",
+            "action_conditioning": "dataset_current_action",
+            "bootstrap_action": "dataset_next_action",
+            "terminal_source": "next_action_nan_invalid",
+            "goal_conditioning": "direct_latent_input",
             "goal_source": "uniform_reachable_future_ema_latent_same_clip",
             "goal_offset_weighting": "uniform_per_transition",
             "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
-            "goal_readout_branches": ["real_context", "predicted_context"],
-            "goal_readout_precision": "float32",
+            "td_branches": ["real_context", "predicted_context"],
+            "actor": "none",
+            "reward": "none",
         }
-        for key, expected in goal_successor.items():
-            if successor.get(key) != expected:
-                raise ValueError(f"successor.{key} must be {expected!r}.")
-    if variant == IMAGINARY_VARIANT:
-        imaginary_successor = {
-            "immediate_feature_source": "real_ema_next_latent",
-            "bootstrap_state_source": ("ema_lewm_predicted_next_from_real_ema_history"),
-            "imaginary_horizon": 1,
-            "imaginary_predictor_gradient": "target_ema_stop_gradient",
+        section = "critic"
+        target_head_decay_key = "target_critic_ema_decay"
+        clamp_key = "clamp_critic_cost"
+    else:
+        head = protocol.get("successor", {})
+        locked_head = {
+            "objective_version": objective_version_for_variant(str(variant)),
+            "architecture": "actor_free_successor_head",
+            "feature_basis": "augmented_latent_squared_distance",
+            "action_conditioning": "dataset_current_action",
+            "bootstrap_action": "dataset_next_action",
+            "terminal_source": "next_action_nan_invalid",
+            "goal_conditioning": "none",
+            "actor": "none",
+            "reward": "none",
         }
-        for key, expected in imaginary_successor.items():
-            if successor.get(key) != expected:
-                raise ValueError(f"successor.{key} must be {expected!r}.")
-    if int(successor.get("hidden_dim", 0)) <= 0:
-        raise ValueError("successor.hidden_dim must be positive.")
-    if not 0.0 <= float(successor.get("gamma", -1.0)) < 1.0:
-        raise ValueError("successor.gamma must lie in [0, 1).")
-    for key in ("target_world_ema_decay", "target_successor_ema_decay"):
-        if not 0.0 <= float(successor.get(key, -1.0)) < 1.0:
-            raise ValueError(f"successor.{key} must lie in [0, 1).")
-    if not 0.0 <= float(successor.get("loss_warmup_fraction", -1.0)) < 1.0:
-        raise ValueError("successor.loss_warmup_fraction must lie in [0, 1).")
-    if (
-        min(
-            float(successor.get("planning_weight", -1.0)),
-            float(successor.get("terminal_weight", -1.0)),
-        )
-        < 0.0
-    ):
-        raise ValueError("Successor planning weights cannot be negative.")
-    if successor.get("clamp_successor_cost") is not True:
-        raise ValueError("The first comparison clamps the successor planning cost.")
+        if variant == GOAL_VARIANT:
+            locked_head.update(
+                {
+                    "goal_readout_training": True,
+                    "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+                    "goal_offset_weighting": "uniform_per_transition",
+                    "goal_terminal_condition": (
+                        "dataset_terminal_or_next_state_is_goal"
+                    ),
+                    "goal_readout_branches": [
+                        "real_context",
+                        "predicted_context",
+                    ],
+                    "goal_readout_precision": "float32",
+                }
+            )
+        section = "successor"
+        target_head_decay_key = "target_successor_ema_decay"
+        clamp_key = "clamp_successor_cost"
+
+    for key, expected in locked_head.items():
+        if head.get(key) != expected:
+            raise ValueError(f"{section}.{key} must be {expected!r}.")
+    if int(head.get("hidden_dim", 0)) <= 0:
+        raise ValueError(f"{section}.hidden_dim must be positive.")
+    if not 0.0 <= float(head.get("gamma", -1.0)) < 1.0:
+        raise ValueError(f"{section}.gamma must lie in [0, 1).")
+    for key in ("target_world_ema_decay", target_head_decay_key):
+        if not 0.0 <= float(head.get(key, -1.0)) < 1.0:
+            raise ValueError(f"{section}.{key} must lie in [0, 1).")
+    if not 0.0 <= float(head.get("loss_warmup_fraction", -1.0)) < 1.0:
+        raise ValueError(f"{section}.loss_warmup_fraction must lie in [0, 1).")
+    if float(head.get("planning_weight", -1.0)) < 0.0:
+        raise ValueError(f"{section}.planning_weight cannot be negative.")
+    if head.get(clamp_key) is not True:
+        raise ValueError(f"{section}.{clamp_key} must be true.")
 
     loss = protocol.get("loss", {})
     sigreg = loss.get("sigreg", {})
@@ -280,10 +305,15 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
     if protocol.get("scheduler", {}).get("interval") != "optimizer_step":
         raise ValueError("The scheduler must step per optimizer update.")
     optimizer = protocol.get("optimizer", {})
+    head_learning_rate_key = (
+        "critic_learning_rate"
+        if variant == DIRECT_GOAL_VARIANT
+        else "successor_learning_rate"
+    )
     if (
         min(
             float(optimizer.get("world_model_learning_rate", 0.0)),
-            float(optimizer.get("successor_learning_rate", 0.0)),
+            float(optimizer.get(head_learning_rate_key, 0.0)),
         )
         <= 0.0
     ):
@@ -352,38 +382,6 @@ def build_actor_free_td_inputs(
     )
 
 
-def build_imaginary_ema_next_latents(
-    target_local_prediction: torch.Tensor,
-    *,
-    batch_size: int,
-    num_steps: int,
-    history_size: int,
-) -> torch.Tensor:
-    """Align EMA LeWM window predictions with TD next-state indices.
-
-    Window start zero predicts the first online TD state ``z_H``.  Imaginary TD
-    starts at that state, so its bootstrap next latents are predictions from
-    window starts ``1:``: ``z_(H+1)`` through ``z_(T-1)``.
-    """
-
-    local_count = int(num_steps) - int(history_size)
-    if target_local_prediction.ndim != 3 or local_count <= 1:
-        raise ValueError("EMA local predictions must contain all TD next states.")
-    expected_prefix = (local_count * int(batch_size), int(history_size))
-    if target_local_prediction.shape[:2] != expected_prefix:
-        raise ValueError(
-            "EMA local predictions must have start-major shape "
-            f"{expected_prefix + (target_local_prediction.shape[-1],)}."
-        )
-    embed_dim = target_local_prediction.shape[-1]
-    one_step = (
-        target_local_prediction[:, -1]
-        .reshape(local_count, int(batch_size), embed_dim)
-        .transpose(0, 1)
-    )
-    return one_step[:, 1:]
-
-
 @dataclass(frozen=True)
 class ActorFreeTrainingSchedule:
     total_scheduler_steps: int
@@ -419,14 +417,12 @@ def resolve_actor_free_training_schedule(
 
 
 def _encode_online_and_target(
-    online_model: Any,
-    target_model: Any,
-    encoder_input: dict[str, Any],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    online_model: Any, target_model: Any, encoder_input: dict[str, Any],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     online = online_model.encode(dict(encoder_input))
     with torch.no_grad():
         target = target_model.encode(dict(encoder_input))
-    return online["emb"], online["act_emb"], target["emb"], target["act_emb"]
+    return online["emb"], online["act_emb"], target["emb"]
 
 
 def _build_training_module(
@@ -447,27 +443,49 @@ def _build_training_module(
             self.model = world_model
             self.target_model = copy.deepcopy(world_model).requires_grad_(False)
             self.target_model.eval()
-            successor_cfg = protocol["successor"]
-            self.successor = ActorFreeSuccessorHead(
+            self.variant = str(protocol["variant"])
+            self.is_direct_goal_critic = self.variant == DIRECT_GOAL_VARIANT
+            head_cfg = (
+                protocol["critic"]
+                if self.is_direct_goal_critic
+                else protocol["successor"]
+            )
+            head_type = (
+                DirectGoalCriticHead
+                if self.is_direct_goal_critic
+                else ActorFreeSuccessorHead
+            )
+            head = head_type(
                 embed_dim=int(protocol["model"]["embed_dim"]),
                 action_dim=action_block_dim,
                 history_size=int(protocol["sequence"]["history_frames"]),
-                hidden_dim=int(successor_cfg["hidden_dim"]),
+                hidden_dim=int(head_cfg["hidden_dim"]),
             )
-            self.target_successor = self.successor.make_target()
-            self.target_successor.eval()
-            self.variant = str(protocol["variant"])
+            target_head = head.make_target()
+            target_head.eval()
+            if self.is_direct_goal_critic:
+                self.critic = head
+                self.target_critic = target_head
+            else:
+                self.successor = head
+                self.target_successor = target_head
             self.goal_generator = goal_generator
-            if self.variant == GOAL_VARIANT and self.goal_generator is None:
-                raise ValueError("goal_hybrid requires a dedicated goal generator.")
+            if self.variant in HINDSIGHT_GOAL_VARIANTS and self.goal_generator is None:
+                raise ValueError(
+                    f"{self.variant} requires a dedicated goal generator."
+                )
             self.history_size = int(protocol["sequence"]["history_frames"])
-            self.gamma = float(successor_cfg["gamma"])
-            self.target_world_ema_decay = float(successor_cfg["target_world_ema_decay"])
-            self.target_successor_ema_decay = float(
-                successor_cfg["target_successor_ema_decay"]
+            self.gamma = float(head_cfg["gamma"])
+            self.target_world_ema_decay = float(head_cfg["target_world_ema_decay"])
+            self.target_head_ema_decay = float(
+                head_cfg[
+                    "target_critic_ema_decay"
+                    if self.is_direct_goal_critic
+                    else "target_successor_ema_decay"
+                ]
             )
             self.auxiliary_warmup_steps = int(
-                float(successor_cfg["loss_warmup_fraction"]) * total_steps
+                float(head_cfg["loss_warmup_fraction"]) * total_steps
             )
             self.device_image_preprocessing = device_image_preprocessing
             if device_image_preprocessing:
@@ -488,22 +506,30 @@ def _build_training_module(
                 )
             sigreg = protocol["loss"]["sigreg"]
             self.sigreg = swm.wm.SIGReg(
-                knots=int(sigreg["knots"]),
-                num_proj=int(sigreg["num_projections"]),
+                knots=int(sigreg["knots"]), num_proj=int(sigreg["num_projections"]),
             )
 
         def train(self, mode: bool = True):
             super().train(mode)
             self.target_model.eval()
-            self.target_successor.eval()
+            self._target_head().eval()
             return self
+
+        def _online_head(self):
+            return self.critic if self.is_direct_goal_critic else self.successor
+
+        def _target_head(self):
+            return (
+                self.target_critic
+                if self.is_direct_goal_critic
+                else self.target_successor
+            )
 
         def _auxiliary_scale(self) -> float:
             if self.auxiliary_warmup_steps <= 0:
                 return 1.0
             return min(
-                1.0,
-                float(self.global_step + 1) / float(self.auxiliary_warmup_steps),
+                1.0, float(self.global_step + 1) / float(self.auxiliary_warmup_steps),
             )
 
         def _preprocess(self, pixels: torch.Tensor) -> torch.Tensor:
@@ -537,7 +563,6 @@ def _build_training_module(
                 embeddings,
                 action_embeddings,
                 target_embeddings,
-                target_action_embeddings,
             ) = _encode_online_and_target(self.model, self.target_model, encoder_input)
             expected_steps = int(protocol["sequence"]["num_steps"])
             if embeddings.shape[1] != expected_steps:
@@ -582,75 +607,127 @@ def _build_training_module(
                 local_prediction,
                 history_size=self.history_size,
             )
-            imagined_ema_next_latents = None
-            if self.variant == IMAGINARY_VARIANT:
-                target_local_histories = torch.cat(
-                    [
-                        target_embeddings[:, start : start + self.history_size]
-                        for start in range(local_count)
-                    ],
-                    dim=0,
-                )
-                target_local_actions = torch.cat(
-                    [
-                        target_action_embeddings[:, start : start + self.history_size]
-                        for start in range(local_count)
-                    ],
-                    dim=0,
-                )
-                with torch.no_grad():
-                    target_local_prediction = self.target_model.predict(
-                        target_local_histories, target_local_actions
-                    )
-                    imagined_ema_next_latents = build_imaginary_ema_next_latents(
-                        target_local_prediction,
-                        batch_size=batch_size,
-                        num_steps=expected_steps,
-                        history_size=self.history_size,
-                    )
             goal_offsets = None
-            if self.variant == GOAL_VARIANT and stage == "train":
+            if self.variant in HINDSIGHT_GOAL_VARIANTS and stage == "train":
                 assert self.goal_generator is not None
                 goal_offsets = sample_actor_free_goal_offsets(
                     td_inputs.terminals,
                     first_current_index=self.history_size,
                     generator=self.goal_generator,
                 )
-            td_output = actor_free_td_objective(
-                self.successor,
-                self.target_successor,
-                embeddings,
-                td_inputs.predicted_context,
-                target_embeddings,
-                td_inputs.actions,
-                gamma=self.gamma,
-                variant=self.variant,
-                terminals=td_inputs.terminals,
-                first_current_index=self.history_size,
-                goal_offsets=goal_offsets,
-                imagined_ema_next_latents=imagined_ema_next_latents,
-            )
-            real_td_loss = (
-                td_output.real_td_loss
-                if td_output.real_td_loss is not None
-                else prediction_loss.new_zeros(())
-            )
             objective = protocol["joint_objective"]
-            weighted_td = (
-                float(objective["predicted_td_weight"]) * td_output.predicted_td_loss
-                + float(objective["real_td_weight"]) * real_td_loss
-            )
-            real_goal_td_loss = (
-                td_output.real_goal_td_loss
-                if td_output.real_goal_td_loss is not None
-                else prediction_loss.new_zeros((), dtype=torch.float32)
-            )
-            weighted_goal_td = (
-                float(objective.get("predicted_goal_td_weight", 0.0))
-                * td_output.predicted_goal_td_loss
-                + float(objective.get("real_goal_td_weight", 0.0)) * real_goal_td_loss
-            )
-            weighted_auxiliary = weighted_td + weighted_goal_td
+            if self.is_direct_goal_critic:
+                critic_output = direct_goal_critic_td_objective(
+                    self.critic,
+                    self.target_critic,
+                    embeddings,
+                    td_inputs.predicted_context,
+                    target_embeddings,
+                    td_inputs.actions,
+                    gamma=self.gamma,
+                    terminals=td_inputs.terminals,
+                    first_current_index=self.history_size,
+                    goal_offsets=goal_offsets,
+                )
+                weighted_auxiliary = (
+                    float(objective["predicted_critic_td_weight"])
+                    * critic_output.predicted_td_loss
+                    + float(objective["real_critic_td_weight"])
+                    * critic_output.real_td_loss
+                )
+                auxiliary_metrics = {
+                    f"{stage}/critic_td_loss": weighted_auxiliary.detach(),
+                    f"{stage}/predicted_critic_td_loss": (
+                        critic_output.predicted_td_loss.detach()
+                    ),
+                    f"{stage}/real_critic_td_loss": (
+                        critic_output.real_td_loss.detach()
+                    ),
+                    f"{stage}/critic_prediction_mean": (
+                        critic_output.prediction_mean.detach()
+                    ),
+                    f"{stage}/critic_target_mean": critic_output.target_mean.detach(),
+                    f"{stage}/critic_terminal_fraction": (
+                        critic_output.terminal_fraction.detach()
+                    ),
+                    f"{stage}/critic_negative_prediction_fraction": (
+                        critic_output.negative_prediction_fraction.detach()
+                    ),
+                    f"{stage}/critic_pairs": critic_output.pair_count.detach().to(
+                        prediction_loss
+                    ),
+                }
+            else:
+                td_output = actor_free_td_objective(
+                    self.successor,
+                    self.target_successor,
+                    embeddings,
+                    td_inputs.predicted_context,
+                    target_embeddings,
+                    td_inputs.actions,
+                    gamma=self.gamma,
+                    variant=self.variant,
+                    terminals=td_inputs.terminals,
+                    first_current_index=self.history_size,
+                    goal_offsets=goal_offsets,
+                )
+                real_td_loss = (
+                    td_output.real_td_loss
+                    if td_output.real_td_loss is not None
+                    else prediction_loss.new_zeros(())
+                )
+                weighted_td = (
+                    float(objective["predicted_td_weight"])
+                    * td_output.predicted_td_loss
+                    + float(objective["real_td_weight"]) * real_td_loss
+                )
+                real_goal_td_loss = (
+                    td_output.real_goal_td_loss
+                    if td_output.real_goal_td_loss is not None
+                    else prediction_loss.new_zeros((), dtype=torch.float32)
+                )
+                weighted_goal_td = (
+                    float(objective.get("predicted_goal_td_weight", 0.0))
+                    * td_output.predicted_goal_td_loss
+                    + float(objective.get("real_goal_td_weight", 0.0))
+                    * real_goal_td_loss
+                )
+                weighted_auxiliary = weighted_td + weighted_goal_td
+                auxiliary_metrics = {
+                    f"{stage}/successor_td_loss": weighted_td.detach(),
+                    f"{stage}/predicted_td_loss": (
+                        td_output.predicted_td_loss.detach()
+                    ),
+                    f"{stage}/real_td_loss": real_td_loss.detach(),
+                    f"{stage}/goal_td_loss": weighted_goal_td.detach(),
+                    f"{stage}/predicted_goal_td_loss": (
+                        td_output.predicted_goal_td_loss.detach()
+                    ),
+                    f"{stage}/real_goal_td_loss": real_goal_td_loss.detach(),
+                    f"{stage}/goal_prediction_mean": (
+                        td_output.goal_prediction_mean.detach()
+                    ),
+                    f"{stage}/goal_target_mean": td_output.goal_target_mean.detach(),
+                    f"{stage}/goal_terminal_fraction": (
+                        td_output.goal_terminal_fraction.detach()
+                    ),
+                    f"{stage}/goal_negative_prediction_fraction": (
+                        td_output.goal_negative_prediction_fraction.detach()
+                    ),
+                    f"{stage}/goal_pairs": td_output.goal_pair_count.detach().to(
+                        prediction_loss
+                    ),
+                    f"{stage}/td_prediction_mean": (
+                        td_output.prediction_mean.detach()
+                    ),
+                    f"{stage}/td_target_mean": td_output.target_mean.detach(),
+                    f"{stage}/terminal_fraction": (
+                        td_output.terminal_fraction.detach()
+                    ),
+                    f"{stage}/td_pairs": prediction_loss.new_tensor(
+                        float(td_output.pair_count)
+                    ),
+                }
             auxiliary_scale = self._auxiliary_scale()
             loss = (
                 prediction_loss
@@ -662,31 +739,8 @@ def _build_training_module(
                 f"{stage}/prediction_loss": prediction_loss.detach(),
                 f"{stage}/sigreg_loss": sigreg_loss.detach(),
                 f"{stage}/td_loss": weighted_auxiliary.detach(),
-                f"{stage}/successor_td_loss": weighted_td.detach(),
-                f"{stage}/predicted_td_loss": td_output.predicted_td_loss.detach(),
-                f"{stage}/real_td_loss": real_td_loss.detach(),
-                f"{stage}/goal_td_loss": weighted_goal_td.detach(),
-                f"{stage}/predicted_goal_td_loss": (
-                    td_output.predicted_goal_td_loss.detach()
-                ),
-                f"{stage}/real_goal_td_loss": real_goal_td_loss.detach(),
-                f"{stage}/goal_prediction_mean": (
-                    td_output.goal_prediction_mean.detach()
-                ),
-                f"{stage}/goal_target_mean": td_output.goal_target_mean.detach(),
-                f"{stage}/goal_terminal_fraction": (
-                    td_output.goal_terminal_fraction.detach()
-                ),
-                f"{stage}/goal_negative_prediction_fraction": (
-                    td_output.goal_negative_prediction_fraction.detach()
-                ),
-                f"{stage}/goal_pairs": td_output.goal_pair_count.detach().to(loss),
-                f"{stage}/td_prediction_mean": td_output.prediction_mean.detach(),
-                f"{stage}/td_target_mean": td_output.target_mean.detach(),
-                f"{stage}/terminal_fraction": td_output.terminal_fraction.detach(),
-                f"{stage}/td_pairs": loss.new_tensor(float(td_output.pair_count)),
                 f"{stage}/td_weight_scale": loss.new_tensor(auxiliary_scale),
-                f"{stage}/imaginary_next_mse": (td_output.imaginary_next_mse.detach()),
+                **auxiliary_metrics,
             }
             if episode_ids is not None:
                 metrics[f"{stage}/unique_episodes_per_batch"] = loss.new_tensor(
@@ -694,7 +748,7 @@ def _build_training_module(
                 )
             if cache_bytes is not None:
                 metrics[f"{stage}/compressed_cache_gib"] = loss.new_tensor(
-                    float(cache_bytes) / 1024**3
+                    float(cache_bytes) / 1024 ** 3
                 )
             self.log_dict(
                 metrics,
@@ -717,14 +771,12 @@ def _build_training_module(
         def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
             del outputs, batch, batch_idx
             ema_update(
-                self.target_model,
-                self.model,
-                decay=self.target_world_ema_decay,
+                self.target_model, self.model, decay=self.target_world_ema_decay,
             )
             ema_update(
-                self.target_successor,
-                self.successor,
-                decay=self.target_successor_ema_decay,
+                self._target_head(),
+                self._online_head(),
+                decay=self.target_head_ema_decay,
             )
 
         def configure_optimizers(self):
@@ -736,15 +788,20 @@ def _build_training_module(
                         "lr": float(optimizer_cfg["world_model_learning_rate"]),
                     },
                     {
-                        "params": list(self.successor.parameters()),
-                        "lr": float(optimizer_cfg["successor_learning_rate"]),
+                        "params": list(self._online_head().parameters()),
+                        "lr": float(
+                            optimizer_cfg[
+                                "critic_learning_rate"
+                                if self.is_direct_goal_critic
+                                else "successor_learning_rate"
+                            ]
+                        ),
                     },
                 ],
                 weight_decay=float(optimizer_cfg["weight_decay"]),
             )
             warmup_steps = max(
-                1,
-                int(float(protocol["scheduler"]["warmup_fraction"]) * total_steps),
+                1, int(float(protocol["scheduler"]["warmup_fraction"]) * total_steps),
             )
 
             def learning_rate_scale(step: int) -> float:
@@ -828,18 +885,53 @@ def _successor_config(
                 "real_goal_td_weight": float(objective["real_goal_td_weight"]),
             }
         )
-    if variant == IMAGINARY_VARIANT:
-        config.update(
-            {
-                "immediate_feature_source": successor["immediate_feature_source"],
-                "bootstrap_state_source": successor["bootstrap_state_source"],
-                "imaginary_horizon": int(successor["imaginary_horizon"]),
-                "imaginary_predictor_gradient": successor[
-                    "imaginary_predictor_gradient"
-                ],
-            }
-        )
     return config
+
+
+def _critic_config(
+    protocol: dict[str, Any],
+    *,
+    action_block_dim: int,
+    base_export_run_name: str,
+    base_checkpoint_sha256: str,
+) -> dict[str, Any]:
+    critic = protocol["critic"]
+    objective = protocol["joint_objective"]
+    return {
+        "method": METHOD,
+        "variant": DIRECT_GOAL_VARIANT,
+        "objective_version": DIRECT_GOAL_OBJECTIVE_VERSION,
+        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+        "architecture": critic["architecture"],
+        "embed_dim": int(protocol["model"]["embed_dim"]),
+        "action_dim": int(action_block_dim),
+        "history_size": int(protocol["sequence"]["history_frames"]),
+        "hidden_dim": int(critic["hidden_dim"]),
+        "gamma": float(critic["gamma"]),
+        "action_conditioning": critic["action_conditioning"],
+        "bootstrap_action": critic["bootstrap_action"],
+        "terminal_source": critic["terminal_source"],
+        "goal_conditioning": critic["goal_conditioning"],
+        "goal_source": critic["goal_source"],
+        "goal_offset_weighting": critic["goal_offset_weighting"],
+        "goal_terminal_condition": critic["goal_terminal_condition"],
+        "td_branches": critic["td_branches"],
+        "goal_cost": objective["goal_cost"],
+        "goal_enters_critic_head": objective["goal_enters_critic_head"],
+        "predicted_context_detach": objective["predicted_context_detach"],
+        "predicted_critic_td_weight": float(
+            objective["predicted_critic_td_weight"]
+        ),
+        "real_critic_td_weight": float(objective["real_critic_td_weight"]),
+        "target_world_ema_decay": float(critic["target_world_ema_decay"]),
+        "target_critic_ema_decay": float(critic["target_critic_ema_decay"]),
+        "planning_weight": float(critic["planning_weight"]),
+        "clamp_critic_cost": bool(critic["clamp_critic_cost"]),
+        "actor": critic["actor"],
+        "reward": critic["reward"],
+        "base_export_run_name": base_export_run_name,
+        "base_checkpoint_sha256": base_checkpoint_sha256,
+    }
 
 
 def _deployment_payload(
@@ -855,7 +947,7 @@ def _deployment_payload(
 ) -> dict[str, Any]:
     """Build one self-contained and version-locked deployment checkpoint."""
 
-    return {
+    payload = {
         "method": METHOD,
         "variant": protocol["variant"],
         "objective_version": objective_version_for_variant(str(protocol["variant"])),
@@ -864,16 +956,35 @@ def _deployment_payload(
         "global_step": int(global_step),
         "world_model_state_dict": module.model.state_dict(),
         "target_world_model_state_dict": module.target_model.state_dict(),
-        "successor_state_dict": module.successor.state_dict(),
-        "target_successor_state_dict": module.target_successor.state_dict(),
         "world_model_config": model_config,
-        "successor_config": _successor_config(
-            protocol,
-            action_block_dim=action_block_dim,
-            base_export_run_name=base_export_run_name,
-            base_checkpoint_sha256=base_checkpoint_sha256,
-        ),
     }
+    if protocol["variant"] == DIRECT_GOAL_VARIANT:
+        payload.update(
+            {
+                "critic_state_dict": module.critic.state_dict(),
+                "target_critic_state_dict": module.target_critic.state_dict(),
+                "critic_config": _critic_config(
+                    protocol,
+                    action_block_dim=action_block_dim,
+                    base_export_run_name=base_export_run_name,
+                    base_checkpoint_sha256=base_checkpoint_sha256,
+                ),
+            }
+        )
+    else:
+        payload.update(
+            {
+                "successor_state_dict": module.successor.state_dict(),
+                "target_successor_state_dict": module.target_successor.state_dict(),
+                "successor_config": _successor_config(
+                    protocol,
+                    action_block_dim=action_block_dim,
+                    base_export_run_name=base_export_run_name,
+                    base_checkpoint_sha256=base_checkpoint_sha256,
+                ),
+            }
+        )
+    return payload
 
 
 def _build_export_callback(
@@ -1047,8 +1158,7 @@ def train_actor_free_td_lewm(
             decoded_frame_store_metadata,
         ) = _prepare_decoded_frame_store(protocol, dataset_source, dataset)
         dataset = StrideAwareLanceDataset(
-            dataset,
-            decoded_frame_store=decoded_frame_store,
+            dataset, decoded_frame_store=decoded_frame_store,
         )
     elif os.environ.get(DECODED_FRAME_STORE_ENV) is not None:
         raise ValueError(
@@ -1057,7 +1167,7 @@ def train_actor_free_td_lewm(
 
     generator = torch.Generator().manual_seed(seed)
     goal_generator = None
-    if protocol["variant"] == GOAL_VARIANT:
+    if protocol["variant"] in HINDSIGHT_GOAL_VARIANTS:
         goal_generator = torch.Generator().manual_seed(
             seed + int(protocol["joint_objective"]["goal_sampling_seed_offset"])
         )
@@ -1174,9 +1284,7 @@ def train_actor_free_td_lewm(
     if formal_epoch_steps > available_epoch_steps:
         raise ValueError("optimizer_steps_per_epoch exceeds available batches.")
     train_limit = resolve_train_batch_limit(
-        smoke=smoke,
-        max_steps=max_steps,
-        train_loader_length=available_epoch_steps,
+        smoke=smoke, max_steps=max_steps, train_loader_length=available_epoch_steps,
     )
     if not smoke and max_steps is None:
         train_limit = formal_epoch_steps
@@ -1227,10 +1335,13 @@ def train_actor_free_td_lewm(
         with manifest_path.open() as stream:
             previous = json.load(stream)
         previous_protocol = previous.get("protocol", {})
+        objective_section = (
+            "critic" if protocol["variant"] == DIRECT_GOAL_VARIANT else "successor"
+        )
         compatible = (
             previous_protocol.get("method") == METHOD
             and previous_protocol.get("variant") == protocol["variant"]
-            and previous_protocol.get("successor", {}).get("objective_version")
+            and previous_protocol.get(objective_section, {}).get("objective_version")
             == objective_version_for_variant(str(protocol["variant"]))
             and previous.get("deployment_checkpoint_version")
             == DEPLOYMENT_CHECKPOINT_VERSION
@@ -1272,8 +1383,12 @@ def train_actor_free_td_lewm(
             "model": {
                 "config": model_config,
                 "lewm_parameters": parameter_count,
-                "successor_parameters": sum(
-                    parameter.numel() for parameter in module.successor.parameters()
+                (
+                    "critic_parameters"
+                    if protocol["variant"] == DIRECT_GOAL_VARIANT
+                    else "successor_parameters"
+                ): sum(
+                    parameter.numel() for parameter in module._online_head().parameters()
                 ),
                 "action_block_dim": action_block_dim,
             },
@@ -1340,15 +1455,14 @@ __all__ = [
     "ActorFreeTDInputs",
     "ActorFreeTrainingSchedule",
     "DEPLOYMENT_CHECKPOINT_VERSION",
+    "DIRECT_GOAL_OBJECTIVE_VERSION",
+    "DIRECT_GOAL_VARIANT",
     "FORMAL_OPTIMIZER_UPDATES",
     "GOAL_OBJECTIVE_VERSION",
     "GOAL_VARIANT",
-    "IMAGINARY_OBJECTIVE_VERSION",
-    "IMAGINARY_VARIANT",
     "METHOD",
     "OBJECTIVE_VERSION",
     "build_actor_free_td_inputs",
-    "build_imaginary_ema_next_latents",
     "load_actor_free_td_training_protocol",
     "objective_version_for_variant",
     "resolve_actor_free_training_schedule",

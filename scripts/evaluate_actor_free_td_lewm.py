@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint-path",
         required=True,
-        help="Joint deployment checkpoint containing LeWM and successor weights.",
+        help="Joint deployment checkpoint containing LeWM and TD-head weights.",
     )
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--video", action="store_true")

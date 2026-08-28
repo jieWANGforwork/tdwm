@@ -27,7 +27,7 @@ ActorFreeTDVariant = Literal[
     "serial_coupled",
     "hybrid",
     "goal_hybrid",
-    "imaginary_hybrid",
+    "direct_goal_hybrid",
 ]
 SUPPORTED_VARIANTS = frozenset(
     {
@@ -36,9 +36,10 @@ SUPPORTED_VARIANTS = frozenset(
         "serial_coupled",
         "hybrid",
         "goal_hybrid",
-        "imaginary_hybrid",
+        "direct_goal_hybrid",
     }
 )
+DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
 
 
 class ActorFreeSuccessorHead(nn.Module):
@@ -136,7 +137,6 @@ class ActorFreeTDOutput:
     goal_terminal_fraction: torch.Tensor
     goal_negative_prediction_fraction: torch.Tensor
     goal_pair_count: torch.Tensor
-    imaginary_next_mse: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -448,7 +448,6 @@ def actor_free_td_objective(
     terminals: torch.Tensor | None = None,
     first_current_index: int | None = None,
     goal_offsets: torch.Tensor | None = None,
-    imagined_ema_next_latents: torch.Tensor | None = None,
 ) -> ActorFreeTDOutput:
     """Apply one-step TD to every aligned transition in a clip.
 
@@ -466,13 +465,15 @@ def actor_free_td_objective(
     readouts.  Passing ``goal_offsets`` samples one hindsight goal per aligned
     transition; omitting it computes the exact conditional-uniform expectation
     over every reachable future goal (used for deterministic validation).
-    ``imaginary_hybrid`` keeps the real EMA next latent as the immediate feature
-    but bootstraps the target successor from a history whose newest latent is
-    predicted by the EMA LeWM predictor.
     """
 
     if variant not in SUPPORTED_VARIANTS:
         raise ValueError(f"Unsupported actor-free TD variant: {variant!r}.")
+    if variant == DIRECT_GOAL_VARIANT:
+        raise ValueError(
+            "direct_goal_hybrid uses direct_goal_critic_td_objective, not the "
+            "successor-feature objective."
+        )
     if not 0.0 <= gamma < 1.0:
         raise ValueError("gamma must lie in [0, 1).")
     _validate_latent_inputs(
@@ -501,23 +502,6 @@ def actor_free_td_objective(
         )
     current_count = real_latents.shape[1] - first_current - 1
     history_shift = first_current - history_size + 1
-    if variant == "imaginary_hybrid":
-        expected_imagined = (
-            real_latents.shape[0],
-            current_count,
-            real_latents.shape[-1],
-        )
-        if imagined_ema_next_latents is None:
-            raise ValueError("imaginary_hybrid requires EMA-predicted next latents.")
-        if imagined_ema_next_latents.shape != expected_imagined:
-            raise ValueError(
-                "imagined_ema_next_latents must have shape "
-                f"{expected_imagined}, found {imagined_ema_next_latents.shape}."
-            )
-    elif imagined_ema_next_latents is not None:
-        raise ValueError(
-            "imagined_ema_next_latents are only valid for imaginary_hybrid."
-        )
 
     previous_actions = _previous_action_histories(
         actions,
@@ -528,28 +512,12 @@ def actor_free_td_objective(
     current_actions = actions[:, first_current:-1]
     with torch.no_grad():
         ema_latents = real_ema_latents.detach()
-        if variant == "imaginary_hybrid":
-            current_ema_history = _latent_histories(
-                ema_latents,
-                history_size=history_size,
-                current_count=current_count,
-                shift=history_shift,
-            )
-            assert imagined_ema_next_latents is not None
-            next_history = torch.cat(
-                (
-                    current_ema_history[..., 1:, :],
-                    imagined_ema_next_latents.detach().unsqueeze(-2),
-                ),
-                dim=-2,
-            )
-        else:
-            next_history = _latent_histories(
-                ema_latents,
-                history_size=history_size,
-                current_count=current_count,
-                shift=history_shift + 1,
-            )
+        next_history = _latent_histories(
+            ema_latents,
+            history_size=history_size,
+            current_count=current_count,
+            shift=history_shift + 1,
+        )
         next_previous_actions = _previous_action_histories(
             actions.detach(),
             history_size=history_size,
@@ -595,12 +563,7 @@ def actor_free_td_objective(
         predicted_td_loss = (predicted - target).square().mean()
         predictions.append(predicted.detach())
 
-    if variant in {
-        "parallel_real",
-        "hybrid",
-        "goal_hybrid",
-        "imaginary_hybrid",
-    }:
+    if variant in {"parallel_real", "hybrid", "goal_hybrid"}:
         real_history = _latent_histories(
             real_latents,
             history_size=history_size,
@@ -618,7 +581,7 @@ def actor_free_td_objective(
     if variant == "parallel_real":
         assert real_td_loss is not None
         td_loss = real_td_loss
-    elif variant in {"hybrid", "goal_hybrid", "imaginary_hybrid"}:
+    elif variant in {"hybrid", "goal_hybrid"}:
         assert real_td_loss is not None
         td_loss = predicted_td_loss + real_td_loss
     else:
@@ -633,16 +596,6 @@ def actor_free_td_objective(
     goal_terminal_fraction = zero
     goal_negative_prediction_fraction = zero
     goal_pair_count = zero
-    imaginary_next_mse = zero
-    if imagined_ema_next_latents is not None:
-        imaginary_next_mse = (
-            (
-                imagined_ema_next_latents.detach().float()
-                - ema_latents[:, first_current + 1 :].float()
-            )
-            .square()
-            .mean()
-        )
     if variant == "goal_hybrid":
         assert predicted is not None and real_prediction is not None
         offset_limits = actor_free_goal_future_offset_limits(
@@ -706,7 +659,6 @@ def actor_free_td_objective(
         goal_terminal_fraction=goal_terminal_fraction,
         goal_negative_prediction_fraction=goal_negative_prediction_fraction,
         goal_pair_count=goal_pair_count,
-        imaginary_next_mse=imaginary_next_mse,
     )
 
 
@@ -738,6 +690,7 @@ __all__ = [
     "ActorFreeSuccessorHead",
     "ActorFreeTDOutput",
     "ActorFreeTDVariant",
+    "DIRECT_GOAL_VARIANT",
     "SUPPORTED_VARIANTS",
     "actor_free_goal_future_offset_limits",
     "actor_free_successor_td_target",
