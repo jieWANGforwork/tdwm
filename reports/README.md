@@ -1,6 +1,6 @@
 # TDWM 实验结果总览
 
-最后更新：2026-08-27（Asia/Shanghai）
+最后更新：2026-08-29（Asia/Shanghai）
 
 本目录汇总当前仓库报告、趋动云下载结果和本地 3090 服务器下载结果。大型日志、数据、
 视频和 checkpoint 不进入 Git；本地轻量原始文件位于被 Git 忽略的
@@ -10,6 +10,18 @@
 例外是经确认长期保存的轻量 A/C/D 结果归档
 [`artifacts/aligned_acd_o50_seed3072/`](artifacts/aligned_acd_o50_seed3072/README.md)：
 它只含 start/goal 索引、成功布尔值、哈希和 provenance，不含数据、模型或原始日志。
+
+Actor-Free TD-LeWM 的 7 方法 × 3 score-mode 比较采用同样的轻量归档原则，但正式归档
+只允许由完整服务器 bundle 自动生成。收集入口为
+`scripts/archive_actor_free_td_lewm_o50.py`；它要求每个方法提供训练摘要、10-epoch
+train/validation 曲线，以及每种 score mode 的 `results.json`、`protocol_manifest.json`
+和 `episode_selection.json`。在 21 个正式 O50 全部通过一致性检查以前，不在本 README
+手工填写或排名尚未完成的数值。
+完整输入格式见
+[`docs/actor_free_td_lewm_result_bundle.md`](../docs/actor_free_td_lewm_result_bundle.md)。
+
+归档器会生成统一曲线 CSV 和可嵌入文档的 SVG。由于 7 个方法的辅助 loss 数量与定义
+不同，total loss 曲线只用于检查各方法自身的收敛情况，不能用曲线高低做跨方法排名。
 
 ## 结论边界
 
@@ -297,6 +309,11 @@ loss `0.16631`、prediction loss `0.03154`、SIGReg `1.34375`；当时验证约�
 | [`server_experiment_index.md`](server_experiment_index.md) | 趋动云日志和轻量 artifact 索引 |
 | [`server_3090_experiment_index.md`](server_3090_experiment_index.md) | 3090 日志、训练和评测 artifact 索引 |
 | [`world_model_research_review.md`](world_model_research_review.md) | 研究背景和方法边界，不是实验结果 |
+
+完整 7×3 bundle 到齐后，归档器还会生成
+`reports/actor_free_td_lewm_cube_seed3072.md` 与
+`reports/artifacts/actor_free_td_lewm_cube_seed3072/`。这两个路径在当前输入不完整时不会
+由脚本创建，以免把 fixture、旧 combined 单列或运行中快照误写成正式结果。
 
 ## 当前总体判断
 

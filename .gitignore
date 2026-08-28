@@ -16,6 +16,8 @@ artifacts/
 reports/artifacts/*
 !reports/artifacts/aligned_acd_o50_seed3072/
 !reports/artifacts/aligned_acd_o50_seed3072/**
+!reports/artifacts/actor_free_td_lewm_cube_seed3072/
+!reports/artifacts/actor_free_td_lewm_cube_seed3072/**
 videos/
 wandb/
 lightning_logs/

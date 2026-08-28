@@ -1,6 +1,42 @@
 # 服务器实验产物索引
 
-首次记录：2026-08-26；最后更新：2026-08-27（Asia/Shanghai）
+首次记录：2026-08-26；最后更新：2026-08-29（Asia/Shanghai）
+
+## AutoDL：Actor-Free TD-LeWM 7×3 结果包收集协议
+
+Actor-Free TD-LeWM 当前比较范围固定为 7 个方法：`serial_decoupled`、
+`serial_coupled`、`hybrid`、`parallel_real`、`goal_hybrid`、`imaginary_hybrid` 和
+`direct_goal_hybrid`。前 6 个 Successor 方法各收集 `f_only/g_only/f_plus_g`；Direct
+Goal Critic 收集 `f_only/c_only/f_plus_c`，合计 21 个正式 O50。
+
+服务器导出目录需使用以下轻量结构：
+
+```text
+<bundle>/<variant>/training_summary.json
+<bundle>/<variant>/training_curve.csv
+<bundle>/<variant>/<score_mode>/results.json
+<bundle>/<variant>/<score_mode>/protocol_manifest.json
+<bundle>/<variant>/<score_mode>/episode_selection.json
+```
+
+`training_curve.csv` 必须含完整 epochs 1--10 的 `train_loss` 与 `validation_loss`。正式
+归档前运行：
+
+```bash
+python scripts/archive_actor_free_td_lewm_o50.py --bundle <bundle> --validate-only
+python scripts/archive_actor_free_td_lewm_o50.py --bundle <bundle>
+python scripts/archive_actor_free_td_lewm_o50.py --bundle <bundle> --check
+```
+
+硬性验收包括：7×3 文件齐全；全部为 O50 且非 smoke/pilot；21 个运行使用完全相同的
+selection；每方法 3 种 mode 使用同一 checkpoint，且与训练摘要 SHA-256 相同；逐 episode
+success 与汇总 rate 一致；10-epoch 曲线的最终值和 best validation 与训练摘要一致。旧版
+evaluator 没有显式 score-mode 字段时，只允许其 combined 结果进入 `f_plus_g/f_plus_c`，
+不能把它解释为 F-only 或 G/C-only。
+
+完整结果尚未导入仓库时，本索引只记录收集协议，不手工复制运行中 loss、fixture 或不完整
+排名。最终轻量归档将位于 `reports/artifacts/actor_free_td_lewm_cube_seed3072/`；checkpoint、
+数据、视频和原始日志继续只保存在外部服务器 artifact 目录。
 
 ## AutoDL 云端 RTX 4080：Aligned A/C/D 补充评测
 
