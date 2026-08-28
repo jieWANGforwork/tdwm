@@ -79,7 +79,7 @@ def _head_count(variant_index: int) -> int:
     return 2_000 + variant_index
 
 
-def _training_dataset() -> dict:
+def _training_dataset(variant: str) -> dict:
     return {
         "path": "/srv/datasets/cube_single_expert.lance",
         "format": "lance",
@@ -94,9 +94,11 @@ def _training_dataset() -> dict:
         },
         "sequence_samples": 1_279_600,
         "split": {
-            "train_size": 1_151_640,
-            "validation_size": 127_960,
-            "seed": 3072,
+            "path": f"/srv/runs/actor-free/{variant}/split_indices.npz",
+            "train_samples": 1_151_640,
+            "validation_samples": 127_960,
+            "train_indices_sha256": _sha("shared-train-indices"),
+            "validation_indices_sha256": _sha("shared-validation-indices"),
         },
     }
 
@@ -185,7 +187,7 @@ def _make_training(variant_root: Path, variant: str, variant_index: int) -> None
                 f"/srv/repo/configs/experiment/actor_free_td_lewm_{variant}_cube_train.yaml"
             ),
             "seed": 3072,
-            "dataset": _training_dataset(),
+            "dataset": _training_dataset(variant),
             "model": {
                 "config": {"_target_": "stable_worldmodel.LeWM"},
                 "lewm_parameters": WORLD_PARAMETERS,
@@ -527,6 +529,30 @@ def test_non_combined_mode_cannot_use_old_implicit_metadata(tmp_path):
         validate_bundle(bundle)
 
 
+@pytest.mark.parametrize(
+    ("variant", "mode"),
+    (
+        ("hybrid", "f_only"),
+        ("hybrid", "g_only"),
+        ("direct_goal_hybrid", "c_only"),
+    ),
+)
+def test_formal_protocol_mode_must_remain_missing_or_combined(
+    tmp_path, variant, mode
+):
+    bundle = _make_bundle(tmp_path / "bundle")
+    path = bundle / variant / mode / "protocol_manifest.json"
+    manifest = _read_json(path)
+    manifest["formal_protocol"]["inference_objective"]["score_mode"] = mode
+    _write_json(path, manifest)
+
+    with pytest.raises(
+        BundleValidationError,
+        match="formal_protocol.*score_mode must be missing.*combined",
+    ):
+        validate_bundle(bundle)
+
+
 def test_same_selection_content_with_noncanonical_bytes_is_rejected(tmp_path):
     bundle = _make_bundle(tmp_path / "bundle")
     path = bundle / "hybrid/g_only/episode_selection.json"
@@ -636,7 +662,6 @@ def test_21_run_manifest_fingerprints_reject_drift(tmp_path, kind, message):
 @pytest.mark.parametrize(
     ("kind", "message"),
     (
-        ("protocol", "training common protocol fingerprint"),
         ("runtime", "training critical runtime fingerprint"),
         ("dataset", "training dataset source/provenance fingerprint"),
     ),
@@ -645,19 +670,90 @@ def test_seven_training_run_fingerprints_reject_drift(tmp_path, kind, message):
     bundle = _make_bundle(tmp_path / "bundle")
     path = bundle / "hybrid/training_manifest.json"
     manifest = _read_json(path)
-    if kind == "protocol":
-        manifest["protocol"]["loader"]["batch_size"] = 16
-    elif kind == "runtime":
+    if kind == "runtime":
         manifest["runtime"]["torch"] = "2.6.0"
     else:
-        manifest["dataset"]["path"] = "/srv/datasets/a-different-copy.lance"
+        manifest["dataset"]["split"]["train_indices_sha256"] = _sha(
+            "different-train-indices"
+        )
     _write_json(path, manifest)
 
     with pytest.raises(BundleValidationError, match=message):
         validate_bundle(bundle)
 
 
-def test_world_parameter_count_is_global_not_only_per_method(tmp_path):
+def test_training_dataset_fingerprint_excludes_run_specific_absolute_paths(tmp_path):
+    bundle = _make_bundle(tmp_path / "bundle")
+    path = bundle / "hybrid/training_manifest.json"
+    manifest = _read_json(path)
+    manifest["dataset"]["split"]["path"] = (
+        "/a/different/server/root/hybrid/split_indices.npz"
+    )
+    manifest["dataset"]["path"] = "/a/different/server/root/cube.lance"
+    manifest["dataset"]["conversion_manifest_path"] = (
+        "/a/different/server/root/cube.lance.manifest.json"
+    )
+    _write_json(path, manifest)
+
+    validate_bundle(bundle)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("sample_count", "must equal sequence_samples"),
+        ("index_hash", "lowercase 64-character SHA-256"),
+    ),
+)
+def test_training_split_uses_real_save_split_schema(tmp_path, mutation, message):
+    bundle = _make_bundle(tmp_path / "bundle")
+    path = bundle / "hybrid/training_manifest.json"
+    manifest = _read_json(path)
+    split = manifest["dataset"]["split"]
+    if mutation == "sample_count":
+        split["validation_samples"] -= 1
+    else:
+        split["validation_indices_sha256"] = "not-a-hash"
+    _write_json(path, manifest)
+
+    with pytest.raises(BundleValidationError, match=message):
+        validate_bundle(bundle)
+
+
+@pytest.mark.parametrize(
+    ("variant", "section", "key", "value"),
+    (
+        ("serial_decoupled", "joint_objective", "predicted_context_detach", False),
+        ("hybrid", "joint_objective", "real_td_weight", 0.0),
+        ("hybrid", "joint_objective", "predicted_td_weight", 0.0),
+        ("goal_hybrid", "successor", "goal_readout_training", False),
+        ("goal_hybrid", "joint_objective", "predicted_goal_td_weight", 0.0),
+        (
+            "imaginary_hybrid",
+            "successor",
+            "bootstrap_state_source",
+            "real_next_latent",
+        ),
+        ("direct_goal_hybrid", "joint_objective", "goal_enters_critic_head", False),
+        ("direct_goal_hybrid", "critic", "target_critic_ema_decay", 0.9),
+        ("serial_coupled", "successor", "gamma", 0.9),
+        ("parallel_real", "successor", "target_world_ema_decay", 0.9),
+    ),
+)
+def test_each_training_variant_is_locked_to_its_complete_yaml_semantics(
+    tmp_path, variant, section, key, value
+):
+    bundle = _make_bundle(tmp_path / "bundle")
+    path = bundle / variant / "training_manifest.json"
+    manifest = _read_json(path)
+    manifest["protocol"][section][key] = value
+    _write_json(path, manifest)
+
+    with pytest.raises(BundleValidationError, match="complete locked training YAML"):
+        validate_bundle(bundle)
+
+
+def test_world_parameter_count_cannot_drift_from_locked_training_model(tmp_path):
     bundle = _make_bundle(tmp_path / "bundle")
     variant = "hybrid"
     for mode in modes_for_variant(variant):
@@ -665,13 +761,7 @@ def test_world_parameter_count_is_global_not_only_per_method(tmp_path):
         result = _read_json(path)
         result["world_model_parameter_count"] += 1
         _write_json(path, result)
-    manifest_path = bundle / variant / "training_manifest.json"
-    manifest = _read_json(manifest_path)
-    manifest["model"]["lewm_parameters"] += 1
-    manifest["protocol"]["model"]["parameters"] += 1
-    _write_json(manifest_path, manifest)
-
-    with pytest.raises(BundleValidationError, match="identical across all 21"):
+    with pytest.raises(BundleValidationError, match="differs from training"):
         validate_bundle(bundle)
 
 

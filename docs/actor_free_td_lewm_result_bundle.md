@@ -45,6 +45,17 @@
 - validation 未跳过；
 - deployment checkpoint version 1。
 
+每个 variant 的 `training_manifest.protocol` 还必须与仓库中对应的锁定训练 YAML 完整
+canonical hash 一致。因此检查不只覆盖共享字段，也覆盖 variant 专属语义：Serial 是否
+detach、Hybrid real/predicted TD 权重、Goal readout 与 goal loss、Imaginary bootstrap、
+Direct critic/joint objective，以及 head gamma、EMA 和 warm-up 等。专属字段只与该
+variant 的 YAML 比较，不会错误地跨 variant 求同。
+
+训练 dataset 的 `split` 必须使用训练器 `save_split` 的真实结构：`train_samples`、
+`validation_samples`、`train_indices_sha256`、`validation_indices_sha256` 和 `path`。
+前两个样本数之和必须等于 `sequence_samples`；四个语义字段必须在七个训练运行中一致。
+`path` 是 run-specific 绝对路径，只检查其存在，不进入跨运行指纹。
+
 `metrics.csv` 使用 Lightning 原始稀疏 CSV。归档器从每个 zero-based epoch `0..9` 的
 `train/loss_epoch` 与 `validation/loss` 各提取唯一一个 aggregate；二者必须落在该 epoch
 最后的 zero-based step（12,795、25,591、…、127,959）。归档器自动生成面向报告的
@@ -74,7 +85,9 @@ epoch 1--10 曲线、epoch-10 指标和最低 validation 指标。列缺失、�
   `episode < 10000`、`0 <= start < goal < 201` 和 `goal-start=50`。
 
 旧版 evaluator 没有 `score_mode` 字段时，只允许原始 combined 结果放入 `f_plus_g` 或
-`f_plus_c`；其余模式必须带显式字段。
+`f_plus_c`；其余模式必须带显式字段。`formal_protocol.inference_objective.score_mode` 只能
+缺失（旧 evaluator）或保留 variant 的 combined mode，不能被改成 `f_only`、`g_only`
+或 `c_only`；实际运行 mode 只出现在 configured protocol 和结果元数据中。
 
 ## 运行
 

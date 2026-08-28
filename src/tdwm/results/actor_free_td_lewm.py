@@ -162,6 +162,15 @@ OBJECTIVE_VERSIONS = {
     "imaginary_hybrid": 3,
     "direct_goal_hybrid": 3,
 }
+TRAINING_PROTOCOL_SHA256 = {
+    "serial_decoupled": "6eaaf266bc6e303f5b72b1858925fb761d516673d7a8235d33b109fb206dcdc2",
+    "serial_coupled": "e272feeb5081253d732dd761593a80750582dbaabdc6b0bff4d56d2b10497d6b",
+    "hybrid": "bd0b207e27126d5534f137016a69a8402521522df60826b9bd442395484a13a9",
+    "parallel_real": "f3d3ca31e1f1b6405f02f63e0b11025d273cc567ff908599347b4be79c0e4fec",
+    "goal_hybrid": "fdbf618cb45e8b856f1914df752e3aa44c741b579ec88191b8f92d3785a491be",
+    "imaginary_hybrid": "6e43c9f75351537bc5bec32c5f88ec47f295d9f2d943c8c9294d79423bfc7340",
+    "direct_goal_hybrid": "f9e2ee091aee487bcef521390f5032d586b7e1ffa98033412fdca30f7293a471",
+}
 
 DISPLAY_NAMES = {
     "serial_decoupled": "Serial Decoupled",
@@ -270,6 +279,7 @@ class TrainingRun:
     world_model_parameter_count: int
     head_parameter_count: int
     common_protocol_sha256: str
+    locked_protocol_sha256: str
     runtime_fingerprint_sha256: str
     dataset_source_fingerprint_sha256: str
     curve: tuple[Mapping[str, float | int], ...]
@@ -666,6 +676,52 @@ def _validate_dataset_provenance(
             raise _error(context, "conversion provenance requires StableWM 0.1.1")
 
 
+def _validate_split_manifest(
+    dataset: Mapping[str, Any], *, context: str
+) -> dict[str, int | str]:
+    split = _require_mapping(dataset.get("split"), context=f"{context}.split")
+    _path_string(split.get("path"), context=f"{context}.split.path")
+    train_samples = _positive_int(
+        split.get("train_samples"), context=f"{context}.split.train_samples"
+    )
+    validation_samples = _positive_int(
+        split.get("validation_samples"),
+        context=f"{context}.split.validation_samples",
+    )
+    sequence_samples = _positive_int(
+        dataset.get("sequence_samples"), context=f"{context}.sequence_samples"
+    )
+    if train_samples + validation_samples != sequence_samples:
+        raise _error(
+            context,
+            "split train_samples + validation_samples must equal sequence_samples",
+        )
+    return {
+        "train_samples": train_samples,
+        "validation_samples": validation_samples,
+        "train_indices_sha256": _require_sha256(
+            split.get("train_indices_sha256"),
+            context=f"{context}.split.train_indices_sha256",
+        ),
+        "validation_indices_sha256": _require_sha256(
+            split.get("validation_indices_sha256"),
+            context=f"{context}.split.validation_indices_sha256",
+        ),
+    }
+
+
+def _without_absolute_paths(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_absolute_paths(item)
+            for key, item in value.items()
+            if key != "path" and not key.endswith("_path")
+        }
+    if isinstance(value, list):
+        return [_without_absolute_paths(item) for item in value]
+    return deepcopy(value)
+
+
 def _path_string(value: Any, *, context: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise _error(context, "must be a non-empty path string")
@@ -741,6 +797,13 @@ def _validate_training_artifacts(variant_root: Path, variant: str) -> TrainingRu
     }.items():
         if protocol.get(key) != expected:
             raise _error(context, f"training protocol {key} must equal {expected!r}")
+    locked_protocol_sha = _fingerprint(protocol)
+    if locked_protocol_sha != TRAINING_PROTOCOL_SHA256[variant]:
+        raise _error(
+            context,
+            "training_manifest.protocol differs from the complete locked training YAML "
+            f"for {variant}",
+        )
     protocol_runtime = _require_mapping(
         protocol.get("runtime"), context=f"{context}.protocol.runtime"
     )
@@ -798,6 +861,9 @@ def _validate_training_artifacts(variant_root: Path, variant: str) -> TrainingRu
         context=f"{context}.manifest.dataset",
         require_embedded_conversion=dataset.get("format") == "lance",
     )
+    split_fingerprint = _validate_split_manifest(
+        dataset, context=f"{context}.manifest.dataset"
+    )
     model = _require_mapping(manifest.get("model"), context=f"{context}.manifest.model")
     world_parameters = _positive_int(
         model.get("lewm_parameters"), context=f"{context}.model.lewm_parameters"
@@ -846,14 +912,12 @@ def _validate_training_artifacts(variant_root: Path, variant: str) -> TrainingRu
         )
     }
     dataset_source = {
-        key: deepcopy(dataset.get(key))
-        for key in (
-            "path",
-            "format",
-            "size_bytes",
-            "conversion_manifest_path",
-            "conversion_manifest",
-        )
+        "format": dataset.get("format"),
+        "size_bytes": dataset.get("size_bytes"),
+        "conversion_manifest": _without_absolute_paths(
+            dataset.get("conversion_manifest")
+        ),
+        "split": split_fingerprint,
     }
     return TrainingRun(
         variant=variant,
@@ -869,6 +933,7 @@ def _validate_training_artifacts(variant_root: Path, variant: str) -> TrainingRu
         world_model_parameter_count=world_parameters,
         head_parameter_count=head_parameters,
         common_protocol_sha256=_fingerprint(common_protocol),
+        locked_protocol_sha256=locked_protocol_sha,
         runtime_fingerprint_sha256=_fingerprint(training_runtime_fingerprint),
         dataset_source_fingerprint_sha256=_fingerprint(dataset_source),
         curve=curve,
@@ -1190,6 +1255,16 @@ def _validate_evaluation_run(
     _validate_protocol(protocol, variant=variant, context=context)
     _validate_protocol(formal_protocol, variant=variant, context=f"{context}.formal")
     combined_mode = combined_mode_for_variant(variant)
+    formal_score_mode = _require_mapping(
+        formal_protocol.get("inference_objective"),
+        context=f"{context}.formal_protocol.inference_objective",
+    ).get("score_mode")
+    if formal_score_mode is not None and formal_score_mode != combined_mode:
+        raise _error(
+            context,
+            "formal_protocol.inference_objective.score_mode must be missing for a "
+            f"legacy run or equal combined mode {combined_mode!r}",
+        )
     score_source = _validate_score_metadata(
         result=result,
         manifest=manifest,
@@ -1546,6 +1621,7 @@ def build_summary(study: ValidatedStudy) -> dict[str, Any]:
                     else "successor_parameter_count"
                 ): training.head_parameter_count,
                 "common_protocol_sha256": training.common_protocol_sha256,
+                "locked_protocol_sha256": training.locked_protocol_sha256,
                 "runtime_fingerprint_sha256": training.runtime_fingerprint_sha256,
                 "dataset_source_fingerprint_sha256": (
                     training.dataset_source_fingerprint_sha256
@@ -1616,8 +1692,10 @@ def build_summary(study: ValidatedStudy) -> dict[str, Any]:
             "shared_action_normalization_fingerprint": True,
             "shared_world_model_parameter_count": True,
             "shared_training_common_protocol_fingerprint": True,
+            "complete_locked_training_protocol_per_variant": True,
             "shared_training_critical_runtime_fingerprint": True,
             "shared_training_dataset_provenance_fingerprint": True,
+            "shared_training_split_samples_and_index_hashes": True,
             "training_metrics_derived_from_raw_lightning_csv": True,
             "success_rates_match_episode_outcomes": True,
         },
@@ -1916,6 +1994,7 @@ def build_report_markdown(study: ValidatedStudy) -> bytes:
             "## 审计结论与边界",
             "",
             f"- 21 个运行的 selection 文件 SHA-256：`{study.selection_sha256}`。",
+            "- 七个训练 manifest 的完整 protocol 分别与对应锁定 YAML 的 canonical hash 一致；split 样本数和索引哈希一致，run-specific 绝对路径不参与指纹。",
             "- 每个方法的三种 score mode 使用完全相同的 checkpoint；其路径严格对应训练器的 epoch-10 export。",
             "- 21 个运行共享完整正式协议、关键 runtime、数据格式/大小/转换来源、action normalization 与 world 参数量指纹。",
             "- 所有运行均为 50 episodes、goal offset 50、planning seed 42、完整 CEM 预算，",
@@ -1977,6 +2056,7 @@ def build_artifact_readme(study: ValidatedStudy) -> bytes:
         "`f_only/c_only/f_plus_c`。旧 evaluator 只有 combined 没有显式 `score_mode` 字段，",
         "归档器只允许它进入 combined 单元，并在 summary 中标记",
         "`legacy_combined_default`；非 combined 单元必须显式记录 mode。",
+        "Formal protocol 的 mode 只能缺失或保留 combined；F/G/C-only 只允许出现在 configured protocol。",
         "",
         "## 重建与验证",
         "",
@@ -2083,6 +2163,7 @@ __all__ = [
     "BundleValidationError",
     "DIRECT_MODES",
     "SELECTION_SHA256",
+    "TRAINING_PROTOCOL_SHA256",
     "SUCCESSOR_MODES",
     "VARIANT_ORDER",
     "ValidatedStudy",

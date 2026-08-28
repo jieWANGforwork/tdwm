@@ -19,6 +19,8 @@ Actor-Free TD-LeWM 的 7 方法 × 3 score-mode 比较采用同样的轻量归�
 `training_result.json`、`training_manifest.json` 与 Lightning `metrics.csv`，自行计算哈希、
 10-epoch aggregate 和最终/最佳 validation。在 21 个正式 O50 全部通过一致性检查以前，
 不在本 README 手工填写或排名尚未完成的数值。
+七个训练 manifest 的完整 protocol 必须分别匹配对应的锁定 YAML；训练 split 的
+train/validation 样本数及两个索引 SHA-256 必须一致，run-specific 绝对路径不进入指纹。
 完整输入格式见
 [`docs/actor_free_td_lewm_result_bundle.md`](../docs/actor_free_td_lewm_result_bundle.md)。
 

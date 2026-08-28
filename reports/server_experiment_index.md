@@ -36,8 +36,11 @@ python scripts/archive_actor_free_td_lewm_o50.py --bundle <bundle> --check
 `metrics.episode_successes` 与汇总 rate 一致；10 个 epoch aggregate、最终 step 与
 trainer 的 127,960 global steps 一致。21 个运行还必须共享完整正式 runtime/image/dataset/
 model/world/evaluation/planning、关键软件版本、数据 format/size/conversion provenance、
-action normalization 和 world 参数量指纹。旧版 evaluator 没有显式 score-mode 字段时，
-只允许其 combined 结果进入 `f_plus_g/f_plus_c`，不能把它解释为 F-only 或 G/C-only。
+action normalization 和 world 参数量指纹。每个训练 protocol 必须完整匹配其 variant 的
+锁定 YAML；七个 split 的 train/validation 样本数与索引 SHA-256 必须相同，绝对 path
+不进入指纹。旧版 evaluator 没有显式 score-mode 字段时，只允许其 combined 结果进入
+`f_plus_g/f_plus_c`；formal protocol 的 mode 也只能缺失或为 combined，不能把它解释为
+F-only 或 G/C-only。
 
 完整结果尚未导入仓库时，本索引只记录收集协议，不手工复制运行中 loss、fixture 或不完整
 排名。最终轻量归档将位于 `reports/artifacts/actor_free_td_lewm_cube_seed3072/`；checkpoint、
