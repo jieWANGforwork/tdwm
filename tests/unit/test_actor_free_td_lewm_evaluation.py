@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import importlib.util
 import sys
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
-from scripts import evaluate_actor_free_td_lewm as evaluation_cli
 from tdwm.evaluation.actor_free_td_lewm import (
     CHECKPOINT_SEMANTICS,
     DIRECT_CRITIC_SEMANTICS,
@@ -15,6 +16,16 @@ from tdwm.evaluation.actor_free_td_lewm import (
     load_actor_free_td_evaluation_protocol,
     validate_actor_free_td_evaluation_protocol,
 )
+
+_CLI_PATH = (
+    Path(__file__).resolve().parents[2] / "scripts" / "evaluate_actor_free_td_lewm.py"
+)
+_CLI_SPEC = importlib.util.spec_from_file_location(
+    "tdwm_evaluate_actor_free_td_lewm_cli", _CLI_PATH
+)
+assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
+evaluation_cli = importlib.util.module_from_spec(_CLI_SPEC)
+_CLI_SPEC.loader.exec_module(evaluation_cli)
 
 CONFIGS = {
     "parallel_real": (

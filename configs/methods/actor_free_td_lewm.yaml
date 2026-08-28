@@ -82,7 +82,7 @@ checkpoint:
   method: actor_free_td_lewm
   objective_version: {base_variants: 1, goal_hybrid: 2, imaginary_hybrid: 3, direct_goal_hybrid: 3}
   deployment_checkpoint_version: 1
-  self_contained_world_and_successor: true
+  self_contained_world_and_td_head: true
 
 provenance:
   note: Goal Hybrid retains SF factorization; Imaginary Hybrid changes only the one-step bootstrap history to an EMA LeWM-predicted next latent while retaining the real EMA immediate feature; Direct Goal Hybrid instead learns C(H,a,z_goal) with the same hindsight targets, coupled Hybrid branches, LeWM budget, and actor-free CEM evaluation.
