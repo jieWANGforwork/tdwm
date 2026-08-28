@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from tdwm.methods.actor_free_td_lewm import (
 )
 from tdwm.training.actor_free_td_lewm import (
     DEPLOYMENT_CHECKPOINT_VERSION,
+    DIRECT_GOAL_OBJECTIVE_VERSION,
     FORMAL_OPTIMIZER_UPDATES,
     GOAL_OBJECTIVE_VERSION,
     METHOD,
@@ -39,6 +41,12 @@ CONFIGS = {
         "goal_hybrid",
     )
 }
+DIRECT_CONFIG = (
+    ROOT
+    / "configs"
+    / "experiment"
+    / "actor_free_td_lewm_direct_goal_hybrid_cube_train.yaml"
+)
 
 
 def test_five_variants_share_data_seed_budget_and_original_lewm_loss():
@@ -120,6 +128,28 @@ def test_goal_hybrid_protocol_rejects_goal_semantic_drift():
     protocol["successor"]["objective_version"] = 1
     with pytest.raises(ValueError, match="objective_version"):
         validate_actor_free_td_training_protocol(protocol)
+
+
+def test_direct_goal_critic_protocol_is_the_same_budget_but_not_sf_factorized():
+    direct = load_actor_free_td_training_protocol(DIRECT_CONFIG)
+    reference = load_actor_free_td_training_protocol(CONFIGS["goal_hybrid"])
+
+    assert direct["variant"] == "direct_goal_hybrid"
+    assert direct["dataset"] == reference["dataset"]
+    assert direct["split"] == reference["split"]
+    assert direct["sequence"] == reference["sequence"]
+    assert direct["loader"] == reference["loader"]
+    assert direct["scheduler"] == reference["scheduler"]
+    assert direct["training"] == reference["training"]
+    assert direct["critic"]["objective_version"] == DIRECT_GOAL_OBJECTIVE_VERSION
+    assert direct["critic"]["architecture"] == "direct_goal_critic_head"
+    assert direct["joint_objective"]["goal_enters_critic_head"] is True
+    assert "successor" not in direct
+
+    drift = deepcopy(direct)
+    drift["joint_objective"]["predicted_context_detach"] = True
+    with pytest.raises(ValueError, match="predicted_context_detach"):
+        validate_actor_free_td_training_protocol(drift)
 
 
 def test_teacher_forced_predictions_replace_only_indices_history_and_later():
@@ -395,3 +425,32 @@ def test_goal_hybrid_checkpoint_records_trained_readout_semantics():
     ]
     assert config["real_goal_td_weight"] == 1.0
     assert config["predicted_goal_td_weight"] == 1.0
+
+
+def test_direct_goal_checkpoint_records_a_critic_without_successor_state():
+    protocol = load_actor_free_td_training_protocol(DIRECT_CONFIG)
+    module = SimpleNamespace(
+        model=nn.Linear(2, 3),
+        target_model=nn.Linear(2, 3),
+        critic=nn.Linear(3, 1),
+        target_critic=nn.Linear(3, 1),
+    )
+    payload = _deployment_payload(
+        module,
+        protocol=protocol,
+        model_config={"_target_": "example.WorldModel"},
+        action_block_dim=25,
+        epoch=1,
+        global_step=2,
+        base_export_run_name="epoch_01",
+        base_checkpoint_sha256="0" * 64,
+    )
+
+    assert payload["objective_version"] == DIRECT_GOAL_OBJECTIVE_VERSION
+    assert "critic_state_dict" in payload
+    assert "target_critic_state_dict" in payload
+    assert "successor_state_dict" not in payload
+    config = payload["critic_config"]
+    assert config["architecture"] == "direct_goal_critic_head"
+    assert config["goal_enters_critic_head"] is True
+    assert config["td_branches"] == ["real_context", "predicted_context"]

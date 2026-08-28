@@ -1,0 +1,113 @@
+schema_version: 1
+id: actor_free_td_lewm_direct_goal_hybrid_cube_checkpoint_o50
+method: actor_free_td_lewm
+variant: direct_goal_hybrid
+display_name: Direct Goal-Conditioned Critic LeWM Hybrid
+environment: cube
+stage: planner_evaluation
+
+runtime:
+  stable_worldmodel_version: 0.1.1
+  import: import stable_worldmodel as swm
+  precision: fp32
+
+image_preprocessing:
+  source: stable_pretraining.data.dataset_stats.ImageNet
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+dataset:
+  identifier: quentinll/lewm-cube
+  file: ogbench/cube_single_expert.h5
+  expected_size_bytes: 101942558720
+  accepted_size_bytes: [101942558720, 74104077358]
+  expected_episodes: 10000
+  expected_transitions: 2010000
+  episode_steps: 201
+  lance:
+    manifest_suffix: .manifest.json
+    image_codec: jpeg
+    jpeg_quality: 100
+  keys_to_load:
+    - pixels
+    - action
+    - qpos
+    - qvel
+    - privileged_block_0_pos
+    - privileged_block_0_quat
+
+checkpoint:
+  source: joint_actor_free_td_lewm_export
+  checkpoint_path: required_cli_argument
+  contains_world_model: true
+  contains_critic: true
+
+model:
+  embed_dim: 192
+
+critic:
+  objective_version: 3
+  architecture: direct_goal_critic_head
+  history_size: 3
+  hidden_dim: 256
+  gamma: 0.95
+  action_conditioning: dataset_current_action
+  bootstrap_action: dataset_next_action
+  terminal_source: next_action_nan_invalid
+  goal_conditioning: direct_latent_input
+  actor: none
+  reward: none
+  td_bootstrap: true
+  goal_source: uniform_reachable_future_ema_latent_same_clip
+  goal_offset_weighting: uniform_per_transition
+  goal_terminal_condition: dataset_terminal_or_next_state_is_goal
+  td_branches: [real_context, predicted_context]
+  goal_cost: normalized_discounted_latent_mse
+  target_world_ema_decay: 0.995
+  target_critic_ema_decay: 0.995
+  planning_weight: 1.0
+  clamp_critic_cost: true
+
+world:
+  env_name: swm/OGBCube-v0
+  env_type: single
+  ob_type: states
+  image_size: 224
+  multiview: false
+  visualize_info: false
+  terminate_at_goal: true
+  success_threshold_meters: 0.04
+
+evaluation:
+  episodes: 50
+  goal_offset: 50
+  start_goal_source: same_dataset_episode
+
+planning:
+  solver: CEM
+  horizon: 5
+  candidates: 300
+  iterations: 30
+  elites: 30
+  initial_variance: 1.0
+  action_block: 5
+  frame_skip: 5
+  receding_horizon: 1
+  episode_budget: 100
+  planning_seed: 42
+  solver_batch_size: 1
+  history_len: 1
+  warm_start: true
+  initial_distribution: cem_gaussian_no_actor
+
+inference_objective:
+  score: discounted_direct_goal_critic_cost
+  goal_usage: training_and_planning_direct_critic_input
+  goal_enters_critic_head: true
+  learned_actor: false
+  replanning: every_action_block
+
+provenance:
+  training_protocol: configs/experiment/actor_free_td_lewm_direct_goal_hybrid_cube_train.yaml
+  comparison_protocol: configs/experiment/lewm_cube_seed3072_o50.yaml
+  status: implementation_ready_checkpoint_pending

@@ -12,13 +12,16 @@ from tdwm.methods.actor_free_td_lewm import (
     SUPPORTED_VARIANTS,
     ActorFreeSuccessorHead,
 )
+from tdwm.methods.direct_goal_critic_lewm import DirectGoalCriticHead
 from tdwm.methods.successor_geometry import latent_goal_cost, successor_goal_cost
 
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
+DIRECT_GOAL_OBJECTIVE_VERSION = 3
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 GOAL_VARIANT = "goal_hybrid"
+DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
 
 
 class ActorFreeTDLeWM(nn.Module):
@@ -136,15 +139,29 @@ class ActorFreeTDLeWM(nn.Module):
             samples=samples,
         )
         final_action = action_candidates[..., -1, :]
-        successor = self.successor(
+        tail_cost = self._tail_cost(
             tail_history,
             previous_actions,
             final_action,
+            goal,
         )
-        tail_cost = successor_goal_cost(successor, goal)
         if self.clamp_tail_cost:
             tail_cost = tail_cost.clamp_min(0.0)
         return explicit_cost + (self.gamma ** (horizon - 1)) * tail_cost
+
+    def _tail_cost(
+        self,
+        latent_history: torch.Tensor,
+        previous_actions: torch.Tensor,
+        current_action: torch.Tensor,
+        goal: torch.Tensor,
+    ) -> torch.Tensor:
+        successor = self.successor(
+            latent_history,
+            previous_actions,
+            current_action,
+        )
+        return successor_goal_cost(successor, goal)
 
     @staticmethod
     def _observed_frames(info: dict[str, Any]) -> int:
@@ -252,11 +269,53 @@ class ActorFreeTDLeWM(nn.Module):
         return encoded
 
 
+class DirectGoalCriticLeWM(ActorFreeTDLeWM):
+    """Splice explicit LeWM costs with a direct goal-conditioned critic tail."""
+
+    def __init__(
+        self,
+        world_model: nn.Module,
+        critic: DirectGoalCriticHead,
+        *,
+        gamma: float,
+        clamp_tail_cost: bool = True,
+    ) -> None:
+        super().__init__(
+            world_model,
+            critic,
+            gamma=gamma,
+            clamp_tail_cost=clamp_tail_cost,
+        )
+
+    @property
+    def critic(self) -> DirectGoalCriticHead:
+        return self.successor  # type: ignore[return-value]
+
+    def _tail_cost(
+        self,
+        latent_history: torch.Tensor,
+        previous_actions: torch.Tensor,
+        current_action: torch.Tensor,
+        goal: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.critic(
+            latent_history,
+            previous_actions,
+            current_action,
+            goal,
+        )
+
+
 def load_actor_free_td_checkpoint(
     checkpoint_path: str | Path,
     *,
     map_location: str | torch.device = "cpu",
-) -> tuple[nn.Module, ActorFreeSuccessorHead, dict[str, Any], dict[str, Any]]:
+) -> tuple[
+    nn.Module,
+    ActorFreeSuccessorHead | DirectGoalCriticHead,
+    dict[str, Any],
+    dict[str, Any],
+]:
     """Restore the jointly exported LeWM and actor-free successor."""
 
     payload = torch.load(
@@ -269,13 +328,85 @@ def load_actor_free_td_checkpoint(
     payload_variant = payload.get("variant")
     if payload_variant not in SUPPORTED_VARIANTS:
         raise ValueError("Checkpoint contains an unsupported TD variant.")
-    expected_objective_version = (
-        GOAL_OBJECTIVE_VERSION if payload_variant == GOAL_VARIANT else OBJECTIVE_VERSION
-    )
+    expected_objective_version = {
+        GOAL_VARIANT: GOAL_OBJECTIVE_VERSION,
+        DIRECT_GOAL_VARIANT: DIRECT_GOAL_OBJECTIVE_VERSION,
+    }.get(payload_variant, OBJECTIVE_VERSION)
     if payload.get("objective_version") != expected_objective_version:
         raise ValueError("Unsupported Actor-Free TD-LeWM objective version.")
     if payload.get("deployment_checkpoint_version") != DEPLOYMENT_CHECKPOINT_VERSION:
         raise ValueError("Unsupported Actor-Free TD-LeWM deployment checkpoint.")
+    if payload_variant == DIRECT_GOAL_VARIANT:
+        required = {
+            "critic_state_dict",
+            "critic_config",
+            "world_model_state_dict",
+            "world_model_config",
+        }
+        missing = required - payload.keys()
+        if missing:
+            raise ValueError(
+                "Direct Goal Critic checkpoint is missing " f"{sorted(missing)}."
+            )
+        config = dict(payload["critic_config"])
+        required_config = {
+            "embed_dim",
+            "action_dim",
+            "history_size",
+            "hidden_dim",
+            "gamma",
+            "variant",
+        }
+        missing_config = required_config - config.keys()
+        if missing_config:
+            raise ValueError(f"critic_config is missing {sorted(missing_config)}.")
+        metadata_checks = {
+            "method": METHOD,
+            "variant": DIRECT_GOAL_VARIANT,
+            "objective_version": DIRECT_GOAL_OBJECTIVE_VERSION,
+            "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+            "architecture": "direct_goal_critic_head",
+            "goal_conditioning": "direct_latent_input",
+            "action_conditioning": "dataset_current_action",
+            "bootstrap_action": "dataset_next_action",
+            "terminal_source": "next_action_nan_invalid",
+            "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+            "goal_offset_weighting": "uniform_per_transition",
+            "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
+            "td_branches": ["real_context", "predicted_context"],
+            "goal_cost": "normalized_discounted_latent_mse",
+            "goal_enters_critic_head": True,
+            "predicted_context_detach": False,
+            "predicted_critic_td_weight": 1.0,
+            "real_critic_td_weight": 1.0,
+            "actor": "none",
+            "reward": "none",
+        }
+        for key, expected in metadata_checks.items():
+            if config.get(key) != expected:
+                raise ValueError(f"critic_config.{key} must be {expected!r}.")
+        if not 0.0 <= float(config["gamma"]) < 1.0:
+            raise ValueError("Checkpoint gamma must lie in [0, 1).")
+
+        critic = DirectGoalCriticHead(
+            embed_dim=int(config["embed_dim"]),
+            action_dim=int(config["action_dim"]),
+            history_size=int(config["history_size"]),
+            hidden_dim=int(config["hidden_dim"]),
+        )
+        critic.load_state_dict(payload["critic_state_dict"], strict=True)
+
+        import hydra
+        from omegaconf import OmegaConf
+
+        world_model = hydra.utils.instantiate(
+            OmegaConf.create(payload["world_model_config"])
+        )
+        world_model.load_state_dict(payload["world_model_state_dict"], strict=True)
+        world_model.eval().requires_grad_(False)
+        critic.eval().requires_grad_(False)
+        return world_model, critic, config, payload
+
     required = {
         "successor_state_dict",
         "successor_config",
@@ -366,7 +497,7 @@ def load_actor_free_td_checkpoint(
 def make_actor_free_td_policy(
     *,
     world_model: nn.Module,
-    successor: ActorFreeSuccessorHead,
+    successor: ActorFreeSuccessorHead | DirectGoalCriticHead,
     planning: dict[str, Any],
     gamma: float,
     process: dict[str, Any] | None = None,
@@ -378,7 +509,12 @@ def make_actor_free_td_policy(
 
     import stable_worldmodel as swm
 
-    wrapped = ActorFreeTDLeWM(
+    adapter_type = (
+        DirectGoalCriticLeWM
+        if isinstance(successor, DirectGoalCriticHead)
+        else ActorFreeTDLeWM
+    )
+    wrapped = adapter_type(
         world_model,
         successor,
         gamma=gamma,
@@ -414,6 +550,7 @@ def make_actor_free_td_policy(
 
 __all__ = [
     "ActorFreeTDLeWM",
+    "DirectGoalCriticLeWM",
     "load_actor_free_td_checkpoint",
     "make_actor_free_td_policy",
 ]

@@ -6,6 +6,7 @@ import pytest
 
 from tdwm.evaluation.actor_free_td_lewm import (
     CHECKPOINT_SEMANTICS,
+    DIRECT_CRITIC_SEMANTICS,
     FORMAL_O50_PLANNING,
     _validate_checkpoint,
     configure_actor_free_td_evaluation_mode,
@@ -35,6 +36,10 @@ CONFIGS = {
         "actor_free_td_lewm_goal_hybrid_cube_checkpoint_o50.yaml"
     ),
 }
+DIRECT_CONFIG = (
+    "configs/experiment/"
+    "actor_free_td_lewm_direct_goal_hybrid_cube_checkpoint_o50.yaml"
+)
 
 
 @pytest.mark.parametrize(("variant", "path"), CONFIGS.items())
@@ -171,6 +176,54 @@ def test_protocol_rejects_goal_conditioning_and_a_learned_actor():
     actor["successor"]["actor"] = "policy_network"
     with pytest.raises(ValueError, match="successor.actor"):
         validate_actor_free_td_evaluation_protocol(actor)
+
+
+def test_direct_goal_critic_o50_protocol_and_checkpoint_are_not_sf_factorized():
+    protocol = load_actor_free_td_evaluation_protocol(DIRECT_CONFIG)
+    critic = protocol["critic"]
+
+    assert protocol["variant"] == "direct_goal_hybrid"
+    assert critic["objective_version"] == 3
+    assert critic["goal_conditioning"] == "direct_latent_input"
+    assert "successor" not in protocol
+    assert protocol["inference_objective"]["goal_enters_critic_head"] is True
+    for key, expected in FORMAL_O50_PLANNING.items():
+        assert protocol["planning"][key] == expected
+
+    critic_config = {
+        "embed_dim": protocol["model"]["embed_dim"],
+        "action_dim": 25,
+        "history_size": critic["history_size"],
+        "hidden_dim": critic["hidden_dim"],
+        "gamma": critic["gamma"],
+        "variant": protocol["variant"],
+        "objective_version": critic["objective_version"],
+        "goal_source": critic["goal_source"],
+        "goal_offset_weighting": critic["goal_offset_weighting"],
+        "goal_terminal_condition": critic["goal_terminal_condition"],
+        "td_branches": critic["td_branches"],
+        "goal_cost": critic["goal_cost"],
+        "goal_enters_critic_head": True,
+        "predicted_context_detach": False,
+        "predicted_critic_td_weight": 1.0,
+        "real_critic_td_weight": 1.0,
+        **DIRECT_CRITIC_SEMANTICS,
+    }
+    payload = {
+        "method": "actor_free_td_lewm",
+        "variant": "direct_goal_hybrid",
+        "objective_version": 3,
+        "deployment_checkpoint_version": 1,
+        "world_model_state_dict": {},
+        "critic_state_dict": {},
+        "world_model_config": {"_target_": "fake.WorldModel"},
+        "critic_config": critic_config,
+    }
+    _validate_checkpoint(
+        payload=payload,
+        successor_config=critic_config,
+        protocol=protocol,
+    )
 
 
 def test_smoke_and_pilot_budgets_do_not_mutate_the_formal_protocol():

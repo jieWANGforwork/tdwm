@@ -9,6 +9,11 @@ from .actor_free_td_lewm import (
     actor_free_td_objective,
     sample_actor_free_goal_offsets,
 )
+from .direct_goal_critic_lewm import (
+    DirectGoalCriticHead,
+    DirectGoalCriticTDOutput,
+    direct_goal_critic_td_objective,
+)
 from .goal_tail import (
     GoalTailTDOutput,
     GoalTailValue,
@@ -67,6 +72,8 @@ __all__ = [
     "ActionPrefixMomentHead",
     "ActionPrefixSuccessorHead",
     "DirectedSuccessorGeometry",
+    "DirectGoalCriticHead",
+    "DirectGoalCriticTDOutput",
     "ExpertActionWindows",
     "GoalConditionedPolicy",
     "GoalTailTDOutput",
@@ -85,6 +92,7 @@ __all__ = [
     "actor_free_td_objective",
     "discounted_goal_tail_target",
     "discounted_horizon_weights",
+    "direct_goal_critic_td_objective",
     "ema_update",
     "finite_horizon_successor_from_moments",
     "finite_horizon_successor_targets",

@@ -27,6 +27,7 @@ ActorFreeTDVariant = Literal[
     "serial_coupled",
     "hybrid",
     "goal_hybrid",
+    "direct_goal_hybrid",
 ]
 SUPPORTED_VARIANTS = frozenset(
     {
@@ -35,8 +36,10 @@ SUPPORTED_VARIANTS = frozenset(
         "serial_coupled",
         "hybrid",
         "goal_hybrid",
+        "direct_goal_hybrid",
     }
 )
+DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
 
 
 class ActorFreeSuccessorHead(nn.Module):
@@ -466,6 +469,11 @@ def actor_free_td_objective(
 
     if variant not in SUPPORTED_VARIANTS:
         raise ValueError(f"Unsupported actor-free TD variant: {variant!r}.")
+    if variant == DIRECT_GOAL_VARIANT:
+        raise ValueError(
+            "direct_goal_hybrid uses direct_goal_critic_td_objective, not the "
+            "successor-feature objective."
+        )
     if not 0.0 <= gamma < 1.0:
         raise ValueError("gamma must lie in [0, 1).")
     _validate_latent_inputs(
@@ -682,6 +690,7 @@ __all__ = [
     "ActorFreeSuccessorHead",
     "ActorFreeTDOutput",
     "ActorFreeTDVariant",
+    "DIRECT_GOAL_VARIANT",
     "SUPPORTED_VARIANTS",
     "actor_free_goal_future_offset_limits",
     "actor_free_successor_td_target",

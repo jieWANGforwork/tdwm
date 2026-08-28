@@ -14,7 +14,7 @@ from tdwm.training.actor_free_td_lewm import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train a goal-free Actor-Free TD-LeWM variant."
+        description="Train an Actor-Free TD-LeWM successor or direct-critic variant."
     )
     parser.add_argument(
         "--config",
