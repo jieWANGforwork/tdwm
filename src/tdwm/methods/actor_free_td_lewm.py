@@ -16,8 +16,15 @@ from torch import nn
 
 from tdwm.methods.successor_geometry import successor_feature_basis
 
-ActorFreeTDVariant = Literal["serial_decoupled", "serial_coupled", "hybrid"]
-SUPPORTED_VARIANTS = frozenset({"serial_decoupled", "serial_coupled", "hybrid"})
+ActorFreeTDVariant = Literal[
+    "parallel_real",
+    "serial_decoupled",
+    "serial_coupled",
+    "hybrid",
+]
+SUPPORTED_VARIANTS = frozenset(
+    {"parallel_real", "serial_decoupled", "serial_coupled", "hybrid"}
+)
 
 
 class ActorFreeSuccessorHead(nn.Module):
@@ -238,9 +245,11 @@ def actor_free_td_objective(
     pair bootstraps from ``actions[:, -1]`` unless its explicit episode-terminal
     mask is true.
 
-    ``serial_decoupled`` stops the predicted-context gradient,
-    ``serial_coupled`` lets it update the world predictor, and ``hybrid`` adds a
-    real-context TD branch to the coupled predicted-context branch.
+    ``parallel_real`` trains only from the real online-encoder context and is
+    parallel to the LeWM predictor. ``serial_decoupled`` stops the
+    predicted-context gradient, ``serial_coupled`` lets it update the world
+    predictor, and ``hybrid`` adds a real-context TD branch to the coupled
+    predicted-context branch.
     """
 
     if variant not in SUPPORTED_VARIANTS:
@@ -279,20 +288,6 @@ def actor_free_td_objective(
         shift=history_shift,
     )
     current_actions = actions[:, first_current:-1]
-    predicted_history = _latent_histories(
-        predicted_latents,
-        history_size=history_size,
-        current_count=current_count,
-        shift=history_shift,
-    )
-    if variant == "serial_decoupled":
-        predicted_history = predicted_history.detach()
-    predicted = successor(
-        predicted_history,
-        previous_actions,
-        current_actions,
-    )
-
     with torch.no_grad():
         ema_latents = real_ema_latents.detach()
         next_history = _latent_histories(
@@ -323,10 +318,28 @@ def actor_free_td_objective(
             terminal=aligned_terminal,
         )
 
-    predicted_td_loss = (predicted - target).square().mean()
+    predicted_td_loss = real_latents.new_zeros(())
     real_td_loss: torch.Tensor | None = None
-    predictions = [predicted.detach()]
-    if variant == "hybrid":
+    predictions: list[torch.Tensor] = []
+
+    if variant != "parallel_real":
+        predicted_history = _latent_histories(
+            predicted_latents,
+            history_size=history_size,
+            current_count=current_count,
+            shift=history_shift,
+        )
+        if variant == "serial_decoupled":
+            predicted_history = predicted_history.detach()
+        predicted = successor(
+            predicted_history,
+            previous_actions,
+            current_actions,
+        )
+        predicted_td_loss = (predicted - target).square().mean()
+        predictions.append(predicted.detach())
+
+    if variant in {"parallel_real", "hybrid"}:
         real_history = _latent_histories(
             real_latents,
             history_size=history_size,
@@ -340,6 +353,12 @@ def actor_free_td_objective(
         )
         real_td_loss = (real_prediction - target).square().mean()
         predictions.append(real_prediction.detach())
+
+    if variant == "parallel_real":
+        assert real_td_loss is not None
+        td_loss = real_td_loss
+    elif variant == "hybrid":
+        assert real_td_loss is not None
         td_loss = predicted_td_loss + real_td_loss
     else:
         td_loss = predicted_td_loss

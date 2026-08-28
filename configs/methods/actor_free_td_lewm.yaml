@@ -25,6 +25,9 @@ targets:
   clip_boundary_is_terminal: false
 
 variants:
+  parallel_real:
+    td_branches: [real_context]
+    predicted_context_detach: false
   serial_decoupled:
     td_branches: [predicted_context]
     predicted_context_detach: true
@@ -53,4 +56,4 @@ checkpoint:
   self_contained_world_and_successor: true
 
 provenance:
-  note: The three variants differ only in TD context coupling and the hybrid real-context branch.
+  note: The four variants differ only in real-versus-predicted TD context and its gradient coupling to the LeWM predictor.

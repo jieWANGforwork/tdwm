@@ -1,4 +1,4 @@
-"""End-to-end training for the three actor-free TD-LeWM variants."""
+"""End-to-end training for the actor-free TD-LeWM variants."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def load_actor_free_td_training_protocol(path: str | Path) -> dict[str, Any]:
 
 
 def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
-    """Reject protocol drift that would invalidate a three-way comparison."""
+    """Reject protocol drift that would invalidate the controlled comparison."""
 
     if protocol.get("schema_version") != 1 or protocol.get("method") != METHOD:
         raise ValueError("Actor-Free TD-LeWM requires its schema 1 method.")
@@ -91,6 +91,7 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
         raise ValueError("sequence.frame_skip must be positive.")
 
     expected_weights = {
+        "parallel_real": (1.0, 0.0, False),
         "serial_decoupled": (0.0, 1.0, True),
         "serial_coupled": (0.0, 1.0, False),
         "hybrid": (1.0, 1.0, False),

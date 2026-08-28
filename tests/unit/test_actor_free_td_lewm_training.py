@@ -29,11 +29,16 @@ CONFIGS = {
     / "configs"
     / "experiment"
     / f"actor_free_td_lewm_{variant}_cube_train.yaml"
-    for variant in ("serial_decoupled", "serial_coupled", "hybrid")
+    for variant in (
+        "parallel_real",
+        "serial_decoupled",
+        "serial_coupled",
+        "hybrid",
+    )
 }
 
 
-def test_three_variants_share_data_seed_budget_and_original_lewm_loss():
+def test_four_variants_share_data_seed_budget_and_original_lewm_loss():
     protocols = {
         variant: load_actor_free_td_training_protocol(path)
         for variant, path in CONFIGS.items()
@@ -70,6 +75,10 @@ def test_three_variants_share_data_seed_budget_and_original_lewm_loss():
     )
     assert protocols["hybrid"]["joint_objective"]["real_td_weight"] == 1.0
     assert protocols["serial_coupled"]["joint_objective"]["real_td_weight"] == 0.0
+    parallel = protocols["parallel_real"]["joint_objective"]
+    assert parallel["real_td_weight"] == 1.0
+    assert parallel["predicted_td_weight"] == 0.0
+    assert parallel["predicted_context_detach"] is False
 
 
 def test_variant_protocol_rejects_a_mismatched_gradient_path():
@@ -77,6 +86,14 @@ def test_variant_protocol_rejects_a_mismatched_gradient_path():
     protocol["joint_objective"]["predicted_context_detach"] = False
 
     with pytest.raises(ValueError, match="predicted_context_detach"):
+        validate_actor_free_td_training_protocol(protocol)
+
+
+def test_parallel_real_protocol_rejects_a_predicted_td_branch():
+    protocol = load_actor_free_td_training_protocol(CONFIGS["parallel_real"])
+    protocol["joint_objective"]["predicted_td_weight"] = 1.0
+
+    with pytest.raises(ValueError, match="predicted_td_weight"):
         validate_actor_free_td_training_protocol(protocol)
 
 
@@ -167,6 +184,20 @@ def test_serial_decoupled_td_does_not_reach_teacher_forced_prediction():
     assert output.real_td_loss is None
     assert local.grad is None
     assert real.grad is None
+    assert any(parameter.grad is not None for parameter in successor.parameters())
+    assert all(parameter.grad is None for parameter in target_successor.parameters())
+
+
+def test_parallel_real_td_uses_encoder_latents_without_reaching_prediction():
+    output, local, real, successor, target_successor = _variant_backward(
+        "parallel_real"
+    )
+
+    assert output.real_td_loss is not None
+    assert torch.equal(output.predicted_td_loss, torch.zeros(()))
+    assert torch.equal(output.td_loss, output.real_td_loss)
+    assert local.grad is None
+    assert real.grad is not None and torch.count_nonzero(real.grad) > 0
     assert any(parameter.grad is not None for parameter in successor.parameters())
     assert all(parameter.grad is None for parameter in target_successor.parameters())
 

@@ -157,6 +157,7 @@ def test_td_target_uses_next_real_ema_latent_and_dataset_next_action():
 @pytest.mark.parametrize(
     ("variant", "predicted_has_grad", "real_has_grad"),
     [
+        ("parallel_real", False, True),
         ("serial_decoupled", False, False),
         ("serial_coupled", True, False),
         ("hybrid", True, True),
@@ -204,14 +205,47 @@ def test_td_variants_have_the_intended_world_model_gradient_paths(
         for parameter in head.parameters()
     )
     assert all(parameter.grad is None for parameter in target.parameters())
-    assert (output.real_td_loss is not None) is (variant == "hybrid")
+    assert (output.real_td_loss is not None) is (
+        variant in {"parallel_real", "hybrid"}
+    )
     if variant == "hybrid":
         assert torch.allclose(
             output.td_loss,
             output.predicted_td_loss + output.real_td_loss,
         )
+    elif variant == "parallel_real":
+        assert output.real_td_loss is not None
+        assert torch.equal(output.predicted_td_loss, torch.zeros(()))
+        assert torch.equal(output.td_loss, output.real_td_loss)
     else:
         assert torch.equal(output.td_loss, output.predicted_td_loss)
+
+
+def test_parallel_real_does_not_read_predicted_context_values():
+    torch.manual_seed(32)
+    head = ActorFreeSuccessorHead(
+        embed_dim=3,
+        action_dim=2,
+        history_size=2,
+        hidden_dim=7,
+    )
+    real = torch.randn(2, 6, 3)
+    predicted = torch.full_like(real, torch.nan)
+
+    output = actor_free_td_objective(
+        head,
+        head.make_target(),
+        real,
+        predicted,
+        torch.randn_like(real),
+        torch.randn(2, 6, 2),
+        gamma=0.9,
+        variant="parallel_real",
+    )
+
+    assert torch.isfinite(output.td_loss)
+    assert torch.isfinite(output.prediction_mean)
+    assert torch.equal(output.predicted_td_loss, torch.zeros(()))
 
 
 def test_cem_cost_splices_h_minus_one_explicit_steps_and_final_action_tail():
@@ -257,8 +291,10 @@ def test_cem_cost_splices_h_minus_one_explicit_steps_and_final_action_tail():
     assert torch.allclose(successor.current_action, actions[..., 2, :])
 
 
+@pytest.mark.parametrize("variant", ["serial_coupled", "parallel_real"])
 def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
     tmp_path,
+    variant,
 ):
     world_model = nn.Linear(2, 2)
     successor = ActorFreeSuccessorHead(
@@ -276,7 +312,7 @@ def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
         "history_size": 2,
         "hidden_dim": 5,
         "gamma": 0.95,
-        "variant": "serial_coupled",
+        "variant": variant,
         "architecture": "actor_free_successor_head",
         "feature_basis": "augmented_latent_squared_distance",
         "goal_conditioning": "none",
@@ -291,7 +327,7 @@ def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
     torch.save(
         {
             "method": "actor_free_td_lewm",
-            "variant": "serial_coupled",
+            "variant": variant,
             "objective_version": 1,
             "deployment_checkpoint_version": 1,
             "successor_state_dict": successor.state_dict(),
@@ -311,7 +347,7 @@ def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
     )
 
     assert restored_config == successor_config
-    assert payload["variant"] == "serial_coupled"
+    assert payload["variant"] == variant
     assert not any(parameter.requires_grad for parameter in restored_world.parameters())
     assert not any(parameter.requires_grad for parameter in restored_head.parameters())
     for key, value in world_model.state_dict().items():

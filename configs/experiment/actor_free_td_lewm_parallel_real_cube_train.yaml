@@ -1,0 +1,175 @@
+schema_version: 1
+id: actor_free_td_lewm_parallel_real_cube_v1
+method: actor_free_td_lewm
+variant: parallel_real
+display_name: Actor-Free TD-LeWM Parallel Real
+environment: cube
+stage: full_training
+initialization: random_from_scratch
+
+runtime:
+  stable_worldmodel_version: 0.1.1
+  import: import stable_worldmodel as swm
+seeds: [0, 42, 3072]
+
+dataset:
+  identifier: quentinll/lewm-cube
+  file: ogbench/cube_single_expert.h5
+  expected_size_bytes: 101942558720
+  accepted_size_bytes: [101942558720, 74104077358]
+  optimized_layout:
+    file: cube_single_expert_chunk1.h5
+    pixels_chunk_frames: 1
+    lossless: true
+    sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  lance:
+    suffix: .lance
+    manifest_suffix: .manifest.json
+    stable_worldmodel_version: 0.1.1
+    image_codec: jpeg
+    jpeg_quality: 100
+    minimum_pixel_verification_samples: 128
+    numeric_verification:
+      action: exact
+      observation: float32_cast_exact
+    source:
+      file: cube_single_expert_chunk1.h5
+      size_bytes: 74104077358
+      sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  expected_episodes: 10000
+  expected_transitions: 2010000
+  keys_to_load: [pixels, action, observation]
+  keys_to_cache: [action, observation]
+  keys_to_merge:
+    proprio: observation
+
+split:
+  unit: sequence_clip
+  implementation: torch.utils.data.random_split
+  train_fraction: 0.9
+  validation_fraction: 0.1
+  seed_source: training_seed
+  exact_indices_artifact: split_indices.npz
+
+sequence:
+  frame_skip: 5
+  history_frames: 3
+  prediction_frames: 1
+  num_steps: 19
+
+image_preprocessing:
+  source: stable_pretraining.data.dataset_stats.ImageNet
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+normalization:
+  fit_population: complete_dataset
+  columns: [action, observation]
+  boundary_nan_policy: preserve_during_preprocessing_then_zero_actions_before_forward
+
+model:
+  parameters: 18034628
+  encoder_size: tiny
+  patch_size: 14
+  embed_dim: 192
+  predictor_depth: 6
+  predictor_heads: 16
+  predictor_mlp_dim: 2048
+  predictor_dim_head: 64
+  predictor_dropout: 0.1
+  predictor_embedding_dropout: 0.0
+  projector_hidden_dim: 2048
+
+joint_objective:
+  local_prediction: original_lewm_one_step_mse
+  regularization: original_lewm_sigreg
+  td_target: ema_next_latent_plus_ema_successor_dataset_next_action
+  target_encoder: ema_world_model
+  bootstrap_action: dataset_next_action
+  terminal_mask: next_action_nan_invalid
+  goal_conditioning: none
+  actor: none
+  reward: none
+  local_prediction_weight: 1.0
+  real_td_weight: 1.0
+  predicted_td_weight: 0.0
+  predicted_context_detach: false
+
+successor:
+  objective_version: 1
+  architecture: actor_free_successor_head
+  hidden_dim: 256
+  gamma: 0.95
+  feature_basis: augmented_latent_squared_distance
+  action_conditioning: dataset_current_action
+  bootstrap_action: dataset_next_action
+  terminal_source: next_action_nan_invalid
+  goal_conditioning: none
+  actor: none
+  reward: none
+  target_world_ema_decay: 0.995
+  target_successor_ema_decay: 0.995
+  loss_warmup_fraction: 0.05
+  planning_weight: 1.0
+  terminal_weight: 0.0
+  clamp_successor_cost: true
+
+loss:
+  prediction: mse
+  sigreg:
+    weight: 0.09
+    knots: 17
+    num_projections: 1024
+    effective_batch_size: 128
+
+loader:
+  batch_size: 8
+  stride_aware_lance: true
+  device_image_preprocessing: true
+  workers: 6
+  prefetch_factor: 2
+  validation_workers: 8
+  validation_locality: true
+  block_shuffle: false
+  block_size: 2048
+  episode_streaming: true
+  episode_pool_size: 384
+  episode_read_size: 16
+  episode_cache_bytes: 6442450944
+  episode_prefetch_blocks: 16
+  minimum_unique_episodes_per_batch: 8
+  train_shuffle: true
+  train_drop_last: true
+  validation_shuffle: false
+  validation_drop_last: false
+  pin_memory: true
+
+logging:
+  type: csv
+  flush_every_n_steps: 50
+optimizer:
+  type: AdamW
+  world_model_learning_rate: 0.00005
+  successor_learning_rate: 0.0001
+  weight_decay: 0.001
+scheduler:
+  type: linear_warmup_cosine_annealing
+  interval: optimizer_step
+  warmup_fraction: 0.01
+training:
+  epochs: 10
+  scheduler_epochs: 10
+  optimizer_steps_per_epoch: 12796
+  precision: bf16-mixed
+  model_compile: false
+  model_compile_mode: reduce-overhead
+  gradient_clip_norm: 1.0
+  checkpoint_every_epochs: 1
+  resume: true
+
+provenance:
+  base_protocol: configs/experiment/lewm_cube_train.yaml
+  method_definition: configs/methods/actor_free_td_lewm.yaml
+  status: implementation_ready_untrained
+  note: TD trains the successor only from real online-encoder latent histories and does not backpropagate through the LeWM predictor.

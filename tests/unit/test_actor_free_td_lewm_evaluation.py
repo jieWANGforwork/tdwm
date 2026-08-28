@@ -14,6 +14,10 @@ from tdwm.evaluation.actor_free_td_lewm import (
 )
 
 CONFIGS = {
+    "parallel_real": (
+        "configs/experiment/"
+        "actor_free_td_lewm_parallel_real_cube_checkpoint_o50.yaml"
+    ),
     "serial_decoupled": (
         "configs/experiment/"
         "actor_free_td_lewm_serial_decoupled_cube_checkpoint_o50.yaml"
@@ -74,7 +78,7 @@ def _checkpoint_for(protocol, *, variant=None):
 
 def test_joint_checkpoint_identity_is_locked_to_the_selected_variant():
     protocol = load_actor_free_td_evaluation_protocol(
-        CONFIGS["serial_decoupled"]
+        CONFIGS["parallel_real"]
     )
     config, payload = _checkpoint_for(protocol)
     _validate_checkpoint(

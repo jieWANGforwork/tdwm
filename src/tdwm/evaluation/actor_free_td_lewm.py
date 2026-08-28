@@ -32,7 +32,7 @@ from tdwm.evaluation.mc_gt_lewm import _load_action_processor
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 SUPPORTED_VARIANTS = frozenset(
-    {"serial_decoupled", "serial_coupled", "hybrid"}
+    {"parallel_real", "serial_decoupled", "serial_coupled", "hybrid"}
 )
 FORMAL_O50_PLANNING = {
     "horizon": 5,
