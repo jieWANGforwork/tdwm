@@ -17,8 +17,18 @@ from tdwm.methods.successor_geometry import latent_goal_cost, successor_goal_cos
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
+IMAGINARY_OBJECTIVE_VERSION = 3
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 GOAL_VARIANT = "goal_hybrid"
+IMAGINARY_VARIANT = "imaginary_hybrid"
+
+
+def _objective_version_for_variant(variant: str) -> int:
+    if variant == GOAL_VARIANT:
+        return GOAL_OBJECTIVE_VERSION
+    if variant == IMAGINARY_VARIANT:
+        return IMAGINARY_OBJECTIVE_VERSION
+    return OBJECTIVE_VERSION
 
 
 class ActorFreeTDLeWM(nn.Module):
@@ -269,9 +279,7 @@ def load_actor_free_td_checkpoint(
     payload_variant = payload.get("variant")
     if payload_variant not in SUPPORTED_VARIANTS:
         raise ValueError("Checkpoint contains an unsupported TD variant.")
-    expected_objective_version = (
-        GOAL_OBJECTIVE_VERSION if payload_variant == GOAL_VARIANT else OBJECTIVE_VERSION
-    )
+    expected_objective_version = _objective_version_for_variant(payload_variant)
     if payload.get("objective_version") != expected_objective_version:
         raise ValueError("Unsupported Actor-Free TD-LeWM objective version.")
     if payload.get("deployment_checkpoint_version") != DEPLOYMENT_CHECKPOINT_VERSION:
@@ -340,6 +348,16 @@ def load_actor_free_td_checkpoint(
             "real_goal_td_weight": 1.0,
         }
         for key, expected in goal_semantics.items():
+            if config.get(key) != expected:
+                raise ValueError(f"successor_config.{key} must be {expected!r}.")
+    if payload_variant == IMAGINARY_VARIANT:
+        imaginary_semantics = {
+            "immediate_feature_source": "real_ema_next_latent",
+            "bootstrap_state_source": ("ema_lewm_predicted_next_from_real_ema_history"),
+            "imaginary_horizon": 1,
+            "imaginary_predictor_gradient": "target_ema_stop_gradient",
+        }
+        for key, expected in imaginary_semantics.items():
             if config.get(key) != expected:
                 raise ValueError(f"successor_config.{key} must be {expected!r}.")
 

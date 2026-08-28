@@ -27,12 +27,14 @@ CONFIGS = {
         "actor_free_td_lewm_serial_coupled_cube_checkpoint_o50.yaml"
     ),
     "hybrid": (
-        "configs/experiment/"
-        "actor_free_td_lewm_hybrid_cube_checkpoint_o50.yaml"
+        "configs/experiment/" "actor_free_td_lewm_hybrid_cube_checkpoint_o50.yaml"
     ),
     "goal_hybrid": (
+        "configs/experiment/" "actor_free_td_lewm_goal_hybrid_cube_checkpoint_o50.yaml"
+    ),
+    "imaginary_hybrid": (
         "configs/experiment/"
-        "actor_free_td_lewm_goal_hybrid_cube_checkpoint_o50.yaml"
+        "actor_free_td_lewm_imaginary_hybrid_cube_checkpoint_o50.yaml"
     ),
 }
 
@@ -90,6 +92,21 @@ def _checkpoint_for(protocol, *, variant=None):
                 "real_goal_td_weight": 1.0,
             }
         )
+    if protocol["variant"] == "imaginary_hybrid":
+        successor_config.update(
+            {
+                "immediate_feature_source": protocol["successor"][
+                    "immediate_feature_source"
+                ],
+                "bootstrap_state_source": protocol["successor"][
+                    "bootstrap_state_source"
+                ],
+                "imaginary_horizon": protocol["successor"]["imaginary_horizon"],
+                "imaginary_predictor_gradient": protocol["successor"][
+                    "imaginary_predictor_gradient"
+                ],
+            }
+        )
     payload = {
         "method": "actor_free_td_lewm",
         "variant": variant or protocol["variant"],
@@ -104,17 +121,11 @@ def _checkpoint_for(protocol, *, variant=None):
 
 
 def test_joint_checkpoint_identity_is_locked_to_the_selected_variant():
-    protocol = load_actor_free_td_evaluation_protocol(
-        CONFIGS["parallel_real"]
-    )
+    protocol = load_actor_free_td_evaluation_protocol(CONFIGS["parallel_real"])
     config, payload = _checkpoint_for(protocol)
-    _validate_checkpoint(
-        payload=payload, successor_config=config, protocol=protocol
-    )
+    _validate_checkpoint(payload=payload, successor_config=config, protocol=protocol)
 
-    wrong_config, wrong_payload = _checkpoint_for(
-        protocol, variant="serial_coupled"
-    )
+    wrong_config, wrong_payload = _checkpoint_for(protocol, variant="serial_coupled")
     with pytest.raises(ValueError, match="variant differs"):
         _validate_checkpoint(
             payload=wrong_payload,
@@ -158,10 +169,32 @@ def test_goal_hybrid_checkpoint_requires_version_two_and_goal_metadata():
         )
 
 
+def test_imaginary_hybrid_checkpoint_requires_version_three_and_metadata():
+    protocol = load_actor_free_td_evaluation_protocol(CONFIGS["imaginary_hybrid"])
+    config, payload = _checkpoint_for(protocol)
+    _validate_checkpoint(payload=payload, successor_config=config, protocol=protocol)
+
+    wrong_version = deepcopy(payload)
+    wrong_version["objective_version"] = 1
+    with pytest.raises(ValueError, match="objective_version differs"):
+        _validate_checkpoint(
+            payload=wrong_version,
+            successor_config=config,
+            protocol=protocol,
+        )
+
+    missing_metadata = deepcopy(config)
+    del missing_metadata["bootstrap_state_source"]
+    with pytest.raises(ValueError, match="bootstrap_state_source"):
+        _validate_checkpoint(
+            payload=payload,
+            successor_config=missing_metadata,
+            protocol=protocol,
+        )
+
+
 def test_protocol_rejects_goal_conditioning_and_a_learned_actor():
-    protocol = load_actor_free_td_evaluation_protocol(
-        CONFIGS["serial_coupled"]
-    )
+    protocol = load_actor_free_td_evaluation_protocol(CONFIGS["serial_coupled"])
     goal_conditioned = deepcopy(protocol)
     goal_conditioned["inference_objective"]["goal_enters_successor_head"] = True
     with pytest.raises(ValueError, match="goal-free successor head"):
@@ -175,12 +208,8 @@ def test_protocol_rejects_goal_conditioning_and_a_learned_actor():
 
 def test_smoke_and_pilot_budgets_do_not_mutate_the_formal_protocol():
     protocol = load_actor_free_td_evaluation_protocol(CONFIGS["hybrid"])
-    smoke = configure_actor_free_td_evaluation_mode(
-        protocol, smoke=True, pilot=False
-    )
-    pilot = configure_actor_free_td_evaluation_mode(
-        protocol, smoke=False, pilot=True
-    )
+    smoke = configure_actor_free_td_evaluation_mode(protocol, smoke=True, pilot=False)
+    pilot = configure_actor_free_td_evaluation_mode(protocol, smoke=False, pilot=True)
 
     assert protocol["evaluation"]["episodes"] == 50
     assert protocol["planning"]["candidates"] == 300
@@ -189,6 +218,4 @@ def test_smoke_and_pilot_budgets_do_not_mutate_the_formal_protocol():
     assert pilot["evaluation"]["episodes"] == 10
     assert pilot["planning"]["candidates"] == 128
     with pytest.raises(ValueError, match="mutually exclusive"):
-        configure_actor_free_td_evaluation_mode(
-            protocol, smoke=True, pilot=True
-        )
+        configure_actor_free_td_evaluation_mode(protocol, smoke=True, pilot=True)

@@ -32,7 +32,9 @@ from tdwm.evaluation.mc_gt_lewm import _load_action_processor
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
+IMAGINARY_OBJECTIVE_VERSION = 3
 GOAL_VARIANT = "goal_hybrid"
+IMAGINARY_VARIANT = "imaginary_hybrid"
 SUPPORTED_VARIANTS = frozenset(
     {
         "parallel_real",
@@ -40,6 +42,7 @@ SUPPORTED_VARIANTS = frozenset(
         "serial_coupled",
         "hybrid",
         "goal_hybrid",
+        "imaginary_hybrid",
     }
 )
 FORMAL_O50_PLANNING = {
@@ -68,6 +71,14 @@ CHECKPOINT_SEMANTICS = {
 }
 
 
+def _objective_version_for_variant(variant: str) -> int:
+    if variant == GOAL_VARIANT:
+        return GOAL_OBJECTIVE_VERSION
+    if variant == IMAGINARY_VARIANT:
+        return IMAGINARY_OBJECTIVE_VERSION
+    return OBJECTIVE_VERSION
+
+
 def load_actor_free_td_evaluation_protocol(
     path: str | Path,
 ) -> dict[str, Any]:
@@ -86,9 +97,7 @@ def validate_actor_free_td_evaluation_protocol(
         raise ValueError("This evaluator only accepts Actor-Free TD-LeWM.")
     variant = protocol.get("variant")
     if variant not in SUPPORTED_VARIANTS:
-        raise ValueError(
-            f"Unsupported Actor-Free TD-LeWM variant {variant!r}."
-        )
+        raise ValueError(f"Unsupported Actor-Free TD-LeWM variant {variant!r}.")
     if (
         protocol.get("environment") != "cube"
         or protocol.get("stage") != "planner_evaluation"
@@ -98,9 +107,7 @@ def validate_actor_free_td_evaluation_protocol(
         raise ValueError("Evaluation requires stable-worldmodel 0.1.1.")
 
     successor = protocol.get("successor", {})
-    expected_objective_version = (
-        GOAL_OBJECTIVE_VERSION if variant == GOAL_VARIANT else OBJECTIVE_VERSION
-    )
+    expected_objective_version = _objective_version_for_variant(str(variant))
     if int(successor.get("objective_version", -1)) != expected_objective_version:
         raise ValueError(
             "Actor-Free TD-LeWM successor objective_version differs from its variant."
@@ -108,10 +115,13 @@ def validate_actor_free_td_evaluation_protocol(
     for key, expected in CHECKPOINT_SEMANTICS.items():
         if successor.get(key) != expected:
             raise ValueError(f"successor.{key} must be {expected!r}.")
-    if min(
-        int(successor.get("history_size", 0)),
-        int(successor.get("hidden_dim", 0)),
-    ) <= 0:
+    if (
+        min(
+            int(successor.get("history_size", 0)),
+            int(successor.get("hidden_dim", 0)),
+        )
+        <= 0
+    ):
         raise ValueError("Successor history and hidden dimensions must be positive.")
     if successor.get("feature_basis") != "augmented_latent_squared_distance":
         raise ValueError("The successor feature basis differs from planning.")
@@ -132,6 +142,16 @@ def validate_actor_free_td_evaluation_protocol(
             "goal_cost": "normalized_discounted_latent_mse",
         }
         for key, expected in goal_semantics.items():
+            if successor.get(key) != expected:
+                raise ValueError(f"successor.{key} must be {expected!r}.")
+    if variant == IMAGINARY_VARIANT:
+        imaginary_semantics = {
+            "immediate_feature_source": "real_ema_next_latent",
+            "bootstrap_state_source": ("ema_lewm_predicted_next_from_real_ema_history"),
+            "imaginary_horizon": 1,
+            "imaginary_predictor_gradient": "target_ema_stop_gradient",
+        }
+        for key, expected in imaginary_semantics.items():
             if successor.get(key) != expected:
                 raise ValueError(f"successor.{key} must be {expected!r}.")
 
@@ -155,7 +175,9 @@ def validate_actor_free_td_evaluation_protocol(
 
     evaluation = protocol.get("evaluation", {})
     if evaluation.get("episodes") != 50 or evaluation.get("goal_offset") != 50:
-        raise ValueError("The formal Actor-Free TD-LeWM protocol is Cube O50/50 episodes.")
+        raise ValueError(
+            "The formal Actor-Free TD-LeWM protocol is Cube O50/50 episodes."
+        )
     objective = protocol.get("inference_objective", {})
     expected_goal_usage = (
         "training_goal_readout_and_planning_linear_readout"
@@ -194,18 +216,12 @@ def _validate_checkpoint(
     checks = {
         "method": METHOD,
         "variant": expected_variant,
-        "objective_version": (
-            GOAL_OBJECTIVE_VERSION
-            if expected_variant == GOAL_VARIANT
-            else OBJECTIVE_VERSION
-        ),
+        "objective_version": _objective_version_for_variant(expected_variant),
         "deployment_checkpoint_version": 1,
     }
     for key, expected in checks.items():
         if payload.get(key) != expected:
-            raise ValueError(
-                f"Checkpoint {key} differs from the evaluation protocol."
-            )
+            raise ValueError(f"Checkpoint {key} differs from the evaluation protocol.")
     required_payload = {
         "world_model_state_dict",
         "successor_state_dict",
@@ -244,18 +260,26 @@ def _validate_checkpoint(
                 "real_goal_td_weight": 1.0,
             }
         )
+    if expected_variant == IMAGINARY_VARIANT:
+        expected_config.update(
+            {
+                "objective_version": IMAGINARY_OBJECTIVE_VERSION,
+                "immediate_feature_source": successor["immediate_feature_source"],
+                "bootstrap_state_source": successor["bootstrap_state_source"],
+                "imaginary_horizon": successor["imaginary_horizon"],
+                "imaginary_predictor_gradient": successor[
+                    "imaginary_predictor_gradient"
+                ],
+            }
+        )
     for key, expected in expected_config.items():
         actual = successor_config.get(key)
         if key == "gamma":
-            matches = actual is not None and np.isclose(
-                float(actual), float(expected)
-            )
+            matches = actual is not None and np.isclose(float(actual), float(expected))
         else:
             matches = actual == expected
         if not matches:
-            raise ValueError(
-                f"Successor checkpoint {key} differs from the protocol."
-            )
+            raise ValueError(f"Successor checkpoint {key} differs from the protocol.")
 
 
 def configure_actor_free_td_evaluation_mode(
@@ -322,8 +346,8 @@ def evaluate_actor_free_td_lewm(
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"
     checkpoint_file = _resolve_joint_checkpoint(checkpoint_path)
-    world_model, successor, successor_config, payload = (
-        load_actor_free_td_checkpoint(checkpoint_file, map_location=device)
+    world_model, successor, successor_config, payload = load_actor_free_td_checkpoint(
+        checkpoint_file, map_location=device
     )
     _validate_checkpoint(
         payload=payload,
@@ -396,9 +420,7 @@ def evaluate_actor_free_td_lewm(
         process={"action": action_processor},
         transform={"pixels": image_transform, "goal": image_transform},
         device=device,
-        clamp_tail_cost=bool(
-            protocol["successor"].get("clamp_successor_cost", True)
-        ),
+        clamp_tail_cost=bool(protocol["successor"].get("clamp_successor_cost", True)),
     )
 
     runtime = {
@@ -496,6 +518,8 @@ def evaluate_actor_free_td_lewm(
 
 __all__ = [
     "FORMAL_O50_PLANNING",
+    "IMAGINARY_OBJECTIVE_VERSION",
+    "IMAGINARY_VARIANT",
     "METHOD",
     "OBJECTIVE_VERSION",
     "SUPPORTED_VARIANTS",

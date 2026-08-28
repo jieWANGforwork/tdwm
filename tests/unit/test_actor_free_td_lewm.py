@@ -55,6 +55,24 @@ class CoefficientEchoSuccessor(nn.Module):
         return torch.cat((zeros, self.scale * current_action, zeros), dim=-1)
 
 
+class HistoryRecordingSuccessor(nn.Module):
+    """Record target histories while returning a trainable zero prediction."""
+
+    def __init__(self, *, history_size: int = 2) -> None:
+        super().__init__()
+        self.embed_dim = 1
+        self.action_dim = 1
+        self.history_size = history_size
+        self.output_dim = 3
+        self.scale = nn.Parameter(torch.zeros(()))
+        self.queried_histories: torch.Tensor | None = None
+
+    def forward(self, latent_history, previous_actions, current_action):
+        del previous_actions
+        self.queried_histories = latent_history.detach().clone()
+        return self.scale.expand(current_action.shape[:-1] + (self.output_dim,))
+
+
 class FixedRolloutWorld(nn.Module):
     def __init__(self, predicted: torch.Tensor) -> None:
         super().__init__()
@@ -181,6 +199,7 @@ def test_td_target_uses_next_real_ema_latent_and_dataset_next_action():
         ("serial_coupled", True, False),
         ("hybrid", True, True),
         ("goal_hybrid", True, True),
+        ("imaginary_hybrid", True, True),
     ],
 )
 def test_td_variants_have_the_intended_world_model_gradient_paths(
@@ -200,6 +219,9 @@ def test_td_variants_have_the_intended_world_model_gradient_paths(
     predicted = torch.randn(2, 6, 3, requires_grad=True)
     real_ema = torch.randn(2, 6, 3, requires_grad=True)
     actions = torch.randn(2, 6, 2)
+    imagined = None
+    if variant == "imaginary_hybrid":
+        imagined = torch.randn(2, 3, 3, requires_grad=True)
 
     output = actor_free_td_objective(
         head,
@@ -210,6 +232,7 @@ def test_td_variants_have_the_intended_world_model_gradient_paths(
         actions,
         gamma=0.9,
         variant=variant,
+        imagined_ema_next_latents=imagined,
     )
     output.td_loss.backward()
 
@@ -220,15 +243,17 @@ def test_td_variants_have_the_intended_world_model_gradient_paths(
     if real_has_grad:
         assert torch.count_nonzero(real.grad) > 0
     assert real_ema.grad is None
+    if imagined is not None:
+        assert imagined.grad is None
     assert any(
         parameter.grad is not None and torch.count_nonzero(parameter.grad) > 0
         for parameter in head.parameters()
     )
     assert all(parameter.grad is None for parameter in target.parameters())
     assert (output.real_td_loss is not None) is (
-        variant in {"parallel_real", "hybrid", "goal_hybrid"}
+        variant in {"parallel_real", "hybrid", "goal_hybrid", "imaginary_hybrid"}
     )
-    if variant in {"hybrid", "goal_hybrid"}:
+    if variant in {"hybrid", "goal_hybrid", "imaginary_hybrid"}:
         assert torch.allclose(
             output.td_loss,
             output.predicted_td_loss + output.real_td_loss,
@@ -239,6 +264,71 @@ def test_td_variants_have_the_intended_world_model_gradient_paths(
         assert torch.equal(output.td_loss, output.real_td_loss)
     else:
         assert torch.equal(output.td_loss, output.predicted_td_loss)
+
+
+def test_imaginary_hybrid_replaces_only_bootstrap_history_next_latent():
+    online = HistoryRecordingSuccessor()
+    target = HistoryRecordingSuccessor().requires_grad_(False)
+    real = torch.zeros(1, 6, 1, requires_grad=True)
+    predicted = torch.zeros_like(real, requires_grad=True)
+    real_ema = torch.arange(6, dtype=torch.float32).reshape(1, 6, 1)
+    actions = torch.arange(6, dtype=torch.float32).reshape(1, 6, 1)
+    imagined = torch.tensor([[[30.0], [40.0], [50.0]]], requires_grad=True)
+
+    output = actor_free_td_objective(
+        online,
+        target,
+        real,
+        predicted,
+        real_ema,
+        actions,
+        gamma=0.5,
+        variant="imaginary_hybrid",
+        imagined_ema_next_latents=imagined,
+    )
+
+    assert target.queried_histories is not None
+    expected_histories = torch.tensor(
+        [[[[2.0], [30.0]], [[3.0], [40.0]], [[4.0], [50.0]]]]
+    )
+    assert torch.equal(target.queried_histories, expected_histories)
+    expected_target = 0.5 * successor_feature_basis(real_ema[:, 3:])
+    expected_branch = expected_target.square().mean()
+    assert torch.allclose(output.predicted_td_loss, expected_branch)
+    assert torch.allclose(output.real_td_loss, expected_branch)
+    assert torch.allclose(output.td_loss, 2.0 * expected_branch)
+    assert torch.allclose(
+        output.imaginary_next_mse,
+        (imagined.detach() - real_ema[:, 3:]).square().mean(),
+    )
+
+    output.td_loss.backward()
+    assert imagined.grad is None
+    assert all(parameter.grad is None for parameter in target.parameters())
+
+    with pytest.raises(ValueError, match="requires EMA-predicted next latents"):
+        actor_free_td_objective(
+            online,
+            target,
+            real,
+            predicted,
+            real_ema,
+            actions,
+            gamma=0.5,
+            variant="imaginary_hybrid",
+        )
+    with pytest.raises(ValueError, match="only valid for imaginary_hybrid"):
+        actor_free_td_objective(
+            online,
+            target,
+            real,
+            predicted,
+            real_ema,
+            actions,
+            gamma=0.5,
+            variant="hybrid",
+            imagined_ema_next_latents=imagined,
+        )
 
 
 def test_goal_hybrid_uses_hindsight_goal_bellman_target_without_clamping():
@@ -402,7 +492,10 @@ def test_cem_cost_splices_h_minus_one_explicit_steps_and_final_action_tail():
     assert torch.allclose(successor.current_action, actions[..., 2, :])
 
 
-@pytest.mark.parametrize("variant", ["serial_coupled", "parallel_real", "goal_hybrid"])
+@pytest.mark.parametrize(
+    "variant",
+    ["serial_coupled", "parallel_real", "goal_hybrid", "imaginary_hybrid"],
+)
 def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
     tmp_path,
     variant,
@@ -416,7 +509,9 @@ def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
     )
     successor_config = {
         "method": "actor_free_td_lewm",
-        "objective_version": 2 if variant == "goal_hybrid" else 1,
+        "objective_version": (
+            2 if variant == "goal_hybrid" else 3 if variant == "imaginary_hybrid" else 1
+        ),
         "deployment_checkpoint_version": 1,
         "embed_dim": 2,
         "action_dim": 1,
@@ -449,12 +544,27 @@ def test_joint_checkpoint_loader_restores_goal_free_successor_and_world_model(
                 "real_goal_td_weight": 1.0,
             }
         )
+    if variant == "imaginary_hybrid":
+        successor_config.update(
+            {
+                "immediate_feature_source": "real_ema_next_latent",
+                "bootstrap_state_source": (
+                    "ema_lewm_predicted_next_from_real_ema_history"
+                ),
+                "imaginary_horizon": 1,
+                "imaginary_predictor_gradient": "target_ema_stop_gradient",
+            }
+        )
     checkpoint = tmp_path / "actor_free_td.pt"
     torch.save(
         {
             "method": "actor_free_td_lewm",
             "variant": variant,
-            "objective_version": 2 if variant == "goal_hybrid" else 1,
+            "objective_version": (
+                2
+                if variant == "goal_hybrid"
+                else 3 if variant == "imaginary_hybrid" else 1
+            ),
             "deployment_checkpoint_version": 1,
             "successor_state_dict": successor.state_dict(),
             "successor_config": successor_config,

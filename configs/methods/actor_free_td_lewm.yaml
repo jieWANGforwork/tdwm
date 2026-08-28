@@ -21,6 +21,7 @@ input:
 targets:
   immediate_feature: augmented_ema_next_latent_squared_distance_basis
   bootstrap: ema_successor_on_real_ema_next_history
+  imaginary_bootstrap: ema_successor_on_real_ema_history_with_predicted_next_latent
   terminal: recorded_next_action_is_non_finite
   clip_boundary_is_terminal: false
 
@@ -42,6 +43,12 @@ variants:
     goal_readout_td_branches: [real_context, predicted_context]
     goal_enters_successor_head: false
     predicted_context_detach: false
+  imaginary_hybrid:
+    td_branches: [real_context, predicted_context]
+    immediate_feature_source: real_ema_next_latent
+    bootstrap_state_source: ema_lewm_predicted_next_from_real_ema_history
+    imaginary_horizon: 1
+    predicted_context_detach: false
 
 loss:
   retained_lewm: prediction_mse_plus_0.09_sigreg
@@ -56,9 +63,9 @@ inference:
 
 checkpoint:
   method: actor_free_td_lewm
-  objective_version: {base_variants: 1, goal_hybrid: 2}
+  objective_version: {base_variants: 1, goal_hybrid: 2, imaginary_hybrid: 3}
   deployment_checkpoint_version: 1
   self_contained_world_and_successor: true
 
 provenance:
-  note: The fifth variant retains Hybrid SF-TD and adds fixed-readout hindsight Goal-TD without an actor or goal input to the successor head.
+  note: Goal Hybrid adds fixed-readout hindsight Goal-TD; Imaginary Hybrid changes only the one-step bootstrap history to an EMA LeWM-predicted next latent while retaining the real EMA immediate feature.

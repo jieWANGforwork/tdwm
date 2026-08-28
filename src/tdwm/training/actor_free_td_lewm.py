@@ -52,15 +52,21 @@ from tdwm.training.rf_successor_lewm import (
 METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
+IMAGINARY_OBJECTIVE_VERSION = 3
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 FORMAL_OPTIMIZER_UPDATES = 127_960
 GOAL_VARIANT = "goal_hybrid"
+IMAGINARY_VARIANT = "imaginary_hybrid"
 
 
 def objective_version_for_variant(variant: str) -> int:
     """Return the locked semantic objective version for a TD variant."""
 
-    return GOAL_OBJECTIVE_VERSION if variant == GOAL_VARIANT else OBJECTIVE_VERSION
+    if variant == GOAL_VARIANT:
+        return GOAL_OBJECTIVE_VERSION
+    if variant == IMAGINARY_VARIANT:
+        return IMAGINARY_OBJECTIVE_VERSION
+    return OBJECTIVE_VERSION
 
 
 def load_actor_free_td_training_protocol(path: str | Path) -> dict[str, Any]:
@@ -105,12 +111,19 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
         "serial_coupled": (0.0, 1.0, False, 0.0, 0.0),
         "hybrid": (1.0, 1.0, False, 0.0, 0.0),
         "goal_hybrid": (1.0, 1.0, False, 1.0, 1.0),
+        "imaginary_hybrid": (1.0, 1.0, False, 0.0, 0.0),
     }[variant]
     objective = protocol.get("joint_objective", {})
+    expected_td_target = (
+        "real_ema_next_feature_plus_ema_successor_imagined_next_history_"
+        "dataset_next_action"
+        if variant == IMAGINARY_VARIANT
+        else "ema_next_latent_plus_ema_successor_dataset_next_action"
+    )
     expected_objective = {
         "local_prediction": "original_lewm_one_step_mse",
         "regularization": "original_lewm_sigreg",
-        "td_target": "ema_next_latent_plus_ema_successor_dataset_next_action",
+        "td_target": expected_td_target,
         "target_encoder": "ema_world_model",
         "bootstrap_action": "dataset_next_action",
         "terminal_mask": "next_action_nan_invalid",
@@ -146,6 +159,19 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
         for key, expected in goal_objective.items():
             if objective.get(key) != expected:
                 raise ValueError(f"joint_objective.{key} must be {expected!r}.")
+    if variant == IMAGINARY_VARIANT:
+        imaginary_objective = {
+            "imaginary_transition_model": "ema_lewm_predictor",
+            "imaginary_immediate_feature": "real_ema_next_latent",
+            "imaginary_bootstrap_history": (
+                "shift_real_ema_history_append_ema_predicted_next_latent"
+            ),
+            "imaginary_horizon": 1,
+            "imaginary_target_gradient": "stop_gradient",
+        }
+        for key, expected in imaginary_objective.items():
+            if objective.get(key) != expected:
+                raise ValueError(f"joint_objective.{key} must be {expected!r}.")
 
     successor = protocol.get("successor", {})
     locked_successor = {
@@ -172,6 +198,16 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
             "goal_readout_precision": "float32",
         }
         for key, expected in goal_successor.items():
+            if successor.get(key) != expected:
+                raise ValueError(f"successor.{key} must be {expected!r}.")
+    if variant == IMAGINARY_VARIANT:
+        imaginary_successor = {
+            "immediate_feature_source": "real_ema_next_latent",
+            "bootstrap_state_source": ("ema_lewm_predicted_next_from_real_ema_history"),
+            "imaginary_horizon": 1,
+            "imaginary_predictor_gradient": "target_ema_stop_gradient",
+        }
+        for key, expected in imaginary_successor.items():
             if successor.get(key) != expected:
                 raise ValueError(f"successor.{key} must be {expected!r}.")
     if int(successor.get("hidden_dim", 0)) <= 0:
@@ -316,6 +352,38 @@ def build_actor_free_td_inputs(
     )
 
 
+def build_imaginary_ema_next_latents(
+    target_local_prediction: torch.Tensor,
+    *,
+    batch_size: int,
+    num_steps: int,
+    history_size: int,
+) -> torch.Tensor:
+    """Align EMA LeWM window predictions with TD next-state indices.
+
+    Window start zero predicts the first online TD state ``z_H``.  Imaginary TD
+    starts at that state, so its bootstrap next latents are predictions from
+    window starts ``1:``: ``z_(H+1)`` through ``z_(T-1)``.
+    """
+
+    local_count = int(num_steps) - int(history_size)
+    if target_local_prediction.ndim != 3 or local_count <= 1:
+        raise ValueError("EMA local predictions must contain all TD next states.")
+    expected_prefix = (local_count * int(batch_size), int(history_size))
+    if target_local_prediction.shape[:2] != expected_prefix:
+        raise ValueError(
+            "EMA local predictions must have start-major shape "
+            f"{expected_prefix + (target_local_prediction.shape[-1],)}."
+        )
+    embed_dim = target_local_prediction.shape[-1]
+    one_step = (
+        target_local_prediction[:, -1]
+        .reshape(local_count, int(batch_size), embed_dim)
+        .transpose(0, 1)
+    )
+    return one_step[:, 1:]
+
+
 @dataclass(frozen=True)
 class ActorFreeTrainingSchedule:
     total_scheduler_steps: int
@@ -351,12 +419,14 @@ def resolve_actor_free_training_schedule(
 
 
 def _encode_online_and_target(
-    online_model: Any, target_model: Any, encoder_input: dict[str, Any],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    online_model: Any,
+    target_model: Any,
+    encoder_input: dict[str, Any],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     online = online_model.encode(dict(encoder_input))
     with torch.no_grad():
         target = target_model.encode(dict(encoder_input))
-    return online["emb"], online["act_emb"], target["emb"]
+    return online["emb"], online["act_emb"], target["emb"], target["act_emb"]
 
 
 def _build_training_module(
@@ -418,7 +488,8 @@ def _build_training_module(
                 )
             sigreg = protocol["loss"]["sigreg"]
             self.sigreg = swm.wm.SIGReg(
-                knots=int(sigreg["knots"]), num_proj=int(sigreg["num_projections"]),
+                knots=int(sigreg["knots"]),
+                num_proj=int(sigreg["num_projections"]),
             )
 
         def train(self, mode: bool = True):
@@ -431,7 +502,8 @@ def _build_training_module(
             if self.auxiliary_warmup_steps <= 0:
                 return 1.0
             return min(
-                1.0, float(self.global_step + 1) / float(self.auxiliary_warmup_steps),
+                1.0,
+                float(self.global_step + 1) / float(self.auxiliary_warmup_steps),
             )
 
         def _preprocess(self, pixels: torch.Tensor) -> torch.Tensor:
@@ -465,6 +537,7 @@ def _build_training_module(
                 embeddings,
                 action_embeddings,
                 target_embeddings,
+                target_action_embeddings,
             ) = _encode_online_and_target(self.model, self.target_model, encoder_input)
             expected_steps = int(protocol["sequence"]["num_steps"])
             if embeddings.shape[1] != expected_steps:
@@ -509,6 +582,32 @@ def _build_training_module(
                 local_prediction,
                 history_size=self.history_size,
             )
+            imagined_ema_next_latents = None
+            if self.variant == IMAGINARY_VARIANT:
+                target_local_histories = torch.cat(
+                    [
+                        target_embeddings[:, start : start + self.history_size]
+                        for start in range(local_count)
+                    ],
+                    dim=0,
+                )
+                target_local_actions = torch.cat(
+                    [
+                        target_action_embeddings[:, start : start + self.history_size]
+                        for start in range(local_count)
+                    ],
+                    dim=0,
+                )
+                with torch.no_grad():
+                    target_local_prediction = self.target_model.predict(
+                        target_local_histories, target_local_actions
+                    )
+                    imagined_ema_next_latents = build_imaginary_ema_next_latents(
+                        target_local_prediction,
+                        batch_size=batch_size,
+                        num_steps=expected_steps,
+                        history_size=self.history_size,
+                    )
             goal_offsets = None
             if self.variant == GOAL_VARIANT and stage == "train":
                 assert self.goal_generator is not None
@@ -529,6 +628,7 @@ def _build_training_module(
                 terminals=td_inputs.terminals,
                 first_current_index=self.history_size,
                 goal_offsets=goal_offsets,
+                imagined_ema_next_latents=imagined_ema_next_latents,
             )
             real_td_loss = (
                 td_output.real_td_loss
@@ -586,6 +686,7 @@ def _build_training_module(
                 f"{stage}/terminal_fraction": td_output.terminal_fraction.detach(),
                 f"{stage}/td_pairs": loss.new_tensor(float(td_output.pair_count)),
                 f"{stage}/td_weight_scale": loss.new_tensor(auxiliary_scale),
+                f"{stage}/imaginary_next_mse": (td_output.imaginary_next_mse.detach()),
             }
             if episode_ids is not None:
                 metrics[f"{stage}/unique_episodes_per_batch"] = loss.new_tensor(
@@ -593,7 +694,7 @@ def _build_training_module(
                 )
             if cache_bytes is not None:
                 metrics[f"{stage}/compressed_cache_gib"] = loss.new_tensor(
-                    float(cache_bytes) / 1024 ** 3
+                    float(cache_bytes) / 1024**3
                 )
             self.log_dict(
                 metrics,
@@ -616,7 +717,9 @@ def _build_training_module(
         def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
             del outputs, batch, batch_idx
             ema_update(
-                self.target_model, self.model, decay=self.target_world_ema_decay,
+                self.target_model,
+                self.model,
+                decay=self.target_world_ema_decay,
             )
             ema_update(
                 self.target_successor,
@@ -640,7 +743,8 @@ def _build_training_module(
                 weight_decay=float(optimizer_cfg["weight_decay"]),
             )
             warmup_steps = max(
-                1, int(float(protocol["scheduler"]["warmup_fraction"]) * total_steps),
+                1,
+                int(float(protocol["scheduler"]["warmup_fraction"]) * total_steps),
             )
 
             def learning_rate_scale(step: int) -> float:
@@ -722,6 +826,17 @@ def _successor_config(
                     objective["predicted_goal_td_weight"]
                 ),
                 "real_goal_td_weight": float(objective["real_goal_td_weight"]),
+            }
+        )
+    if variant == IMAGINARY_VARIANT:
+        config.update(
+            {
+                "immediate_feature_source": successor["immediate_feature_source"],
+                "bootstrap_state_source": successor["bootstrap_state_source"],
+                "imaginary_horizon": int(successor["imaginary_horizon"]),
+                "imaginary_predictor_gradient": successor[
+                    "imaginary_predictor_gradient"
+                ],
             }
         )
     return config
@@ -932,7 +1047,8 @@ def train_actor_free_td_lewm(
             decoded_frame_store_metadata,
         ) = _prepare_decoded_frame_store(protocol, dataset_source, dataset)
         dataset = StrideAwareLanceDataset(
-            dataset, decoded_frame_store=decoded_frame_store,
+            dataset,
+            decoded_frame_store=decoded_frame_store,
         )
     elif os.environ.get(DECODED_FRAME_STORE_ENV) is not None:
         raise ValueError(
@@ -1058,7 +1174,9 @@ def train_actor_free_td_lewm(
     if formal_epoch_steps > available_epoch_steps:
         raise ValueError("optimizer_steps_per_epoch exceeds available batches.")
     train_limit = resolve_train_batch_limit(
-        smoke=smoke, max_steps=max_steps, train_loader_length=available_epoch_steps,
+        smoke=smoke,
+        max_steps=max_steps,
+        train_loader_length=available_epoch_steps,
     )
     if not smoke and max_steps is None:
         train_limit = formal_epoch_steps
@@ -1225,9 +1343,12 @@ __all__ = [
     "FORMAL_OPTIMIZER_UPDATES",
     "GOAL_OBJECTIVE_VERSION",
     "GOAL_VARIANT",
+    "IMAGINARY_OBJECTIVE_VERSION",
+    "IMAGINARY_VARIANT",
     "METHOD",
     "OBJECTIVE_VERSION",
     "build_actor_free_td_inputs",
+    "build_imaginary_ema_next_latents",
     "load_actor_free_td_training_protocol",
     "objective_version_for_variant",
     "resolve_actor_free_training_schedule",
