@@ -12,15 +12,17 @@ Goal Critic 收集 `f_only/c_only/f_plus_c`，合计 21 个正式 O50。
 服务器导出目录需使用以下轻量结构：
 
 ```text
-<bundle>/<variant>/training_summary.json
-<bundle>/<variant>/training_curve.csv
+<bundle>/<variant>/training_result.json
+<bundle>/<variant>/training_manifest.json
+<bundle>/<variant>/metrics.csv
 <bundle>/<variant>/<score_mode>/results.json
 <bundle>/<variant>/<score_mode>/protocol_manifest.json
 <bundle>/<variant>/<score_mode>/episode_selection.json
 ```
 
-`training_curve.csv` 必须含完整 epochs 1--10 的 `train_loss` 与 `validation_loss`。正式
-归档前运行：
+三个训练文件必须由 trainer 原样导出；不接受人工 `training_summary.json` 或整理后的
+曲线。归档器从 Lightning `metrics.csv` 的 `train/loss_epoch` 与 `validation/loss` 自动
+抽取完整 epochs 1--10 曲线并计算三个原始文件的 SHA-256。正式归档前运行：
 
 ```bash
 python scripts/archive_actor_free_td_lewm_o50.py --bundle <bundle> --validate-only
@@ -28,11 +30,14 @@ python scripts/archive_actor_free_td_lewm_o50.py --bundle <bundle>
 python scripts/archive_actor_free_td_lewm_o50.py --bundle <bundle> --check
 ```
 
-硬性验收包括：7×3 文件齐全；全部为 O50 且非 smoke/pilot；21 个运行使用完全相同的
-selection；每方法 3 种 mode 使用同一 checkpoint，且与训练摘要 SHA-256 相同；逐 episode
-success 与汇总 rate 一致；10-epoch 曲线的最终值和 best validation 与训练摘要一致。旧版
-evaluator 没有显式 score-mode 字段时，只允许其 combined 结果进入 `f_plus_g/f_plus_c`，
-不能把它解释为 F-only 或 G/C-only。
+硬性验收包括：7×3 文件齐全；全部为 O50 且非 smoke/pilot；selection 必须能按 StableWM
+0.1.1 seed 42 重算且精确 SHA-256 为 `e46ea81c…ee7`；每方法 3 种 mode 使用同一路径、
+同一 SHA-256 checkpoint，且路径对应训练器 epoch-10 export；逐 episode canonical
+`metrics.episode_successes` 与汇总 rate 一致；10 个 epoch aggregate、最终 step 与
+trainer 的 127,960 global steps 一致。21 个运行还必须共享完整正式 runtime/image/dataset/
+model/world/evaluation/planning、关键软件版本、数据 format/size/conversion provenance、
+action normalization 和 world 参数量指纹。旧版 evaluator 没有显式 score-mode 字段时，
+只允许其 combined 结果进入 `f_plus_g/f_plus_c`，不能把它解释为 F-only 或 G/C-only。
 
 完整结果尚未导入仓库时，本索引只记录收集协议，不手工复制运行中 loss、fixture 或不完整
 排名。最终轻量归档将位于 `reports/artifacts/actor_free_td_lewm_cube_seed3072/`；checkpoint、

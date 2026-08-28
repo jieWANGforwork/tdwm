@@ -1,10 +1,10 @@
 """Validate and archive the fixed-seed Actor-Free TD-LeWM Cube O50 study.
 
-The archive intentionally consumes only lightweight JSON outputs and a compact
-training summary.  It never reads or copies datasets, checkpoints, videos, or
-raw logs.  A complete input bundle has seven variants and three inference
-scores per variant; partial bundles are rejected instead of being rendered as
-partial results.
+The archive consumes the evaluator's JSON outputs and the trainer's original
+``training_result.json``, ``training_manifest.json``, and Lightning
+``metrics.csv``.  It computes source hashes and epoch summaries itself; no
+hand-written result or curve summary is trusted.  Datasets, checkpoints,
+videos, and console logs are never copied into the repository.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+import numpy as np
+
 
 SCHEMA_VERSION = 1
 METHOD = "actor_free_td_lewm"
@@ -34,6 +36,11 @@ PLANNING_SEED = 42
 ENVIRONMENT = "cube"
 DATASET_IDENTIFIER = "quentinll/lewm-cube"
 STABLE_WORLDMODEL_VERSION = "0.1.1"
+SELECTION_SHA256 = "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7"
+DATASET_EPISODES = 10_000
+DATASET_TRANSITIONS = 2_010_000
+EPISODE_STEPS = 201
+OPTIMIZER_STEPS_PER_EPOCH = 12_796
 
 VARIANT_ORDER = (
     "serial_decoupled",
@@ -49,6 +56,7 @@ SUCCESSOR_MODES = ("f_only", "g_only", "f_plus_g")
 DIRECT_MODES = ("f_only", "c_only", "f_plus_c")
 
 FORMAL_PLANNING = {
+    "solver": "CEM",
     "horizon": 5,
     "candidates": 300,
     "iterations": 30,
@@ -60,8 +68,99 @@ FORMAL_PLANNING = {
     "episode_budget": 100,
     "planning_seed": PLANNING_SEED,
     "solver_batch_size": 1,
+    "history_len": 1,
     "warm_start": True,
     "initial_distribution": "cem_gaussian_no_actor",
+}
+
+FORMAL_RUNTIME = {
+    "stable_worldmodel_version": STABLE_WORLDMODEL_VERSION,
+    "import": "import stable_worldmodel as swm",
+    "precision": "fp32",
+}
+FORMAL_IMAGE_PREPROCESSING = {
+    "source": "stable_pretraining.data.dataset_stats.ImageNet",
+    "mean": [0.485, 0.456, 0.406],
+    "std": [0.229, 0.224, 0.225],
+}
+FORMAL_DATASET = {
+    "identifier": DATASET_IDENTIFIER,
+    "file": "ogbench/cube_single_expert.h5",
+    "expected_size_bytes": 101_942_558_720,
+    "accepted_size_bytes": [101_942_558_720, 74_104_077_358],
+    "expected_episodes": DATASET_EPISODES,
+    "expected_transitions": DATASET_TRANSITIONS,
+    "episode_steps": EPISODE_STEPS,
+    "lance": {
+        "manifest_suffix": ".manifest.json",
+        "image_codec": "jpeg",
+        "jpeg_quality": 100,
+    },
+    "keys_to_load": [
+        "pixels",
+        "action",
+        "qpos",
+        "qvel",
+        "privileged_block_0_pos",
+        "privileged_block_0_quat",
+    ],
+}
+FORMAL_MODEL = {"embed_dim": 192}
+FORMAL_WORLD = {
+    "env_name": "swm/OGBCube-v0",
+    "env_type": "single",
+    "ob_type": "states",
+    "image_size": 224,
+    "multiview": False,
+    "visualize_info": False,
+    "terminate_at_goal": True,
+    "success_threshold_meters": 0.04,
+}
+FORMAL_EVALUATION = {
+    "episodes": EPISODES,
+    "goal_offset": GOAL_OFFSET,
+    "start_goal_source": "same_dataset_episode",
+}
+COMMON_PROTOCOL_SECTIONS = {
+    "runtime": FORMAL_RUNTIME,
+    "image_preprocessing": FORMAL_IMAGE_PREPROCESSING,
+    "dataset": FORMAL_DATASET,
+    "model": FORMAL_MODEL,
+    "world": FORMAL_WORLD,
+    "evaluation": FORMAL_EVALUATION,
+    "planning": FORMAL_PLANNING,
+}
+RUNTIME_FINGERPRINT_KEYS = (
+    "stable_worldmodel",
+    "torch",
+    "python",
+    "platform",
+    "device",
+    "cuda_device",
+    "compatibility_adapter",
+)
+TRAINING_COMMON_PROTOCOL_SECTIONS = (
+    "runtime",
+    "dataset",
+    "split",
+    "sequence",
+    "image_preprocessing",
+    "normalization",
+    "model",
+    "loss",
+    "loader",
+    "logging",
+    "scheduler",
+    "training",
+)
+OBJECTIVE_VERSIONS = {
+    "serial_decoupled": 1,
+    "serial_coupled": 1,
+    "hybrid": 1,
+    "parallel_real": 1,
+    "goal_hybrid": 2,
+    "imaginary_hybrid": 3,
+    "direct_goal_hybrid": 3,
 }
 
 DISPLAY_NAMES = {
@@ -145,6 +244,12 @@ class EvaluationRun:
     evaluation_commit: str
     runtime: Mapping[str, Any]
     dataset: Mapping[str, Any]
+    normalization: Mapping[str, Any]
+    checkpoint_path: str
+    common_protocol_sha256: str
+    runtime_fingerprint_sha256: str
+    dataset_fingerprint_sha256: str
+    normalization_fingerprint_sha256: str
     world_model_parameter_count: int
     head_parameter_count: int
     source_sha256: Mapping[str, str]
@@ -154,12 +259,19 @@ class EvaluationRun:
 class TrainingRun:
     variant: str
     training_commit: str
-    checkpoint_sha256: str
+    run_dir: str
+    last_checkpoint: str
+    deployment_checkpoint: str
     runtime: Mapping[str, Any]
+    dataset: Mapping[str, Any]
+    model: Mapping[str, Any]
     metrics: Mapping[str, Any]
     source_file_sha256: Mapping[str, str]
-    summary_sha256: str
-    curve_sha256: str
+    world_model_parameter_count: int
+    head_parameter_count: int
+    common_protocol_sha256: str
+    runtime_fingerprint_sha256: str
+    dataset_source_fingerprint_sha256: str
     curve: tuple[Mapping[str, float | int], ...]
 
 
@@ -267,20 +379,47 @@ def _normalize_success_rate(value: Any, *, context: str) -> float:
 
 
 def _success_vector(metrics: Mapping[str, Any], *, context: str) -> tuple[bool, ...]:
-    values = metrics.get("success")
-    if not isinstance(values, list):
-        raise _error(context, "metrics.success must be a JSON array")
-    if len(values) != EPISODES:
-        raise _error(context, f"metrics.success must contain exactly {EPISODES} rows")
-    normalized: list[bool] = []
-    for index, value in enumerate(values):
-        if type(value) is bool:
-            normalized.append(value)
-        elif isinstance(value, int) and value in (0, 1):
-            normalized.append(bool(value))
-        else:
-            raise _error(context, f"metrics.success[{index}] is not boolean/0/1")
-    return tuple(normalized)
+    def normalize(values: Any, field: str) -> tuple[bool, ...]:
+        if not isinstance(values, list):
+            raise _error(context, f"metrics.{field} must be a JSON array")
+        if len(values) != EPISODES:
+            raise _error(
+                context,
+                f"metrics.{field} must contain exactly {EPISODES} rows",
+            )
+        normalized: list[bool] = []
+        for index, value in enumerate(values):
+            if type(value) is bool:
+                normalized.append(value)
+            elif isinstance(value, int) and value in (0, 1):
+                normalized.append(bool(value))
+            else:
+                raise _error(
+                    context,
+                    f"metrics.{field}[{index}] is not boolean/0/1",
+                )
+        return tuple(normalized)
+
+    canonical = (
+        normalize(metrics["episode_successes"], "episode_successes")
+        if "episode_successes" in metrics
+        else None
+    )
+    legacy = normalize(metrics["success"], "success") if "success" in metrics else None
+    if canonical is None and legacy is None:
+        raise _error(
+            context,
+            "metrics.episode_successes is required (legacy metrics.success is accepted)",
+        )
+    if canonical is not None and legacy is not None and canonical != legacy:
+        raise _error(
+            context,
+            "metrics.episode_successes and legacy metrics.success disagree",
+        )
+    if canonical is not None:
+        return canonical
+    assert legacy is not None
+    return legacy
 
 
 def _selection(value: Any, *, context: str) -> dict[str, tuple[int, ...]]:
@@ -296,6 +435,16 @@ def _selection(value: Any, *, context: str) -> dict[str, tuple[int, ...]]:
         normalized[key] = tuple(values)
     if any(item < 0 for key in required for item in normalized[key]):
         raise _error(context, "selection values must be non-negative")
+    if any(item >= DATASET_EPISODES for item in normalized["episode_indices"]):
+        raise _error(context, f"episode_indices must lie in [0,{DATASET_EPISODES})")
+    for index, (start, goal) in enumerate(
+        zip(normalized["start_steps"], normalized["goal_steps"])
+    ):
+        if not 0 <= start < goal < EPISODE_STEPS:
+            raise _error(
+                context,
+                f"selection row {index} must satisfy 0 <= start < goal < {EPISODE_STEPS}",
+            )
     if any(
         goal != start + GOAL_OFFSET
         for start, goal in zip(
@@ -315,6 +464,29 @@ def _selection(value: Any, *, context: str) -> dict[str, tuple[int, ...]]:
     )
     if len(set(pairs)) != EPISODES:
         raise _error(context, "the O50 selection contains duplicate start-goal pairs")
+
+    valid_per_episode = EPISODE_STEPS - GOAL_OFFSET
+    rng = np.random.default_rng(PLANNING_SEED)
+    expected_ranks = np.sort(
+        rng.choice(
+            DATASET_EPISODES * valid_per_episode - 1,
+            size=EPISODES,
+            replace=False,
+        )
+    )
+    expected_episodes = expected_ranks // valid_per_episode
+    expected_starts = expected_ranks % valid_per_episode
+    expected = {
+        "episode_indices": tuple(int(item) for item in expected_episodes),
+        "start_steps": tuple(int(item) for item in expected_starts),
+        "goal_steps": tuple(int(item + GOAL_OFFSET) for item in expected_starts),
+        "valid_row_ranks": tuple(int(item) for item in expected_ranks),
+    }
+    if normalized != expected:
+        raise _error(
+            context,
+            "selection is not the StableWM 0.1.1 Cube seed-42 O50 sample",
+        )
     return normalized
 
 
@@ -327,46 +499,116 @@ def _pair_hash(episode_index: int, start_step: int, goal_step: int) -> str:
     return _sha256_bytes(_canonical_json_bytes(payload))
 
 
-def _validate_training_curve(path: Path, variant: str) -> tuple[Mapping[str, Any], ...]:
-    context = f"{variant}/training_curve.csv"
+def _parse_csv_integer(value: Any, *, context: str) -> int:
+    number = _parse_csv_number(value)
+    if not math.isfinite(number) or not number.is_integer():
+        raise _error(context, "must be an integer")
+    return int(number)
+
+
+def _has_csv_value(value: Any) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _validate_training_metrics(
+    path: Path, variant: str
+) -> tuple[tuple[Mapping[str, Any], ...], Mapping[str, Any]]:
+    context = f"{variant}/metrics.csv"
     if not path.is_file():
         raise _error(context, f"missing required file {path}")
-    rows: list[dict[str, Any]] = []
+    train_by_epoch: dict[int, tuple[float, int]] = {}
+    validation_by_epoch: dict[int, tuple[float, int]] = {}
+    observed_steps: list[int] = []
     try:
         with path.open(newline="", encoding="utf-8") as stream:
             reader = csv.DictReader(stream)
-            required = {"epoch", "train_loss", "validation_loss"}
+            required = {"epoch", "step", "train/loss_epoch", "validation/loss"}
             missing = required.difference(reader.fieldnames or ())
             if missing:
                 raise _error(context, f"missing columns {sorted(missing)}")
             for position, source in enumerate(reader, start=1):
-                try:
-                    epoch = int(source["epoch"])
-                except (TypeError, ValueError) as exc:
-                    raise _error(context, f"row {position} epoch is not an integer") from exc
-                train_loss = _finite_number(
-                    _parse_csv_number(source["train_loss"]),
-                    context=f"{context} row {position} train_loss",
+                tracked = (
+                    _has_csv_value(source.get("train/loss_epoch"))
+                    or _has_csv_value(source.get("validation/loss"))
                 )
-                validation_loss = _finite_number(
-                    _parse_csv_number(source["validation_loss"]),
-                    context=f"{context} row {position} validation_loss",
+                if not _has_csv_value(source.get("step")):
+                    if tracked:
+                        raise _error(context, f"row {position} aggregate has no step")
+                    continue
+                step = _parse_csv_integer(
+                    source.get("step"), context=f"{context} row {position} step"
                 )
-                if train_loss < 0.0 or validation_loss < 0.0:
-                    raise _error(context, "loss values must be non-negative")
-                rows.append(
-                    {
-                        "epoch": epoch,
-                        "train_loss": train_loss,
-                        "validation_loss": validation_loss,
-                    }
+                if step < 0:
+                    raise _error(context, f"row {position} step must be non-negative")
+                observed_steps.append(step)
+                if not tracked:
+                    continue
+                epoch = _parse_csv_integer(
+                    source.get("epoch"), context=f"{context} row {position} epoch"
                 )
+                if not 0 <= epoch < TRAINING_EPOCHS:
+                    raise _error(context, f"row {position} epoch must lie in [0,9]")
+                for field, destination in (
+                    ("train/loss_epoch", train_by_epoch),
+                    ("validation/loss", validation_by_epoch),
+                ):
+                    if not _has_csv_value(source.get(field)):
+                        continue
+                    value = _finite_number(
+                        _parse_csv_number(source[field]),
+                        context=f"{context} row {position} {field}",
+                    )
+                    if value < 0.0:
+                        raise _error(context, f"row {position} {field} is negative")
+                    if epoch in destination:
+                        raise _error(
+                            context,
+                            f"epoch {epoch} contains more than one {field} aggregate",
+                        )
+                    destination[epoch] = (value, step)
     except OSError as exc:
         raise _error(context, f"cannot read {path}: {exc}") from exc
-    epochs = [row["epoch"] for row in rows]
-    if epochs != list(range(1, TRAINING_EPOCHS + 1)):
-        raise _error(context, "must contain exactly one ordered row for epochs 1..10")
-    return tuple(rows)
+    expected_epochs = set(range(TRAINING_EPOCHS))
+    if set(train_by_epoch) != expected_epochs:
+        raise _error(context, "must contain exactly one train/loss_epoch for epochs 0..9")
+    if set(validation_by_epoch) != expected_epochs:
+        raise _error(context, "must contain exactly one validation/loss for epochs 0..9")
+    if not observed_steps or max(observed_steps) != TRAINING_STEPS - 1:
+        raise _error(
+            context,
+            f"maximum CSV step must equal zero-based {TRAINING_STEPS - 1}",
+        )
+    curve: list[Mapping[str, Any]] = []
+    for epoch in range(TRAINING_EPOCHS):
+        expected_step = (epoch + 1) * OPTIMIZER_STEPS_PER_EPOCH - 1
+        train_loss, train_step = train_by_epoch[epoch]
+        validation_loss, validation_step = validation_by_epoch[epoch]
+        if train_step != expected_step or validation_step != expected_step:
+            raise _error(
+                context,
+                f"epoch {epoch} aggregates must use final step {expected_step}",
+            )
+        curve.append(
+            {
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "validation_loss": validation_loss,
+            }
+        )
+    best = min(curve, key=lambda row: float(row["validation_loss"]))
+    metrics = {
+        "final_epoch": {
+            "epoch": TRAINING_EPOCHS,
+            "train/loss": curve[-1]["train_loss"],
+            "validation/loss": curve[-1]["validation_loss"],
+        },
+        "best_validation": {
+            "epoch": best["epoch"],
+            "metric": "validation/loss",
+            "value": best["validation_loss"],
+        },
+    }
+    return tuple(curve), metrics
 
 
 def _parse_csv_number(value: Any) -> float:
@@ -376,105 +618,259 @@ def _parse_csv_number(value: Any) -> float:
         return math.nan
 
 
-def _validate_training_summary(path: Path, curve_path: Path, variant: str) -> TrainingRun:
-    context = f"{variant}/training_summary.json"
-    summary = _load_json(path, context=context)
-    expected_scalars = {
-        "schema_version": SCHEMA_VERSION,
+def _validate_dataset_provenance(
+    dataset: Mapping[str, Any],
+    *,
+    context: str,
+    require_embedded_conversion: bool = False,
+) -> None:
+    path = dataset.get("path")
+    if not isinstance(path, str) or not path:
+        raise _error(context, "dataset.path must be recorded")
+    dataset_format = dataset.get("format")
+    if dataset_format not in {"hdf5", "lance"}:
+        raise _error(context, "dataset.format must be 'hdf5' or 'lance'")
+    size = _positive_int(dataset.get("size_bytes"), context=f"{context}.size_bytes")
+    conversion_path = dataset.get("conversion_manifest_path")
+    conversion = dataset.get("conversion_manifest")
+    if dataset_format == "hdf5":
+        if size not in FORMAL_DATASET["accepted_size_bytes"]:
+            raise _error(context, "HDF5 dataset size is not an accepted locked layout")
+        if conversion_path is not None or conversion is not None:
+            raise _error(context, "HDF5 dataset must not claim Lance conversion provenance")
+        return
+    if not isinstance(conversion_path, str) or not conversion_path.endswith(
+        FORMAL_DATASET["lance"]["manifest_suffix"]
+    ):
+        raise _error(context, "Lance dataset must record its .manifest.json path")
+    if require_embedded_conversion:
+        embedded = _require_mapping(
+            conversion, context=f"{context}.conversion_manifest"
+        )
+        destination = _require_mapping(
+            embedded.get("destination"),
+            context=f"{context}.conversion_manifest.destination",
+        )
+        conversion_details = _require_mapping(
+            embedded.get("conversion"),
+            context=f"{context}.conversion_manifest.conversion",
+        )
+        if destination.get("format") != "lance":
+            raise _error(context, "conversion manifest destination must be Lance")
+        if destination.get("size_bytes") != size:
+            raise _error(context, "conversion manifest size differs from dataset size")
+        if (
+            conversion_details.get("stable_worldmodel_version")
+            != STABLE_WORLDMODEL_VERSION
+        ):
+            raise _error(context, "conversion provenance requires StableWM 0.1.1")
+
+
+def _path_string(value: Any, *, context: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise _error(context, "must be a non-empty path string")
+    return os.path.normpath(value)
+
+
+def _validate_training_artifacts(variant_root: Path, variant: str) -> TrainingRun:
+    result_path = variant_root / "training_result.json"
+    manifest_path = variant_root / "training_manifest.json"
+    metrics_path = variant_root / "metrics.csv"
+    context = f"{variant}/training"
+    result = _load_json(result_path, context=f"{context}.result")
+    manifest = _load_json(manifest_path, context=f"{context}.manifest")
+
+    expected_result = {
         "method": METHOD,
         "variant": variant,
         "seed": TRAINING_SEED,
-        "status": "complete",
-        "epochs_completed": TRAINING_EPOCHS,
+        "final_epoch": TRAINING_EPOCHS,
         "global_step": TRAINING_STEPS,
     }
-    for key, expected in expected_scalars.items():
-        if summary.get(key) != expected:
-            raise _error(context, f"{key} must equal {expected!r}")
+    for key, expected in expected_result.items():
+        if result.get(key) != expected:
+            raise _error(context, f"training_result.{key} must equal {expected!r}")
+    _positive_int(
+        result.get("peak_cuda_memory_bytes"),
+        context=f"{context}.result.peak_cuda_memory_bytes",
+    )
+    run_dir = _path_string(result.get("run_dir"), context=f"{context}.result.run_dir")
+    last_checkpoint = _path_string(
+        result.get("last_checkpoint"), context=f"{context}.result.last_checkpoint"
+    )
+    expected_last = os.path.normpath(
+        os.path.join(run_dir, "checkpoints", "lightning", "last.ckpt")
+    )
+    if last_checkpoint != expected_last:
+        raise _error(
+            context,
+            "training_result.last_checkpoint is not run_dir/checkpoints/lightning/last.ckpt",
+        )
+    deployment_checkpoint = os.path.normpath(
+        os.path.join(
+            run_dir,
+            "checkpoints",
+            METHOD,
+            variant,
+            f"epoch_{TRAINING_EPOCHS:02d}.pt",
+        )
+    )
 
-    training_commit = _require_git_revision(
-        summary.get("training_commit"), context=f"{context}.training_commit"
+    expected_manifest = {
+        "method": METHOD,
+        "variant": variant,
+        "seed": TRAINING_SEED,
+        "objective_version": OBJECTIVE_VERSIONS[variant],
+        "deployment_checkpoint_version": 1,
+    }
+    for key, expected in expected_manifest.items():
+        if manifest.get(key) != expected:
+            raise _error(context, f"training_manifest.{key} must equal {expected!r}")
+    _path_string(
+        manifest.get("protocol_path"), context=f"{context}.manifest.protocol_path"
     )
-    checkpoint_sha = _require_sha256(
-        summary.get("checkpoint_sha256"), context=f"{context}.checkpoint_sha256"
+    protocol = _require_mapping(
+        manifest.get("protocol"), context=f"{context}.manifest.protocol"
     )
-    runtime = _require_mapping(summary.get("runtime"), context=f"{context}.runtime")
+    for key, expected in {
+        "schema_version": SCHEMA_VERSION,
+        "method": METHOD,
+        "variant": variant,
+        "environment": ENVIRONMENT,
+        "stage": "full_training",
+    }.items():
+        if protocol.get(key) != expected:
+            raise _error(context, f"training protocol {key} must equal {expected!r}")
+    protocol_runtime = _require_mapping(
+        protocol.get("runtime"), context=f"{context}.protocol.runtime"
+    )
+    if protocol_runtime.get("stable_worldmodel_version") != STABLE_WORLDMODEL_VERSION:
+        raise _error(context, "training protocol requires stable-worldmodel 0.1.1")
+    protocol_training = _require_mapping(
+        protocol.get("training"), context=f"{context}.protocol.training"
+    )
+    if protocol_training.get("epochs") != TRAINING_EPOCHS:
+        raise _error(context, "training protocol must contain 10 epochs")
+    if protocol_training.get("optimizer_steps_per_epoch") != OPTIMIZER_STEPS_PER_EPOCH:
+        raise _error(context, "training optimizer_steps_per_epoch must equal 12796")
+    head_section = "critic" if variant == DIRECT_VARIANT else "successor"
+    protocol_head = _require_mapping(
+        protocol.get(head_section), context=f"{context}.protocol.{head_section}"
+    )
+    if protocol_head.get("objective_version") != OBJECTIVE_VERSIONS[variant]:
+        raise _error(context, f"training {head_section}.objective_version is wrong")
+
+    runtime = _require_mapping(manifest.get("runtime"), context=f"{context}.runtime")
     if runtime.get("stable_worldmodel") != STABLE_WORLDMODEL_VERSION:
         raise _error(
             context,
             f"runtime.stable_worldmodel must equal {STABLE_WORLDMODEL_VERSION!r}",
         )
-    if not isinstance(runtime.get("cuda_device"), str) or not runtime["cuda_device"]:
-        raise _error(context, "runtime.cuda_device must be recorded")
-
-    metrics = _require_mapping(summary.get("metrics"), context=f"{context}.metrics")
-    final_epoch = _require_mapping(
-        metrics.get("final_epoch"), context=f"{context}.metrics.final_epoch"
-    )
-    if final_epoch.get("epoch") != TRAINING_EPOCHS:
-        raise _error(context, f"metrics.final_epoch.epoch must equal {TRAINING_EPOCHS}")
-    for key in ("train/loss", "validation/loss"):
-        _finite_number(
-            final_epoch.get(key), context=f"{context}.metrics.final_epoch.{key}"
-        )
-    best = _require_mapping(
-        metrics.get("best_validation"),
-        context=f"{context}.metrics.best_validation",
-    )
-    if best.get("metric") != "validation/loss":
-        raise _error(context, "best_validation.metric must equal 'validation/loss'")
-    best_epoch = best.get("epoch")
-    if (
-        isinstance(best_epoch, bool)
-        or not isinstance(best_epoch, int)
-        or not 1 <= best_epoch <= TRAINING_EPOCHS
+    for key in ("torch", "python", "platform", "cuda_device"):
+        if not isinstance(runtime.get(key), str) or not runtime[key]:
+            raise _error(context, f"runtime.{key} must be recorded")
+    if "compatibility_adapter" not in runtime or (
+        runtime["compatibility_adapter"] is not None
+        and not isinstance(runtime["compatibility_adapter"], dict)
     ):
-        raise _error(context, "best_validation.epoch must lie in [1,10]")
-    _finite_number(best.get("value"), context=f"{context}.best_validation.value")
-
-    source_files = _require_mapping(
-        summary.get("source_files"), context=f"{context}.source_files"
+        raise _error(context, "runtime.compatibility_adapter must be null or an object")
+    training_commit = _require_git_revision(
+        runtime.get("tdwm_git_revision"), context=f"{context}.runtime.tdwm_git_revision"
     )
-    required_sources = ("training_result.json", "training_manifest.json", "metrics.csv")
-    normalized_sources = {
-        name: _require_sha256(
-            source_files.get(name), context=f"{context}.source_files.{name}"
-        )
-        for name in required_sources
+    training = _require_mapping(
+        manifest.get("training"), context=f"{context}.manifest.training"
+    )
+    expected_training = {
+        "formal_optimizer_steps": TRAINING_STEPS,
+        "optimizer_steps_per_epoch": OPTIMIZER_STEPS_PER_EPOCH,
+        "configured_optimizer_steps": TRAINING_STEPS,
+        "validation_skipped": False,
     }
-    curve = _validate_training_curve(curve_path, variant)
-    final_curve = curve[-1]
-    if not math.isclose(
-        float(final_epoch["train/loss"]),
-        float(final_curve["train_loss"]),
-        rel_tol=0.0,
-        abs_tol=1e-12,
-    ):
-        raise _error(context, "final train/loss differs from training_curve.csv")
-    if not math.isclose(
-        float(final_epoch["validation/loss"]),
-        float(final_curve["validation_loss"]),
-        rel_tol=0.0,
-        abs_tol=1e-12,
-    ):
-        raise _error(context, "final validation/loss differs from training_curve.csv")
-    curve_best = min(curve, key=lambda row: float(row["validation_loss"]))
-    if best["epoch"] != curve_best["epoch"] or not math.isclose(
-        float(best["value"]),
-        float(curve_best["validation_loss"]),
-        rel_tol=0.0,
-        abs_tol=1e-12,
-    ):
-        raise _error(context, "best_validation differs from training_curve.csv")
+    for key, expected in expected_training.items():
+        if training.get(key) != expected:
+            raise _error(context, f"training_manifest.training.{key} must equal {expected!r}")
+
+    dataset = _require_mapping(
+        manifest.get("dataset"), context=f"{context}.manifest.dataset"
+    )
+    _validate_dataset_provenance(
+        dataset,
+        context=f"{context}.manifest.dataset",
+        require_embedded_conversion=dataset.get("format") == "lance",
+    )
+    model = _require_mapping(manifest.get("model"), context=f"{context}.manifest.model")
+    world_parameters = _positive_int(
+        model.get("lewm_parameters"), context=f"{context}.model.lewm_parameters"
+    )
+    protocol_model = _require_mapping(
+        protocol.get("model"), context=f"{context}.protocol.model"
+    )
+    protocol_world_parameters = _positive_int(
+        protocol_model.get("parameters"),
+        context=f"{context}.protocol.model.parameters",
+    )
+    if protocol_world_parameters != world_parameters:
+        raise _error(context, "training protocol/model world parameter counts differ")
+    head_key = "critic_parameters" if variant == DIRECT_VARIANT else "successor_parameters"
+    head_parameters = _positive_int(
+        model.get(head_key), context=f"{context}.model.{head_key}"
+    )
+    curve, metrics = _validate_training_metrics(metrics_path, variant)
+    normalized_sources = {
+        "training_result.json": _sha256_file(result_path),
+        "training_manifest.json": _sha256_file(manifest_path),
+        "metrics.csv": _sha256_file(metrics_path),
+    }
+    missing_common = [
+        key for key in TRAINING_COMMON_PROTOCOL_SECTIONS if key not in protocol
+    ]
+    if missing_common:
+        raise _error(context, f"training protocol is missing {missing_common}")
+    common_protocol = {
+        key: deepcopy(protocol[key]) for key in TRAINING_COMMON_PROTOCOL_SECTIONS
+    }
+    # The exact parameter count is checked separately across all training and
+    # evaluation runs; keep the architecture fields in this protocol hash.
+    _require_mapping(
+        common_protocol["model"], context=f"{context}.common_protocol.model"
+    ).pop("parameters", None)
+    training_runtime_fingerprint = {
+        key: deepcopy(runtime[key])
+        for key in (
+            "stable_worldmodel",
+            "torch",
+            "python",
+            "platform",
+            "cuda_device",
+            "compatibility_adapter",
+        )
+    }
+    dataset_source = {
+        key: deepcopy(dataset.get(key))
+        for key in (
+            "path",
+            "format",
+            "size_bytes",
+            "conversion_manifest_path",
+            "conversion_manifest",
+        )
+    }
     return TrainingRun(
         variant=variant,
         training_commit=training_commit,
-        checkpoint_sha256=checkpoint_sha,
+        run_dir=run_dir,
+        last_checkpoint=last_checkpoint,
+        deployment_checkpoint=deployment_checkpoint,
         runtime=deepcopy(runtime),
+        dataset=deepcopy(dataset),
+        model=deepcopy(model),
         metrics=deepcopy(metrics),
         source_file_sha256=normalized_sources,
-        summary_sha256=_sha256_file(path),
-        curve_sha256=_sha256_file(curve_path),
+        world_model_parameter_count=world_parameters,
+        head_parameter_count=head_parameters,
+        common_protocol_sha256=_fingerprint(common_protocol),
+        runtime_fingerprint_sha256=_fingerprint(training_runtime_fingerprint),
+        dataset_source_fingerprint_sha256=_fingerprint(dataset_source),
         curve=curve,
     )
 
@@ -488,22 +884,27 @@ def _validate_score_metadata(
     combined_mode: str,
     context: str,
 ) -> str:
-    values = (
-        result.get("score_mode"),
-        manifest.get("score_mode"),
-        _require_mapping(
-            protocol.get("inference_objective"),
-            context=f"{context}.protocol.inference_objective",
-        ).get("score_mode"),
-    )
-    present = [value for value in values if value is not None]
-    if present:
-        if len(present) != len(values) or any(value != score_mode for value in values):
+    result_mode = result.get("score_mode")
+    manifest_mode = manifest.get("score_mode")
+    protocol_mode = _require_mapping(
+        protocol.get("inference_objective"),
+        context=f"{context}.protocol.inference_objective",
+    ).get("score_mode")
+    values = (result_mode, manifest_mode, protocol_mode)
+    if all(value is not None for value in values):
+        if any(value != score_mode for value in values):
             raise _error(context, "score_mode metadata is missing or inconsistent")
         return "explicit"
+    if (
+        result_mode is None
+        and manifest_mode is None
+        and score_mode == combined_mode
+        and protocol_mode in {None, combined_mode}
+    ):
+        return "legacy_combined_default"
     if score_mode != combined_mode:
         raise _error(context, "non-combined scores require explicit score_mode metadata")
-    return "legacy_combined_default"
+    raise _error(context, "score_mode metadata is missing or inconsistent")
 
 
 def _validate_protocol(
@@ -519,28 +920,244 @@ def _validate_protocol(
     for key, value in expected.items():
         if protocol.get(key) != value:
             raise _error(context, f"protocol.{key} must equal {value!r}")
-    runtime = _require_mapping(
-        protocol.get("runtime"), context=f"{context}.protocol.runtime"
-    )
-    if runtime.get("stable_worldmodel_version") != STABLE_WORLDMODEL_VERSION:
-        raise _error(context, "protocol requires stable-worldmodel 0.1.1")
-    dataset = _require_mapping(
-        protocol.get("dataset"), context=f"{context}.protocol.dataset"
-    )
-    if dataset.get("identifier") != DATASET_IDENTIFIER:
-        raise _error(context, f"protocol.dataset.identifier must be {DATASET_IDENTIFIER!r}")
-    evaluation = _require_mapping(
-        protocol.get("evaluation"), context=f"{context}.protocol.evaluation"
-    )
-    if evaluation.get("episodes") != EPISODES or evaluation.get("goal_offset") != GOAL_OFFSET:
-        raise _error(context, "protocol must be the formal Cube O50 evaluation")
-    planning = _require_mapping(
-        protocol.get("planning"), context=f"{context}.protocol.planning"
-    )
-    for key, expected_value in FORMAL_PLANNING.items():
-        if planning.get(key) != expected_value:
+    for section, expected_value in COMMON_PROTOCOL_SECTIONS.items():
+        actual = _require_mapping(
+            protocol.get(section), context=f"{context}.protocol.{section}"
+        )
+        if actual != expected_value:
             raise _error(
-                context, f"protocol.planning.{key} must equal {expected_value!r}"
+                context,
+                f"protocol.{section} differs from the complete formal Cube O50 lock",
+            )
+
+    successor_common = {
+        "objective_version": OBJECTIVE_VERSIONS[variant],
+        "architecture": "actor_free_successor_head",
+        "history_size": 3,
+        "hidden_dim": 256,
+        "gamma": 0.95,
+        "feature_basis": "augmented_latent_squared_distance",
+        "action_conditioning": "dataset_current_action",
+        "bootstrap_action": "dataset_next_action",
+        "terminal_source": "next_action_nan_invalid",
+        "goal_conditioning": "none",
+        "actor": "none",
+        "reward": "none",
+        "td_bootstrap": True,
+        "target_world_ema_decay": 0.995,
+        "target_successor_ema_decay": 0.995,
+        "planning_weight": 1.0,
+        "terminal_weight": 0.0,
+        "clamp_successor_cost": True,
+    }
+    if variant == "goal_hybrid":
+        successor_common.update(
+            {
+                "goal_readout_training": True,
+                "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+                "goal_offset_weighting": "uniform_per_transition",
+                "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
+                "goal_readout_branches": ["real_context", "predicted_context"],
+                "goal_readout_precision": "float32",
+                "goal_cost": "normalized_discounted_latent_mse",
+            }
+        )
+    elif variant == "imaginary_hybrid":
+        successor_common.update(
+            {
+                "immediate_feature_source": "real_ema_next_latent",
+                "bootstrap_state_source": (
+                    "ema_lewm_predicted_next_from_real_ema_history"
+                ),
+                "imaginary_horizon": 1,
+                "imaginary_predictor_gradient": "target_ema_stop_gradient",
+            }
+        )
+    direct = {
+        "objective_version": 3,
+        "architecture": "direct_goal_critic_head",
+        "history_size": 3,
+        "hidden_dim": 256,
+        "gamma": 0.95,
+        "action_conditioning": "dataset_current_action",
+        "bootstrap_action": "dataset_next_action",
+        "terminal_source": "next_action_nan_invalid",
+        "goal_conditioning": "direct_latent_input",
+        "actor": "none",
+        "reward": "none",
+        "td_bootstrap": True,
+        "goal_source": "uniform_reachable_future_ema_latent_same_clip",
+        "goal_offset_weighting": "uniform_per_transition",
+        "goal_terminal_condition": "dataset_terminal_or_next_state_is_goal",
+        "td_branches": ["real_context", "predicted_context"],
+        "goal_cost": "normalized_discounted_latent_mse",
+        "target_world_ema_decay": 0.995,
+        "target_critic_ema_decay": 0.995,
+        "planning_weight": 1.0,
+        "clamp_critic_cost": True,
+    }
+    head_section = "critic" if variant == DIRECT_VARIANT else "successor"
+    expected_head = direct if variant == DIRECT_VARIANT else successor_common
+    actual_head = _require_mapping(
+        protocol.get(head_section), context=f"{context}.protocol.{head_section}"
+    )
+    if actual_head != expected_head:
+        raise _error(
+            context,
+            f"protocol.{head_section} differs from the formal evaluator semantics",
+        )
+    wrong_head = "successor" if variant == DIRECT_VARIANT else "critic"
+    if wrong_head in protocol:
+        raise _error(context, f"protocol must not contain a {wrong_head} section")
+
+    expected_checkpoint = {
+        "source": "joint_actor_free_td_lewm_export",
+        "checkpoint_path": "required_cli_argument",
+        "contains_world_model": True,
+        ("contains_critic" if variant == DIRECT_VARIANT else "contains_successor"): True,
+    }
+    checkpoint = _require_mapping(
+        protocol.get("checkpoint"), context=f"{context}.protocol.checkpoint"
+    )
+    if checkpoint != expected_checkpoint:
+        raise _error(context, "protocol.checkpoint semantics differ from the evaluator")
+
+    expected_objective = {
+        "score": (
+            "discounted_direct_goal_critic_cost"
+            if variant == DIRECT_VARIANT
+            else "discounted_successor_feature_goal_cost"
+        ),
+        "goal_usage": {
+            "goal_hybrid": "training_goal_readout_and_planning_linear_readout",
+            DIRECT_VARIANT: "training_and_planning_direct_critic_input",
+        }.get(variant, "planning_linear_readout_only"),
+        (
+            "goal_enters_critic_head"
+            if variant == DIRECT_VARIANT
+            else "goal_enters_successor_head"
+        ): variant == DIRECT_VARIANT,
+        "learned_actor": False,
+        "replanning": "every_action_block",
+    }
+    objective = _require_mapping(
+        protocol.get("inference_objective"),
+        context=f"{context}.protocol.inference_objective",
+    )
+    objective_without_mode = deepcopy(objective)
+    objective_without_mode.pop("score_mode", None)
+    if objective_without_mode != expected_objective:
+        raise _error(
+            context,
+            "protocol.inference_objective differs from formal evaluator semantics",
+        )
+    if "score_mode" in objective and objective["score_mode"] not in modes_for_variant(
+        variant
+    ):
+        raise _error(context, "protocol score_mode is incompatible with its variant")
+
+
+def _fingerprint(value: Any) -> str:
+    return _sha256_bytes(_canonical_json_bytes(value))
+
+
+def _runtime_fingerprint(runtime: Mapping[str, Any], *, context: str) -> dict[str, Any]:
+    missing = [key for key in RUNTIME_FINGERPRINT_KEYS if key not in runtime]
+    if missing:
+        raise _error(context, f"runtime fingerprint is missing {missing}")
+    fingerprint = {key: deepcopy(runtime[key]) for key in RUNTIME_FINGERPRINT_KEYS}
+    if fingerprint["stable_worldmodel"] != STABLE_WORLDMODEL_VERSION:
+        raise _error(context, "runtime stable_worldmodel must equal 0.1.1")
+    for key in ("torch", "python", "platform", "device", "cuda_device"):
+        if not isinstance(fingerprint[key], str) or not fingerprint[key]:
+            raise _error(context, f"runtime.{key} must be a non-empty string")
+    if fingerprint["device"] != "cuda":
+        raise _error(context, "formal server evaluation must record device='cuda'")
+    compatibility = fingerprint["compatibility_adapter"]
+    if compatibility is not None and not isinstance(compatibility, dict):
+        raise _error(context, "runtime.compatibility_adapter must be null or an object")
+    return fingerprint
+
+
+def _validate_checkpoint_config(
+    checkpoint: Mapping[str, Any],
+    *,
+    protocol: Mapping[str, Any],
+    variant: str,
+    context: str,
+) -> None:
+    if checkpoint.get("objective_version") != OBJECTIVE_VERSIONS[variant]:
+        raise _error(context, "checkpoint objective_version differs from its variant")
+    config_key = "critic_config" if variant == DIRECT_VARIANT else "successor_config"
+    config = _require_mapping(
+        checkpoint.get(config_key), context=f"{context}.checkpoint.{config_key}"
+    )
+    head_key = "critic" if variant == DIRECT_VARIANT else "successor"
+    head = _require_mapping(protocol.get(head_key), context=f"{context}.{head_key}")
+    expected_subset = {
+        "method": METHOD,
+        "variant": variant,
+        "objective_version": OBJECTIVE_VERSIONS[variant],
+        "deployment_checkpoint_version": 1,
+        "architecture": head["architecture"],
+        "embed_dim": FORMAL_MODEL["embed_dim"],
+        "history_size": head["history_size"],
+        "hidden_dim": head["hidden_dim"],
+        "gamma": head["gamma"],
+        "action_conditioning": head["action_conditioning"],
+        "bootstrap_action": head["bootstrap_action"],
+        "terminal_source": head["terminal_source"],
+        "goal_conditioning": head["goal_conditioning"],
+        "actor": "none",
+        "reward": "none",
+    }
+    if variant != DIRECT_VARIANT:
+        expected_subset["feature_basis"] = head["feature_basis"]
+    if variant == "goal_hybrid":
+        expected_subset.update(
+            {
+                "goal_readout_training": True,
+                "goal_source": head["goal_source"],
+                "goal_offset_weighting": head["goal_offset_weighting"],
+                "goal_terminal_condition": head["goal_terminal_condition"],
+                "goal_readout_branches": head["goal_readout_branches"],
+                "goal_readout_precision": head["goal_readout_precision"],
+                "goal_cost": head["goal_cost"],
+                "goal_enters_successor_head": False,
+                "predicted_goal_td_weight": 1.0,
+                "real_goal_td_weight": 1.0,
+            }
+        )
+    elif variant == "imaginary_hybrid":
+        expected_subset.update(
+            {
+                "immediate_feature_source": head["immediate_feature_source"],
+                "bootstrap_state_source": head["bootstrap_state_source"],
+                "imaginary_horizon": head["imaginary_horizon"],
+                "imaginary_predictor_gradient": head[
+                    "imaginary_predictor_gradient"
+                ],
+            }
+        )
+    elif variant == DIRECT_VARIANT:
+        expected_subset.update(
+            {
+                "goal_source": head["goal_source"],
+                "goal_offset_weighting": head["goal_offset_weighting"],
+                "goal_terminal_condition": head["goal_terminal_condition"],
+                "td_branches": head["td_branches"],
+                "goal_cost": head["goal_cost"],
+                "goal_enters_critic_head": True,
+                "predicted_context_detach": False,
+                "predicted_critic_td_weight": 1.0,
+                "real_critic_td_weight": 1.0,
+            }
+        )
+    for key, expected in expected_subset.items():
+        if config.get(key) != expected:
+            raise _error(
+                context,
+                f"checkpoint {config_key}.{key} differs from evaluator semantics",
             )
 
 
@@ -639,6 +1256,11 @@ def _validate_evaluation_run(
     if normalized_selection != manifest_selection:
         raise _error(context, "manifest.selection differs from episode_selection.json")
     selection_sha = _sha256_file(selection_path)
+    if selection_sha != SELECTION_SHA256:
+        raise _error(
+            context,
+            f"episode_selection.json SHA-256 must equal locked {SELECTION_SHA256}",
+        )
 
     checkpoint = _require_mapping(
         manifest.get("checkpoint"), context=f"{context}.manifest.checkpoint"
@@ -648,20 +1270,47 @@ def _validate_evaluation_run(
     )
     if checkpoint.get("method") != METHOD or checkpoint.get("variant") != variant:
         raise _error(context, "checkpoint method/variant metadata is inconsistent")
+    checkpoint_path = _path_string(
+        checkpoint.get("path"), context=f"{context}.checkpoint.path"
+    )
+    _validate_checkpoint_config(
+        checkpoint,
+        protocol=formal_protocol,
+        variant=variant,
+        context=context,
+    )
 
     dataset = _require_mapping(
         manifest.get("dataset"), context=f"{context}.manifest.dataset"
     )
-    if dataset.get("episodes") != 10_000 or dataset.get("transitions") != 2_010_000:
+    if (
+        dataset.get("episodes") != DATASET_EPISODES
+        or dataset.get("transitions") != DATASET_TRANSITIONS
+    ):
         raise _error(context, "manifest dataset must contain 10,000 episodes/2,010,000 rows")
+    _validate_dataset_provenance(dataset, context=f"{context}.manifest.dataset")
+    normalization = _require_mapping(
+        manifest.get("normalization"), context=f"{context}.manifest.normalization"
+    )
+    action_normalization = _require_mapping(
+        normalization.get("action"),
+        context=f"{context}.manifest.normalization.action",
+    )
+    if not action_normalization:
+        raise _error(context, "action normalization provenance must not be empty")
     runtime = _require_mapping(
         manifest.get("runtime"), context=f"{context}.manifest.runtime"
     )
-    if runtime.get("stable_worldmodel") != STABLE_WORLDMODEL_VERSION:
-        raise _error(context, "runtime stable_worldmodel must equal 0.1.1")
+    runtime_fingerprint = _runtime_fingerprint(runtime, context=context)
     evaluation_commit = _require_git_revision(
         runtime.get("tdwm_git_revision"), context=f"{context}.runtime.tdwm_git_revision"
     )
+    _path_string(
+        manifest.get("protocol_path"), context=f"{context}.manifest.protocol_path"
+    )
+    common_protocol = {
+        key: deepcopy(formal_protocol[key]) for key in COMMON_PROTOCOL_SECTIONS
+    }
     return EvaluationRun(
         variant=variant,
         score_mode=score_mode,
@@ -678,6 +1327,12 @@ def _validate_evaluation_run(
         evaluation_commit=evaluation_commit,
         runtime=deepcopy(runtime),
         dataset=deepcopy(dataset),
+        normalization=deepcopy(normalization),
+        checkpoint_path=checkpoint_path,
+        common_protocol_sha256=_fingerprint(common_protocol),
+        runtime_fingerprint_sha256=_fingerprint(runtime_fingerprint),
+        dataset_fingerprint_sha256=_fingerprint(dataset),
+        normalization_fingerprint_sha256=_fingerprint(normalization),
         world_model_parameter_count=world_parameters,
         head_parameter_count=head_parameters,
         source_sha256={
@@ -699,13 +1354,10 @@ def validate_bundle(bundle_root: str | Path) -> ValidatedStudy:
     evaluations: dict[str, dict[str, EvaluationRun]] = {}
     reference_selection: Mapping[str, tuple[int, ...]] | None = None
     reference_selection_sha: str | None = None
+    all_runs: list[EvaluationRun] = []
     for variant in VARIANT_ORDER:
         variant_root = root / variant
-        training_run = _validate_training_summary(
-            variant_root / "training_summary.json",
-            variant_root / "training_curve.csv",
-            variant,
-        )
+        training_run = _validate_training_artifacts(variant_root, variant)
         training[variant] = training_run
         runs: dict[str, EvaluationRun] = {}
         for score_mode in modes_for_variant(variant):
@@ -715,6 +1367,7 @@ def validate_bundle(bundle_root: str | Path) -> ValidatedStudy:
                 score_mode=score_mode,
             )
             runs[score_mode] = run
+            all_runs.append(run)
             if reference_selection is None:
                 reference_selection = run.selection
                 reference_selection_sha = run.selection_sha256
@@ -730,11 +1383,13 @@ def validate_bundle(bundle_root: str | Path) -> ValidatedStudy:
         checkpoint_hashes = {run.checkpoint_sha256 for run in runs.values()}
         if len(checkpoint_hashes) != 1:
             raise _error(variant, "the three score modes use different checkpoints")
-        checkpoint_sha = next(iter(checkpoint_hashes))
-        if checkpoint_sha != training_run.checkpoint_sha256:
+        checkpoint_paths = {run.checkpoint_path for run in runs.values()}
+        if len(checkpoint_paths) != 1:
+            raise _error(variant, "the three score modes use different checkpoint paths")
+        if next(iter(checkpoint_paths)) != training_run.deployment_checkpoint:
             raise _error(
                 variant,
-                "evaluation checkpoint differs from training_summary checkpoint",
+                "evaluation checkpoint path differs from the trainer's epoch-10 export",
             )
         protocols = {run.formal_protocol_sha256 for run in runs.values()}
         if len(protocols) != 1:
@@ -743,9 +1398,57 @@ def validate_bundle(bundle_root: str | Path) -> ValidatedStudy:
         head_counts = {run.head_parameter_count for run in runs.values()}
         if len(world_counts) != 1 or len(head_counts) != 1:
             raise _error(variant, "parameter counts differ across score modes")
+        if next(iter(world_counts)) != training_run.world_model_parameter_count:
+            raise _error(variant, "evaluation world-model count differs from training")
+        if next(iter(head_counts)) != training_run.head_parameter_count:
+            raise _error(variant, "evaluation head count differs from training")
         evaluations[variant] = runs
 
     assert reference_selection is not None and reference_selection_sha is not None
+    if reference_selection_sha != SELECTION_SHA256:
+        raise BundleValidationError("The common selection is not the locked seed-42 O50 file.")
+    shared_fingerprints = {
+        "formal protocol common sections": {
+            run.common_protocol_sha256 for run in all_runs
+        },
+        "critical runtime": {run.runtime_fingerprint_sha256 for run in all_runs},
+        "dataset source/provenance": {
+            run.dataset_fingerprint_sha256 for run in all_runs
+        },
+        "action normalization": {
+            run.normalization_fingerprint_sha256 for run in all_runs
+        },
+    }
+    for label, values in shared_fingerprints.items():
+        if len(values) != 1:
+            raise BundleValidationError(
+                f"The 21 formal runs do not share one {label} fingerprint."
+            )
+    training_fingerprints = {
+        "training common protocol": {
+            run.common_protocol_sha256 for run in training.values()
+        },
+        "training critical runtime": {
+            run.runtime_fingerprint_sha256 for run in training.values()
+        },
+        "training dataset source/provenance": {
+            run.dataset_source_fingerprint_sha256 for run in training.values()
+        },
+    }
+    for label, values in training_fingerprints.items():
+        if len(values) != 1:
+            raise BundleValidationError(
+                f"The seven training runs do not share one {label} fingerprint."
+            )
+    world_counts = {run.world_model_parameter_count for run in all_runs}
+    training_world_counts = {
+        run.world_model_parameter_count for run in training.values()
+    }
+    if len(world_counts) != 1 or training_world_counts != world_counts:
+        raise BundleValidationError(
+            "world_model_parameter_count must be identical across all 21 evaluations "
+            "and all seven training manifests."
+        )
     return ValidatedStudy(
         training=training,
         evaluations=evaluations,
@@ -797,6 +1500,14 @@ def build_summary(study: ValidatedStudy) -> dict[str, Any]:
                 "evaluation_commit": run.evaluation_commit,
                 "runtime": run.runtime,
                 "dataset": run.dataset,
+                "normalization": run.normalization,
+                "checkpoint_path": run.checkpoint_path,
+                "common_protocol_sha256": run.common_protocol_sha256,
+                "runtime_fingerprint_sha256": run.runtime_fingerprint_sha256,
+                "dataset_fingerprint_sha256": run.dataset_fingerprint_sha256,
+                "normalization_fingerprint_sha256": (
+                    run.normalization_fingerprint_sha256
+                ),
                 "world_model_parameter_count": run.world_model_parameter_count,
                 (
                     "critic_parameter_count"
@@ -817,12 +1528,28 @@ def build_summary(study: ValidatedStudy) -> dict[str, Any]:
                 "epochs_completed": TRAINING_EPOCHS,
                 "global_step": TRAINING_STEPS,
                 "training_commit": training.training_commit,
-                "checkpoint_sha256": training.checkpoint_sha256,
+                "checkpoint_sha256": runs[
+                    combined_mode_for_variant(variant)
+                ]["checkpoint_sha256"],
+                "run_dir": training.run_dir,
+                "last_checkpoint": training.last_checkpoint,
+                "deployment_checkpoint": training.deployment_checkpoint,
                 "runtime": training.runtime,
+                "dataset": training.dataset,
+                "model": training.model,
                 "metrics": training.metrics,
                 "source_files_sha256": training.source_file_sha256,
-                "training_summary_json_sha256": training.summary_sha256,
-                "training_curve_csv_sha256": training.curve_sha256,
+                "world_model_parameter_count": training.world_model_parameter_count,
+                (
+                    "critic_parameter_count"
+                    if variant == DIRECT_VARIANT
+                    else "successor_parameter_count"
+                ): training.head_parameter_count,
+                "common_protocol_sha256": training.common_protocol_sha256,
+                "runtime_fingerprint_sha256": training.runtime_fingerprint_sha256,
+                "dataset_source_fingerprint_sha256": (
+                    training.dataset_source_fingerprint_sha256
+                ),
                 "loss_curve": list(training.curve),
             },
             "evaluations": runs,
@@ -880,8 +1607,18 @@ def build_summary(study: ValidatedStudy) -> dict[str, Any]:
             "formal_o50_only": True,
             "smoke_or_pilot_runs": 0,
             "common_selection_across_21_runs": True,
+            "locked_seed42_selection_sha256": True,
             "same_checkpoint_within_each_variant": True,
-            "training_checkpoint_matches_evaluation": True,
+            "training_checkpoint_path_matches_evaluation": True,
+            "shared_common_protocol_fingerprint": True,
+            "shared_critical_runtime_fingerprint": True,
+            "shared_dataset_provenance_fingerprint": True,
+            "shared_action_normalization_fingerprint": True,
+            "shared_world_model_parameter_count": True,
+            "shared_training_common_protocol_fingerprint": True,
+            "shared_training_critical_runtime_fingerprint": True,
+            "shared_training_dataset_provenance_fingerprint": True,
+            "training_metrics_derived_from_raw_lightning_csv": True,
             "success_rates_match_episode_outcomes": True,
         },
     }
@@ -1161,13 +1898,16 @@ def build_report_markdown(study: ValidatedStudy) -> bytes:
     )
     for variant in VARIANT_ORDER:
         training = study.training[variant]
+        checkpoint_sha = study.evaluations[variant][
+            combined_mode_for_variant(variant)
+        ].checkpoint_sha256
         final_epoch = training.metrics["final_epoch"]
         best = training.metrics["best_validation"]
         lines.append(
             f"| {DISPLAY_NAMES[variant]} | {float(final_epoch['train/loss']):.6f} | "
             f"{float(final_epoch['validation/loss']):.6f} | "
             f"{float(best['value']):.6f} (E{best['epoch']}) | "
-            f"`{_short_sha(training.checkpoint_sha256)}…` | "
+            f"`{_short_sha(checkpoint_sha)}…` | "
             f"`{_short_sha(training.training_commit)}` |"
         )
     lines.extend(
@@ -1176,7 +1916,8 @@ def build_report_markdown(study: ValidatedStudy) -> bytes:
             "## 审计结论与边界",
             "",
             f"- 21 个运行的 selection 文件 SHA-256：`{study.selection_sha256}`。",
-            "- 每个方法的三种 score mode 使用完全相同的 checkpoint；其 SHA 也与训练摘要一致。",
+            "- 每个方法的三种 score mode 使用完全相同的 checkpoint；其路径严格对应训练器的 epoch-10 export。",
+            "- 21 个运行共享完整正式协议、关键 runtime、数据格式/大小/转换来源、action normalization 与 world 参数量指纹。",
             "- 所有运行均为 50 episodes、goal offset 50、planning seed 42、完整 CEM 预算，",
             "  且 `smoke=false`、`pilot=false`。",
             "- 每个 success rate 都已由 50 个逐 episode 布尔值重新计算并核对。",
@@ -1202,7 +1943,8 @@ def build_artifact_readme(study: ValidatedStudy) -> bytes:
         "# Actor-Free TD-LeWM Cube O50 7×3 可审计归档",
         "",
         "该目录由服务器导出的完整轻量结果包生成。它包含 7 个方法 × 3 种推理分数的",
-        "同一 O50 selection 配对结果，不包含数据集、checkpoint、图像、视频或原始日志。",
+        "同一 O50 selection 配对结果，以及训练器原始 JSON/metrics.csv 的派生摘要；不包含",
+        "数据集、checkpoint、图像、视频或控制台日志。",
         "",
         "## 文件",
         "",
@@ -1223,8 +1965,9 @@ def build_artifact_readme(study: ValidatedStudy) -> bytes:
         "## 输入包目录",
         "",
         "```text",
-        "<bundle>/<variant>/training_summary.json",
-        "<bundle>/<variant>/training_curve.csv",
+        "<bundle>/<variant>/training_result.json",
+        "<bundle>/<variant>/training_manifest.json",
+        "<bundle>/<variant>/metrics.csv",
         "<bundle>/<variant>/<score_mode>/results.json",
         "<bundle>/<variant>/<score_mode>/protocol_manifest.json",
         "<bundle>/<variant>/<score_mode>/episode_selection.json",
@@ -1247,9 +1990,10 @@ def build_artifact_readme(study: ValidatedStudy) -> bytes:
         "shasum -a 256 -c checksums.sha256",
         "```",
         "",
-        "归档器会拒绝不完整的 7×3 bundle、smoke/pilot、非 O50、不同 selection、同方法",
-        "不同 checkpoint、训练 checkpoint 不匹配、协议预算变化，或 success rate 与逐 episode",
-        "结果不一致。",
+        "归档器会从原始训练文件自行计算 SHA-256、10-epoch 曲线和最终/最佳 validation；",
+        "拒绝不完整的 7×3 bundle、smoke/pilot、非 O50、selection 非固定 seed-42 文件、同方法",
+        "不同 checkpoint、训练 export 路径不匹配、任何公平协议/runtime/数据来源指纹漂移，",
+        "或 success rate 与逐 episode 结果不一致。",
         "",
         "## 选择与哈希",
         "",
@@ -1338,6 +2082,7 @@ def write_archive(
 __all__ = [
     "BundleValidationError",
     "DIRECT_MODES",
+    "SELECTION_SHA256",
     "SUCCESSOR_MODES",
     "VARIANT_ORDER",
     "ValidatedStudy",

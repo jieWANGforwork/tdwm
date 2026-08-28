@@ -13,15 +13,20 @@
 
 Actor-Free TD-LeWM 的 7 方法 × 3 score-mode 比较采用同样的轻量归档原则，但正式归档
 只允许由完整服务器 bundle 自动生成。收集入口为
-`scripts/archive_actor_free_td_lewm_o50.py`；它要求每个方法提供训练摘要、10-epoch
-train/validation 曲线，以及每种 score mode 的 `results.json`、`protocol_manifest.json`
-和 `episode_selection.json`。在 21 个正式 O50 全部通过一致性检查以前，不在本 README
-手工填写或排名尚未完成的数值。
+`scripts/archive_actor_free_td_lewm_o50.py`；它要求每个方法提供原始训练 JSON/metrics，
+以及每种 score mode 的 `results.json`、`protocol_manifest.json` 和
+`episode_selection.json`。训练摘要和曲线不是人工文件：归档器直接读取每个方法原始的
+`training_result.json`、`training_manifest.json` 与 Lightning `metrics.csv`，自行计算哈希、
+10-epoch aggregate 和最终/最佳 validation。在 21 个正式 O50 全部通过一致性检查以前，
+不在本 README 手工填写或排名尚未完成的数值。
 完整输入格式见
 [`docs/actor_free_td_lewm_result_bundle.md`](../docs/actor_free_td_lewm_result_bundle.md)。
 
-归档器会生成统一曲线 CSV 和可嵌入文档的 SVG。由于 7 个方法的辅助 loss 数量与定义
-不同，total loss 曲线只用于检查各方法自身的收敛情况，不能用曲线高低做跨方法排名。
+归档器还锁定固定 seed-42 selection 的规范 SHA-256，并核对 21 个运行的正式协议、关键
+runtime、数据格式/大小/转换来源、action normalization 和参数量指纹；`solver` 与
+`history_len` 也属于 planning 锁。它会生成统一曲线 CSV 和可嵌入文档的 SVG。由于 7 个
+方法的辅助 loss 数量与定义不同，total loss 曲线只用于检查各方法自身的收敛情况，不能
+用曲线高低做跨方法排名。
 
 ## 结论边界
 
