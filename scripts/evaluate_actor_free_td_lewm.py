@@ -31,6 +31,16 @@ def parse_args() -> argparse.Namespace:
         help="Joint deployment checkpoint containing LeWM and TD-head weights.",
     )
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--score-mode",
+        choices=("f_only", "g_only", "f_plus_g", "c_only", "f_plus_c"),
+        default=None,
+        help=(
+            "Override the protocol inference score. Successor checkpoints use "
+            "f_only/g_only/f_plus_g; Direct Goal Critic uses "
+            "f_only/c_only/f_plus_c."
+        ),
+    )
     parser.add_argument("--video", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--smoke", action="store_true")
@@ -45,6 +55,8 @@ def main() -> None:
     output_dir = args.output_dir
     if output_dir is None:
         config_stem = Path(args.config).stem
+        if args.score_mode is not None:
+            config_stem = f"{config_stem}_{args.score_mode}"
         output_dir = (
             Path(os.environ.get("TDWM_RUN_ROOT", "outputs")) / config_stem
         )
@@ -56,6 +68,7 @@ def main() -> None:
         video=args.video,
         smoke=args.smoke,
         pilot=args.pilot,
+        score_mode=args.score_mode,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 

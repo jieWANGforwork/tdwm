@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
 import torch
 from torch import nn
 
@@ -184,6 +185,64 @@ def test_direct_critic_planning_tail_receives_goal_without_successor_readout():
     assert torch.allclose(critic.current_action, actions[..., -1, :])
     assert critic.goal is not None
     assert torch.equal(critic.goal, torch.zeros(1, 1, 2))
+
+
+@pytest.mark.parametrize(
+    ("score_mode", "expected"),
+    [
+        ("f_only", 1.3125),
+        ("c_only", 1.0),
+        ("f_plus_c", 1.75),
+    ],
+)
+def test_direct_critic_score_modes_are_exact_ablation_terms(score_mode, expected):
+    predicted = torch.tensor(
+        [[[[99.0, 99.0], [98.0, 98.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]]]
+    )
+    critic = RecordingDirectCritic()
+    adapter = DirectGoalCriticLeWM(
+        FixedRolloutWorld(predicted),
+        critic,
+        gamma=0.5,
+        clamp_tail_cost=False,
+        score_mode=score_mode,
+    )
+    actions = torch.tensor([[[[0.1], [0.2], [0.3]]]])
+    info = {
+        "pixels": torch.zeros(1, 1, 2, 3, 2, 2),
+        "goal_emb": torch.zeros(1, 1, 2),
+    }
+
+    assert torch.allclose(adapter.get_cost(info, actions), torch.tensor([[expected]]))
+    if score_mode == "f_only":
+        assert critic.current_action is None
+    else:
+        assert critic.current_action is not None
+        assert torch.allclose(critic.current_action, actions[..., -1, :])
+
+
+def test_direct_critic_default_score_is_backward_compatible_combined_mode():
+    predicted = torch.tensor(
+        [[[[99.0, 99.0], [98.0, 98.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]]]
+    )
+    adapter = DirectGoalCriticLeWM(
+        FixedRolloutWorld(predicted),
+        RecordingDirectCritic(),
+        gamma=0.5,
+        clamp_tail_cost=False,
+    )
+
+    assert adapter.score_mode == "f_plus_c"
+
+
+def test_direct_critic_adapter_rejects_successor_score_modes():
+    with pytest.raises(ValueError, match="Unsupported DirectGoalCriticLeWM score mode"):
+        DirectGoalCriticLeWM(
+            FixedRolloutWorld(torch.zeros(1, 1, 3, 2)),
+            RecordingDirectCritic(),
+            gamma=0.5,
+            score_mode="g_only",
+        )
 
 
 def test_direct_checkpoint_loader_restores_critic_not_successor(tmp_path):

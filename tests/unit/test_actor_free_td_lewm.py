@@ -493,6 +493,84 @@ def test_cem_cost_splices_h_minus_one_explicit_steps_and_final_action_tail():
 
 
 @pytest.mark.parametrize(
+    ("score_mode", "expected"),
+    [
+        ("f_only", 1.3125),
+        ("g_only", 1.0),
+        ("f_plus_g", 1.75),
+    ],
+)
+def test_successor_score_modes_are_exact_ablation_terms(score_mode, expected):
+    predicted = torch.tensor(
+        [[[[99.0, 99.0], [98.0, 98.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]]]
+    )
+    successor = RecordingTailSuccessor()
+    adapter = ActorFreeTDLeWM(
+        FixedRolloutWorld(predicted),
+        successor,
+        gamma=0.5,
+        clamp_tail_cost=False,
+        score_mode=score_mode,
+    )
+    actions = torch.tensor([[[[0.1], [0.2], [0.3]]]])
+    info = {
+        "pixels": torch.zeros(1, 1, 2, 3, 2, 2),
+        "goal_emb": torch.zeros(1, 1, 2),
+    }
+
+    cost = adapter.get_cost(info, actions)
+
+    assert torch.allclose(cost, torch.tensor([[expected]]))
+    if score_mode == "f_only":
+        # F-only scores z1, z2 and z3, so the state reached by the final
+        # candidate action contributes .5 * .5**2 * mean([3, 0]**2).
+        expected_f = 0.5 * (0.5 + 0.5 * 2.0 + 0.25 * 4.5)
+        assert expected_f == expected
+        assert successor.current_action is None
+    else:
+        # Tail-only still uses the F rollout to form context but adds no F cost.
+        assert successor.current_action is not None
+        assert torch.allclose(successor.current_action, actions[..., -1, :])
+
+
+def test_successor_default_score_is_backward_compatible_combined_mode():
+    predicted = torch.tensor(
+        [[[[99.0, 99.0], [98.0, 98.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]]]
+    )
+    actions = torch.tensor([[[[0.1], [0.2], [0.3]]]])
+    info = {
+        "pixels": torch.zeros(1, 1, 2, 3, 2, 2),
+        "goal_emb": torch.zeros(1, 1, 2),
+    }
+    default = ActorFreeTDLeWM(
+        FixedRolloutWorld(predicted),
+        RecordingTailSuccessor(),
+        gamma=0.5,
+        clamp_tail_cost=False,
+    )
+    explicit = ActorFreeTDLeWM(
+        FixedRolloutWorld(predicted),
+        RecordingTailSuccessor(),
+        gamma=0.5,
+        clamp_tail_cost=False,
+        score_mode="f_plus_g",
+    )
+
+    assert default.score_mode == "f_plus_g"
+    assert torch.equal(default.get_cost(info, actions), explicit.get_cost(info, actions))
+
+
+def test_successor_adapter_rejects_direct_critic_score_modes():
+    with pytest.raises(ValueError, match="Unsupported ActorFreeTDLeWM score mode"):
+        ActorFreeTDLeWM(
+            FixedRolloutWorld(torch.zeros(1, 1, 3, 2)),
+            RecordingTailSuccessor(),
+            gamma=0.5,
+            score_mode="c_only",
+        )
+
+
+@pytest.mark.parametrize(
     "variant",
     ["serial_coupled", "parallel_real", "goal_hybrid", "imaginary_hybrid"],
 )

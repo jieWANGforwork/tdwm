@@ -101,6 +101,7 @@ planning:
   initial_distribution: cem_gaussian_no_actor
 
 inference_objective:
+  score_mode: f_plus_c
   score: discounted_direct_goal_critic_cost
   goal_usage: training_and_planning_direct_critic_input
   goal_enters_critic_head: true

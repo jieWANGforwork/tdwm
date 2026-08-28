@@ -15,6 +15,8 @@ import yaml
 
 from tdwm.adapters import prepare_cloud_runtime
 from tdwm.adapters.actor_free_td_lewm import (
+    DIRECT_CRITIC_SCORE_MODES,
+    SUCCESSOR_SCORE_MODES,
     load_actor_free_td_checkpoint,
     make_actor_free_td_policy,
 )
@@ -33,8 +35,10 @@ METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
 DIRECT_GOAL_OBJECTIVE_VERSION = 3
+IMAGINARY_OBJECTIVE_VERSION = 3
 GOAL_VARIANT = "goal_hybrid"
 DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
+IMAGINARY_VARIANT = "imaginary_hybrid"
 SUPPORTED_VARIANTS = frozenset(
     {
         "parallel_real",
@@ -42,6 +46,7 @@ SUPPORTED_VARIANTS = frozenset(
         "serial_coupled",
         "hybrid",
         "goal_hybrid",
+        "imaginary_hybrid",
         "direct_goal_hybrid",
     }
 )
@@ -80,12 +85,49 @@ DIRECT_CRITIC_SEMANTICS = {
 }
 
 
+def _objective_version_for_variant(variant: str) -> int:
+    return {
+        GOAL_VARIANT: GOAL_OBJECTIVE_VERSION,
+        DIRECT_GOAL_VARIANT: DIRECT_GOAL_OBJECTIVE_VERSION,
+        IMAGINARY_VARIANT: IMAGINARY_OBJECTIVE_VERSION,
+    }.get(variant, OBJECTIVE_VERSION)
+
+
+def default_score_mode_for_variant(variant: str) -> str:
+    """Return the legacy combined score for a checkpoint variant."""
+
+    return "f_plus_c" if variant == DIRECT_GOAL_VARIANT else "f_plus_g"
+
+
+def validate_score_mode_for_variant(variant: str, score_mode: str) -> str:
+    allowed = (
+        DIRECT_CRITIC_SCORE_MODES
+        if variant == DIRECT_GOAL_VARIANT
+        else SUCCESSOR_SCORE_MODES
+    )
+    if score_mode not in allowed:
+        raise ValueError(
+            f"score_mode {score_mode!r} is incompatible with {variant!r}; "
+            f"expected one of {sorted(allowed)}."
+        )
+    return score_mode
+
+
 def load_actor_free_td_evaluation_protocol(
     path: str | Path,
 ) -> dict[str, Any]:
     with Path(path).open() as stream:
         protocol = yaml.safe_load(stream)
     validate_actor_free_td_evaluation_protocol(protocol)
+    objective = protocol.setdefault("inference_objective", {})
+    objective["score_mode"] = validate_score_mode_for_variant(
+        str(protocol["variant"]),
+        str(
+            objective.get(
+                "score_mode", default_score_mode_for_variant(protocol["variant"])
+            )
+        ),
+    )
     return protocol
 
 
@@ -117,9 +159,7 @@ def validate_actor_free_td_evaluation_protocol(
     else:
         head = protocol.get("successor", {})
         section = "successor"
-        expected_objective_version = (
-            GOAL_OBJECTIVE_VERSION if variant == GOAL_VARIANT else OBJECTIVE_VERSION
-        )
+        expected_objective_version = _objective_version_for_variant(str(variant))
         expected_semantics = CHECKPOINT_SEMANTICS
     if int(head.get("objective_version", -1)) != expected_objective_version:
         raise ValueError(f"{section}.objective_version differs from its variant.")
@@ -152,6 +192,18 @@ def validate_actor_free_td_evaluation_protocol(
             "goal_cost": "normalized_discounted_latent_mse",
         }
         for key, expected in goal_semantics.items():
+            if head.get(key) != expected:
+                raise ValueError(f"successor.{key} must be {expected!r}.")
+    elif variant == IMAGINARY_VARIANT:
+        imaginary_semantics = {
+            "immediate_feature_source": "real_ema_next_latent",
+            "bootstrap_state_source": (
+                "ema_lewm_predicted_next_from_real_ema_history"
+            ),
+            "imaginary_horizon": 1,
+            "imaginary_predictor_gradient": "target_ema_stop_gradient",
+        }
+        for key, expected in imaginary_semantics.items():
             if head.get(key) != expected:
                 raise ValueError(f"successor.{key} must be {expected!r}.")
     elif variant == DIRECT_GOAL_VARIANT:
@@ -201,6 +253,14 @@ def validate_actor_free_td_evaluation_protocol(
         raise ValueError("The goal-free successor head cannot accept the goal.")
     if objective.get("learned_actor") is not False:
         raise ValueError("Actor-Free TD-LeWM cannot use a learned actor.")
+    validate_score_mode_for_variant(
+        str(variant),
+        str(
+            objective.get(
+                "score_mode", default_score_mode_for_variant(str(variant))
+            )
+        ),
+    )
 
 
 def _resolve_joint_checkpoint(path: str | Path) -> Path:
@@ -227,10 +287,7 @@ def _validate_checkpoint(
     checks = {
         "method": METHOD,
         "variant": expected_variant,
-        "objective_version": {
-            GOAL_VARIANT: GOAL_OBJECTIVE_VERSION,
-            DIRECT_GOAL_VARIANT: DIRECT_GOAL_OBJECTIVE_VERSION,
-        }.get(expected_variant, OBJECTIVE_VERSION),
+        "objective_version": _objective_version_for_variant(expected_variant),
         "deployment_checkpoint_version": 1,
     }
     for key, expected in checks.items():
@@ -298,6 +355,18 @@ def _validate_checkpoint(
                 "real_goal_td_weight": 1.0,
             }
         )
+    elif expected_variant == IMAGINARY_VARIANT:
+        expected_config.update(
+            {
+                "objective_version": IMAGINARY_OBJECTIVE_VERSION,
+                "immediate_feature_source": "real_ema_next_latent",
+                "bootstrap_state_source": (
+                    "ema_lewm_predicted_next_from_real_ema_history"
+                ),
+                "imaginary_horizon": 1,
+                "imaginary_predictor_gradient": "target_ema_stop_gradient",
+            }
+        )
     for key, expected in expected_config.items():
         actual = successor_config.get(key)
         if key == "gamma":
@@ -317,12 +386,26 @@ def configure_actor_free_td_evaluation_mode(
     *,
     smoke: bool,
     pilot: bool,
+    score_mode: str | None = None,
 ) -> dict[str, Any]:
     """Apply bounded execution budgets after validating the formal protocol."""
 
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
     configured = deepcopy(protocol)
+    selected_score_mode = validate_score_mode_for_variant(
+        str(configured["variant"]),
+        score_mode
+        or str(
+            configured.get("inference_objective", {}).get(
+                "score_mode",
+                default_score_mode_for_variant(str(configured["variant"])),
+            )
+        ),
+    )
+    configured.setdefault("inference_objective", {})[
+        "score_mode"
+    ] = selected_score_mode
     if smoke:
         configured["id"] = f"{configured['id']}_smoke"
         configured["evaluation"]["episodes"] = 1
@@ -352,10 +435,11 @@ def evaluate_actor_free_td_lewm(
     video: bool = False,
     smoke: bool = False,
     pilot: bool = False,
+    score_mode: str | None = None,
 ) -> dict[str, Any]:
     formal_protocol = load_actor_free_td_evaluation_protocol(protocol_path)
     protocol = configure_actor_free_td_evaluation_mode(
-        formal_protocol, smoke=smoke, pilot=pilot
+        formal_protocol, smoke=smoke, pilot=pilot, score_mode=score_mode
     )
 
     dataset_path = Path(dataset_path).expanduser().resolve()
@@ -461,6 +545,7 @@ def evaluate_actor_free_td_lewm(
                 True,
             )
         ),
+        score_mode=protocol["inference_objective"]["score_mode"],
     )
 
     runtime = {
@@ -476,6 +561,7 @@ def evaluate_actor_free_td_lewm(
     if torch.cuda.is_available():
         runtime["cuda_device"] = torch.cuda.get_device_name(0)
     manifest = {
+        "score_mode": protocol["inference_objective"]["score_mode"],
         "protocol": protocol,
         "formal_protocol": formal_protocol,
         "protocol_path": str(Path(protocol_path).resolve()),
@@ -556,6 +642,7 @@ def evaluate_actor_free_td_lewm(
         ): head_parameter_count,
         "method": METHOD,
         "variant": protocol["variant"],
+        "score_mode": protocol["inference_objective"]["score_mode"],
         "smoke": smoke,
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
@@ -570,7 +657,9 @@ __all__ = [
     "OBJECTIVE_VERSION",
     "SUPPORTED_VARIANTS",
     "configure_actor_free_td_evaluation_mode",
+    "default_score_mode_for_variant",
     "evaluate_actor_free_td_lewm",
     "load_actor_free_td_evaluation_protocol",
     "validate_actor_free_td_evaluation_protocol",
+    "validate_score_mode_for_variant",
 ]

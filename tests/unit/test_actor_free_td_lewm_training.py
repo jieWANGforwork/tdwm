@@ -17,11 +17,13 @@ from tdwm.training.actor_free_td_lewm import (
     DIRECT_GOAL_OBJECTIVE_VERSION,
     FORMAL_OPTIMIZER_UPDATES,
     GOAL_OBJECTIVE_VERSION,
+    IMAGINARY_OBJECTIVE_VERSION,
     METHOD,
     OBJECTIVE_VERSION,
     _build_generator_callback,
     _deployment_payload,
     build_actor_free_td_inputs,
+    build_imaginary_ema_next_latents,
     load_actor_free_td_training_protocol,
     resolve_actor_free_training_schedule,
     validate_actor_free_td_training_protocol,
@@ -39,6 +41,7 @@ CONFIGS = {
         "serial_coupled",
         "hybrid",
         "goal_hybrid",
+        "imaginary_hybrid",
     )
 }
 DIRECT_CONFIG = (
@@ -49,7 +52,7 @@ DIRECT_CONFIG = (
 )
 
 
-def test_five_variants_share_data_seed_budget_and_original_lewm_loss():
+def test_six_variants_share_data_seed_budget_and_original_lewm_loss():
     protocols = {
         variant: load_actor_free_td_training_protocol(path)
         for variant, path in CONFIGS.items()
@@ -90,6 +93,17 @@ def test_five_variants_share_data_seed_budget_and_original_lewm_loss():
     assert goal["real_goal_td_weight"] == goal["predicted_goal_td_weight"] == 1.0
     assert goal["goal_enters_successor_head"] is False
     assert protocols["goal_hybrid"]["successor"]["objective_version"] == 2
+    imaginary = protocols["imaginary_hybrid"]
+    assert imaginary["successor"]["objective_version"] == 3
+    assert (
+        imaginary["joint_objective"]["imaginary_transition_model"]
+        == "ema_lewm_predictor"
+    )
+    assert (
+        imaginary["joint_objective"]["imaginary_immediate_feature"]
+        == "real_ema_next_latent"
+    )
+    assert imaginary["joint_objective"]["imaginary_horizon"] == 1
     assert protocols["serial_coupled"]["joint_objective"]["real_td_weight"] == 0.0
     parallel = protocols["parallel_real"]["joint_objective"]
     assert parallel["real_td_weight"] == 1.0
@@ -152,6 +166,25 @@ def test_direct_goal_critic_protocol_is_the_same_budget_but_not_sf_factorized():
         validate_actor_free_td_training_protocol(drift)
 
 
+def test_imaginary_hybrid_protocol_rejects_bootstrap_semantic_drift():
+    protocol = load_actor_free_td_training_protocol(CONFIGS["imaginary_hybrid"])
+    protocol["joint_objective"]["imaginary_immediate_feature"] = (
+        "predicted_next_latent"
+    )
+    with pytest.raises(ValueError, match="imaginary_immediate_feature"):
+        validate_actor_free_td_training_protocol(protocol)
+
+    protocol = load_actor_free_td_training_protocol(CONFIGS["imaginary_hybrid"])
+    protocol["successor"]["bootstrap_state_source"] = "real_ema_next_history"
+    with pytest.raises(ValueError, match="bootstrap_state_source"):
+        validate_actor_free_td_training_protocol(protocol)
+
+    protocol = load_actor_free_td_training_protocol(CONFIGS["imaginary_hybrid"])
+    protocol["successor"]["objective_version"] = 1
+    with pytest.raises(ValueError, match="objective_version"):
+        validate_actor_free_td_training_protocol(protocol)
+
+
 def test_teacher_forced_predictions_replace_only_indices_history_and_later():
     real = torch.arange(7, dtype=torch.float32).reshape(1, 7, 1)
     actions = torch.arange(7, dtype=torch.float32).reshape(1, 7, 1)
@@ -198,6 +231,20 @@ def test_next_action_nan_sets_terminal_before_actions_are_zeroed():
     ]
     assert torch.isfinite(inputs.actions).all()
     assert inputs.actions[0, 5, 0] == 0.0
+
+
+def test_imaginary_predictions_skip_z_h_and_align_with_td_next_states():
+    target_local = torch.zeros(4, 3, 1)
+    target_local[:, -1, 0] = torch.tensor([30.0, 40.0, 50.0, 60.0])
+
+    imagined_next = build_imaginary_ema_next_latents(
+        target_local,
+        batch_size=1,
+        num_steps=7,
+        history_size=3,
+    )
+
+    assert imagined_next[0, :, 0].tolist() == [40.0, 50.0, 60.0]
 
 
 def _variant_backward(variant: str):
@@ -454,3 +501,33 @@ def test_direct_goal_checkpoint_records_a_critic_without_successor_state():
     assert config["architecture"] == "direct_goal_critic_head"
     assert config["goal_enters_critic_head"] is True
     assert config["td_branches"] == ["real_context", "predicted_context"]
+
+
+def test_imaginary_hybrid_checkpoint_records_imagined_bootstrap_semantics():
+    protocol = load_actor_free_td_training_protocol(CONFIGS["imaginary_hybrid"])
+    module = SimpleNamespace(
+        model=nn.Linear(2, 3),
+        target_model=nn.Linear(2, 3),
+        successor=nn.Linear(3, 4),
+        target_successor=nn.Linear(3, 4),
+    )
+    payload = _deployment_payload(
+        module,
+        protocol=protocol,
+        model_config={"_target_": "example.WorldModel"},
+        action_block_dim=25,
+        epoch=1,
+        global_step=2,
+        base_export_run_name="epoch_01",
+        base_checkpoint_sha256="0" * 64,
+    )
+
+    assert payload["objective_version"] == IMAGINARY_OBJECTIVE_VERSION
+    config = payload["successor_config"]
+    assert config["immediate_feature_source"] == "real_ema_next_latent"
+    assert (
+        config["bootstrap_state_source"]
+        == "ema_lewm_predicted_next_from_real_ema_history"
+    )
+    assert config["imaginary_horizon"] == 1
+    assert config["imaginary_predictor_gradient"] == "target_ema_stop_gradient"

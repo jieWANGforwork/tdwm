@@ -67,6 +67,14 @@ loss:
 inference:
   goal_query: linear_projection_of_successor_moments
   direct_goal_hybrid_query: direct_goal_conditioned_scalar_critic
+  successor_score_modes: [f_only, g_only, f_plus_g]
+  successor_default_score_mode: f_plus_g
+  direct_critic_score_modes: [f_only, c_only, f_plus_c]
+  direct_critic_default_score_mode: f_plus_c
+  f_only: normalized_discounted_goal_cost_over_all_h_lewm_states
+  tail_only: lewm_rollout_builds_context_but_contributes_no_explicit_cost
+  tail_only_formula: gamma_pow_h_minus_1_times_tail
+  combined_formula: h_minus_1_lewm_prefix_plus_gamma_pow_h_minus_1_times_tail
   action_selection: stable_worldmodel_cem_mpc
   learned_actor: false
 

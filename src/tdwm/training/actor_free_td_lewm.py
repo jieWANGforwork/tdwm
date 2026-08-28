@@ -57,10 +57,12 @@ METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
 DIRECT_GOAL_OBJECTIVE_VERSION = 3
+IMAGINARY_OBJECTIVE_VERSION = 3
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 FORMAL_OPTIMIZER_UPDATES = 127_960
 GOAL_VARIANT = "goal_hybrid"
 DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
+IMAGINARY_VARIANT = "imaginary_hybrid"
 HINDSIGHT_GOAL_VARIANTS = frozenset({GOAL_VARIANT, DIRECT_GOAL_VARIANT})
 
 
@@ -71,6 +73,8 @@ def objective_version_for_variant(variant: str) -> int:
         return GOAL_OBJECTIVE_VERSION
     if variant == DIRECT_GOAL_VARIANT:
         return DIRECT_GOAL_OBJECTIVE_VERSION
+    if variant == IMAGINARY_VARIANT:
+        return IMAGINARY_OBJECTIVE_VERSION
     return OBJECTIVE_VERSION
 
 
@@ -138,10 +142,17 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
             "serial_coupled": (0.0, 1.0, False, 0.0, 0.0),
             "hybrid": (1.0, 1.0, False, 0.0, 0.0),
             "goal_hybrid": (1.0, 1.0, False, 1.0, 1.0),
+            "imaginary_hybrid": (1.0, 1.0, False, 0.0, 0.0),
         }[variant]
+        expected_td_target = (
+            "real_ema_next_feature_plus_ema_successor_imagined_next_history_"
+            "dataset_next_action"
+            if variant == IMAGINARY_VARIANT
+            else "ema_next_latent_plus_ema_successor_dataset_next_action"
+        )
         expected_objective.update(
             {
-                "td_target": "ema_next_latent_plus_ema_successor_dataset_next_action",
+                "td_target": expected_td_target,
                 "goal_conditioning": "none",
                 "real_td_weight": expected_weights[0],
                 "predicted_td_weight": expected_weights[1],
@@ -171,6 +182,19 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
             "goal_sampling_seed_offset": 1,
         }
         for key, expected in goal_objective.items():
+            if objective.get(key) != expected:
+                raise ValueError(f"joint_objective.{key} must be {expected!r}.")
+    if variant == IMAGINARY_VARIANT:
+        imaginary_objective = {
+            "imaginary_transition_model": "ema_lewm_predictor",
+            "imaginary_immediate_feature": "real_ema_next_latent",
+            "imaginary_bootstrap_history": (
+                "shift_real_ema_history_append_ema_predicted_next_latent"
+            ),
+            "imaginary_horizon": 1,
+            "imaginary_target_gradient": "stop_gradient",
+        }
+        for key, expected in imaginary_objective.items():
             if objective.get(key) != expected:
                 raise ValueError(f"joint_objective.{key} must be {expected!r}.")
     if variant == DIRECT_GOAL_VARIANT:
@@ -232,6 +256,17 @@ def validate_actor_free_td_training_protocol(protocol: dict[str, Any]) -> None:
                         "predicted_context",
                     ],
                     "goal_readout_precision": "float32",
+                }
+            )
+        if variant == IMAGINARY_VARIANT:
+            locked_head.update(
+                {
+                    "immediate_feature_source": "real_ema_next_latent",
+                    "bootstrap_state_source": (
+                        "ema_lewm_predicted_next_from_real_ema_history"
+                    ),
+                    "imaginary_horizon": 1,
+                    "imaginary_predictor_gradient": "target_ema_stop_gradient",
                 }
             )
         section = "successor"
@@ -382,6 +417,33 @@ def build_actor_free_td_inputs(
     )
 
 
+def build_imaginary_ema_next_latents(
+    target_local_prediction: torch.Tensor,
+    *,
+    batch_size: int,
+    num_steps: int,
+    history_size: int,
+) -> torch.Tensor:
+    """Align EMA LeWM window predictions with TD next-state indices."""
+
+    local_count = int(num_steps) - int(history_size)
+    if target_local_prediction.ndim != 3 or local_count <= 1:
+        raise ValueError("EMA local predictions must contain all TD next states.")
+    expected_prefix = (local_count * int(batch_size), int(history_size))
+    if target_local_prediction.shape[:2] != expected_prefix:
+        raise ValueError(
+            "EMA local predictions must have start-major shape "
+            f"{expected_prefix + (target_local_prediction.shape[-1],)}."
+        )
+    embed_dim = target_local_prediction.shape[-1]
+    one_step = (
+        target_local_prediction[:, -1]
+        .reshape(local_count, int(batch_size), embed_dim)
+        .transpose(0, 1)
+    )
+    return one_step[:, 1:]
+
+
 @dataclass(frozen=True)
 class ActorFreeTrainingSchedule:
     total_scheduler_steps: int
@@ -417,12 +479,14 @@ def resolve_actor_free_training_schedule(
 
 
 def _encode_online_and_target(
-    online_model: Any, target_model: Any, encoder_input: dict[str, Any],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    online_model: Any,
+    target_model: Any,
+    encoder_input: dict[str, Any],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     online = online_model.encode(dict(encoder_input))
     with torch.no_grad():
         target = target_model.encode(dict(encoder_input))
-    return online["emb"], online["act_emb"], target["emb"]
+    return online["emb"], online["act_emb"], target["emb"], target["act_emb"]
 
 
 def _build_training_module(
@@ -563,6 +627,7 @@ def _build_training_module(
                 embeddings,
                 action_embeddings,
                 target_embeddings,
+                target_action_embeddings,
             ) = _encode_online_and_target(self.model, self.target_model, encoder_input)
             expected_steps = int(protocol["sequence"]["num_steps"])
             if embeddings.shape[1] != expected_steps:
@@ -607,6 +672,32 @@ def _build_training_module(
                 local_prediction,
                 history_size=self.history_size,
             )
+            imagined_ema_next_latents = None
+            if self.variant == IMAGINARY_VARIANT:
+                target_local_histories = torch.cat(
+                    [
+                        target_embeddings[:, start : start + self.history_size]
+                        for start in range(local_count)
+                    ],
+                    dim=0,
+                )
+                target_local_actions = torch.cat(
+                    [
+                        target_action_embeddings[:, start : start + self.history_size]
+                        for start in range(local_count)
+                    ],
+                    dim=0,
+                )
+                with torch.no_grad():
+                    target_local_prediction = self.target_model.predict(
+                        target_local_histories, target_local_actions
+                    )
+                    imagined_ema_next_latents = build_imaginary_ema_next_latents(
+                        target_local_prediction,
+                        batch_size=batch_size,
+                        num_steps=expected_steps,
+                        history_size=self.history_size,
+                    )
             goal_offsets = None
             if self.variant in HINDSIGHT_GOAL_VARIANTS and stage == "train":
                 assert self.goal_generator is not None
@@ -670,6 +761,7 @@ def _build_training_module(
                     terminals=td_inputs.terminals,
                     first_current_index=self.history_size,
                     goal_offsets=goal_offsets,
+                    imagined_ema_next_latents=imagined_ema_next_latents,
                 )
                 real_td_loss = (
                     td_output.real_td_loss
@@ -726,6 +818,9 @@ def _build_training_module(
                     ),
                     f"{stage}/td_pairs": prediction_loss.new_tensor(
                         float(td_output.pair_count)
+                    ),
+                    f"{stage}/imaginary_next_mse": (
+                        td_output.imaginary_next_mse.detach()
                     ),
                 }
             auxiliary_scale = self._auxiliary_scale()
@@ -883,6 +978,17 @@ def _successor_config(
                     objective["predicted_goal_td_weight"]
                 ),
                 "real_goal_td_weight": float(objective["real_goal_td_weight"]),
+            }
+        )
+    if variant == IMAGINARY_VARIANT:
+        config.update(
+            {
+                "immediate_feature_source": successor["immediate_feature_source"],
+                "bootstrap_state_source": successor["bootstrap_state_source"],
+                "imaginary_horizon": int(successor["imaginary_horizon"]),
+                "imaginary_predictor_gradient": successor[
+                    "imaginary_predictor_gradient"
+                ],
             }
         )
     return config
@@ -1460,9 +1566,12 @@ __all__ = [
     "FORMAL_OPTIMIZER_UPDATES",
     "GOAL_OBJECTIVE_VERSION",
     "GOAL_VARIANT",
+    "IMAGINARY_OBJECTIVE_VERSION",
+    "IMAGINARY_VARIANT",
     "METHOD",
     "OBJECTIVE_VERSION",
     "build_actor_free_td_inputs",
+    "build_imaginary_ema_next_latents",
     "load_actor_free_td_training_protocol",
     "objective_version_for_variant",
     "resolve_actor_free_training_schedule",

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sys
 from copy import deepcopy
 
 import pytest
 
+from scripts import evaluate_actor_free_td_lewm as evaluation_cli
 from tdwm.evaluation.actor_free_td_lewm import (
     CHECKPOINT_SEMANTICS,
     DIRECT_CRITIC_SEMANTICS,
@@ -64,6 +66,7 @@ def test_all_variants_share_one_actor_free_cube_o50_protocol(variant, path):
     assert protocol["inference_objective"]["goal_usage"] == expected_goal_usage
     assert protocol["inference_objective"]["goal_enters_successor_head"] is False
     assert protocol["inference_objective"]["learned_actor"] is False
+    assert protocol["inference_objective"]["score_mode"] == "f_plus_g"
 
 
 def _checkpoint_for(protocol, *, variant=None):
@@ -220,6 +223,7 @@ def test_direct_goal_critic_o50_protocol_and_checkpoint_are_not_sf_factorized():
     assert critic["goal_conditioning"] == "direct_latent_input"
     assert "successor" not in protocol
     assert protocol["inference_objective"]["goal_enters_critic_head"] is True
+    assert protocol["inference_objective"]["score_mode"] == "f_plus_c"
     for key, expected in FORMAL_O50_PLANNING.items():
         assert protocol["planning"][key] == expected
 
@@ -272,3 +276,77 @@ def test_smoke_and_pilot_budgets_do_not_mutate_the_formal_protocol():
     assert pilot["planning"]["candidates"] == 128
     with pytest.raises(ValueError, match="mutually exclusive"):
         configure_actor_free_td_evaluation_mode(protocol, smoke=True, pilot=True)
+
+
+def test_missing_score_mode_defaults_to_legacy_combined_score():
+    successor = load_actor_free_td_evaluation_protocol(CONFIGS["hybrid"])
+    del successor["inference_objective"]["score_mode"]
+    validate_actor_free_td_evaluation_protocol(successor)
+    successor_configured = configure_actor_free_td_evaluation_mode(
+        successor,
+        smoke=False,
+        pilot=False,
+    )
+    assert successor_configured["inference_objective"]["score_mode"] == "f_plus_g"
+
+    direct = load_actor_free_td_evaluation_protocol(DIRECT_CONFIG)
+    del direct["inference_objective"]["score_mode"]
+    validate_actor_free_td_evaluation_protocol(direct)
+    direct_configured = configure_actor_free_td_evaluation_mode(
+        direct,
+        smoke=False,
+        pilot=False,
+    )
+    assert direct_configured["inference_objective"]["score_mode"] == "f_plus_c"
+
+
+def test_score_mode_override_is_validated_and_recorded_in_runtime_protocol():
+    successor = load_actor_free_td_evaluation_protocol(CONFIGS["hybrid"])
+    configured = configure_actor_free_td_evaluation_mode(
+        successor,
+        smoke=False,
+        pilot=False,
+        score_mode="g_only",
+    )
+    assert successor["inference_objective"]["score_mode"] == "f_plus_g"
+    assert configured["inference_objective"]["score_mode"] == "g_only"
+
+    direct = load_actor_free_td_evaluation_protocol(DIRECT_CONFIG)
+    configured_direct = configure_actor_free_td_evaluation_mode(
+        direct,
+        smoke=False,
+        pilot=False,
+        score_mode="c_only",
+    )
+    assert configured_direct["inference_objective"]["score_mode"] == "c_only"
+
+    with pytest.raises(ValueError, match="incompatible"):
+        configure_actor_free_td_evaluation_mode(
+            successor,
+            smoke=False,
+            pilot=False,
+            score_mode="c_only",
+        )
+    with pytest.raises(ValueError, match="incompatible"):
+        configure_actor_free_td_evaluation_mode(
+            direct,
+            smoke=False,
+            pilot=False,
+            score_mode="g_only",
+        )
+
+
+def test_cli_accepts_score_mode_override(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "evaluate_actor_free_td_lewm.py",
+            "--checkpoint-path",
+            "checkpoint.pt",
+            "--score-mode",
+            "g_only",
+        ],
+    )
+
+    assert evaluation_cli.parse_args().score_mode == "g_only"

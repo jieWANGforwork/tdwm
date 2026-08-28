@@ -98,6 +98,7 @@ planning:
   initial_distribution: cem_gaussian_no_actor
 
 inference_objective:
+  score_mode: f_plus_g
   score: discounted_successor_feature_goal_cost
   goal_usage: planning_linear_readout_only
   goal_enters_successor_head: false

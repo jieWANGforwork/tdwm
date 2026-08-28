@@ -19,9 +19,22 @@ METHOD = "actor_free_td_lewm"
 OBJECTIVE_VERSION = 1
 GOAL_OBJECTIVE_VERSION = 2
 DIRECT_GOAL_OBJECTIVE_VERSION = 3
+IMAGINARY_OBJECTIVE_VERSION = 3
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 GOAL_VARIANT = "goal_hybrid"
 DIRECT_GOAL_VARIANT = "direct_goal_hybrid"
+IMAGINARY_VARIANT = "imaginary_hybrid"
+
+SUCCESSOR_SCORE_MODES = frozenset({"f_only", "g_only", "f_plus_g"})
+DIRECT_CRITIC_SCORE_MODES = frozenset({"f_only", "c_only", "f_plus_c"})
+
+
+def _objective_version_for_variant(variant: str) -> int:
+    return {
+        GOAL_VARIANT: GOAL_OBJECTIVE_VERSION,
+        DIRECT_GOAL_VARIANT: DIRECT_GOAL_OBJECTIVE_VERSION,
+        IMAGINARY_VARIANT: IMAGINARY_OBJECTIVE_VERSION,
+    }.get(variant, OBJECTIVE_VERSION)
 
 
 class ActorFreeTDLeWM(nn.Module):
@@ -33,6 +46,9 @@ class ActorFreeTDLeWM(nn.Module):
     input; consequently no transition is counted by both terms.
     """
 
+    supported_score_modes = SUCCESSOR_SCORE_MODES
+    default_score_mode = "f_plus_g"
+
     def __init__(
         self,
         world_model: nn.Module,
@@ -40,6 +56,7 @@ class ActorFreeTDLeWM(nn.Module):
         *,
         gamma: float,
         clamp_tail_cost: bool = True,
+        score_mode: str | None = None,
     ) -> None:
         super().__init__()
         if not 0.0 <= gamma < 1.0:
@@ -48,6 +65,13 @@ class ActorFreeTDLeWM(nn.Module):
         self.successor = successor
         self.gamma = float(gamma)
         self.clamp_tail_cost = bool(clamp_tail_cost)
+        self.score_mode = score_mode or self.default_score_mode
+        if self.score_mode not in self.supported_score_modes:
+            raise ValueError(
+                f"Unsupported {type(self).__name__} score mode "
+                f"{self.score_mode!r}; expected one of "
+                f"{sorted(self.supported_score_modes)}."
+            )
 
     @property
     def history_size(self) -> int:
@@ -117,14 +141,12 @@ class ActorFreeTDLeWM(nn.Module):
             )
 
         goal = self._goal_for_samples(info_dict, batch=batch, samples=samples)
+        if self.score_mode == "f_only":
+            return self._discounted_explicit_cost(future, goal)
+
         explicit_future = future[..., :-1, :]
         if explicit_future.shape[-2]:
-            stage_cost = latent_goal_cost(explicit_future, goal.unsqueeze(-2))
-            discounts = torch.pow(
-                stage_cost.new_tensor(self.gamma),
-                torch.arange(stage_cost.shape[-1], device=stage_cost.device),
-            )
-            explicit_cost = (1.0 - self.gamma) * (stage_cost * discounts).sum(dim=-1)
+            explicit_cost = self._discounted_explicit_cost(explicit_future, goal)
         else:
             explicit_cost = future.new_zeros(batch, samples)
 
@@ -147,7 +169,24 @@ class ActorFreeTDLeWM(nn.Module):
         )
         if self.clamp_tail_cost:
             tail_cost = tail_cost.clamp_min(0.0)
-        return explicit_cost + (self.gamma ** (horizon - 1)) * tail_cost
+        discounted_tail = (self.gamma ** (horizon - 1)) * tail_cost
+        if self.score_mode in {"g_only", "c_only"}:
+            return discounted_tail
+        return explicit_cost + discounted_tail
+
+    def _discounted_explicit_cost(
+        self,
+        future: torch.Tensor,
+        goal: torch.Tensor,
+    ) -> torch.Tensor:
+        """Score every supplied LeWM future state with the normalized cost."""
+
+        stage_cost = latent_goal_cost(future, goal.unsqueeze(-2))
+        discounts = torch.pow(
+            stage_cost.new_tensor(self.gamma),
+            torch.arange(stage_cost.shape[-1], device=stage_cost.device),
+        )
+        return (1.0 - self.gamma) * (stage_cost * discounts).sum(dim=-1)
 
     def _tail_cost(
         self,
@@ -272,6 +311,9 @@ class ActorFreeTDLeWM(nn.Module):
 class DirectGoalCriticLeWM(ActorFreeTDLeWM):
     """Splice explicit LeWM costs with a direct goal-conditioned critic tail."""
 
+    supported_score_modes = DIRECT_CRITIC_SCORE_MODES
+    default_score_mode = "f_plus_c"
+
     def __init__(
         self,
         world_model: nn.Module,
@@ -279,12 +321,14 @@ class DirectGoalCriticLeWM(ActorFreeTDLeWM):
         *,
         gamma: float,
         clamp_tail_cost: bool = True,
+        score_mode: str | None = None,
     ) -> None:
         super().__init__(
             world_model,
             critic,
             gamma=gamma,
             clamp_tail_cost=clamp_tail_cost,
+            score_mode=score_mode,
         )
 
     @property
@@ -328,10 +372,7 @@ def load_actor_free_td_checkpoint(
     payload_variant = payload.get("variant")
     if payload_variant not in SUPPORTED_VARIANTS:
         raise ValueError("Checkpoint contains an unsupported TD variant.")
-    expected_objective_version = {
-        GOAL_VARIANT: GOAL_OBJECTIVE_VERSION,
-        DIRECT_GOAL_VARIANT: DIRECT_GOAL_OBJECTIVE_VERSION,
-    }.get(payload_variant, OBJECTIVE_VERSION)
+    expected_objective_version = _objective_version_for_variant(payload_variant)
     if payload.get("objective_version") != expected_objective_version:
         raise ValueError("Unsupported Actor-Free TD-LeWM objective version.")
     if payload.get("deployment_checkpoint_version") != DEPLOYMENT_CHECKPOINT_VERSION:
@@ -473,6 +514,18 @@ def load_actor_free_td_checkpoint(
         for key, expected in goal_semantics.items():
             if config.get(key) != expected:
                 raise ValueError(f"successor_config.{key} must be {expected!r}.")
+    if payload_variant == IMAGINARY_VARIANT:
+        imaginary_semantics = {
+            "immediate_feature_source": "real_ema_next_latent",
+            "bootstrap_state_source": (
+                "ema_lewm_predicted_next_from_real_ema_history"
+            ),
+            "imaginary_horizon": 1,
+            "imaginary_predictor_gradient": "target_ema_stop_gradient",
+        }
+        for key, expected in imaginary_semantics.items():
+            if config.get(key) != expected:
+                raise ValueError(f"successor_config.{key} must be {expected!r}.")
 
     successor = ActorFreeSuccessorHead(
         embed_dim=int(config["embed_dim"]),
@@ -504,6 +557,7 @@ def make_actor_free_td_policy(
     transform: dict[str, Any] | None = None,
     device: str | torch.device = "cpu",
     clamp_tail_cost: bool = True,
+    score_mode: str | None = None,
 ):
     """Build the unchanged Stable World Model CEM policy around this adapter."""
 
@@ -519,6 +573,7 @@ def make_actor_free_td_policy(
         successor,
         gamma=gamma,
         clamp_tail_cost=clamp_tail_cost,
+        score_mode=score_mode,
     ).to(device)
     wrapped.eval().requires_grad_(False)
     solver = swm.solver.CEMSolver(
@@ -550,7 +605,9 @@ def make_actor_free_td_policy(
 
 __all__ = [
     "ActorFreeTDLeWM",
+    "DIRECT_CRITIC_SCORE_MODES",
     "DirectGoalCriticLeWM",
+    "SUCCESSOR_SCORE_MODES",
     "load_actor_free_td_checkpoint",
     "make_actor_free_td_policy",
 ]
