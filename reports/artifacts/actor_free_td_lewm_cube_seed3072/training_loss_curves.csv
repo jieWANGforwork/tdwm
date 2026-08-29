@@ -1,0 +1,71 @@
+variant,display_name,epoch,train_loss,validation_loss,loss_component,cross_method_comparable
+serial_decoupled,Serial Decoupled,1,0.342529535294,1.95646250248,method_total_loss,false
+serial_decoupled,Serial Decoupled,2,0.168815642595,1.25920045376,method_total_loss,false
+serial_decoupled,Serial Decoupled,3,0.14194393158,1.25623571873,method_total_loss,false
+serial_decoupled,Serial Decoupled,4,0.127172484994,1.01144719124,method_total_loss,false
+serial_decoupled,Serial Decoupled,5,0.118550524116,0.888729095459,method_total_loss,false
+serial_decoupled,Serial Decoupled,6,0.113178052008,0.829179763794,method_total_loss,false
+serial_decoupled,Serial Decoupled,7,0.109507933259,0.902248561382,method_total_loss,false
+serial_decoupled,Serial Decoupled,8,0.106841348112,0.791404366493,method_total_loss,false
+serial_decoupled,Serial Decoupled,9,0.106386363506,0.75450450182,method_total_loss,false
+serial_decoupled,Serial Decoupled,10,0.108423814178,0.780097007751,method_total_loss,false
+serial_coupled,Serial Coupled,1,0.342734485865,2.21270847321,method_total_loss,false
+serial_coupled,Serial Coupled,2,0.171004995704,1.29977846146,method_total_loss,false
+serial_coupled,Serial Coupled,3,0.142540261149,1.25988888741,method_total_loss,false
+serial_coupled,Serial Coupled,4,0.12754572928,1.01120126247,method_total_loss,false
+serial_coupled,Serial Coupled,5,0.118972614408,0.886408269405,method_total_loss,false
+serial_coupled,Serial Coupled,6,0.113299652934,0.826698958874,method_total_loss,false
+serial_coupled,Serial Coupled,7,0.109657138586,0.901814341545,method_total_loss,false
+serial_coupled,Serial Coupled,8,0.107015222311,0.789806604385,method_total_loss,false
+serial_coupled,Serial Coupled,9,0.106565646827,0.752396523952,method_total_loss,false
+serial_coupled,Serial Coupled,10,0.10864251852,0.780158281326,method_total_loss,false
+hybrid,Hybrid,1,0.343003600836,1.97912919521,method_total_loss,false
+hybrid,Hybrid,2,0.169247925282,1.3064211607,method_total_loss,false
+hybrid,Hybrid,3,0.142317697406,1.25817775726,method_total_loss,false
+hybrid,Hybrid,4,0.12768098712,1.02412366867,method_total_loss,false
+hybrid,Hybrid,5,0.119281210005,0.889225840569,method_total_loss,false
+hybrid,Hybrid,6,0.113605298102,0.826511800289,method_total_loss,false
+hybrid,Hybrid,7,0.1099877581,0.922230124474,method_total_loss,false
+hybrid,Hybrid,8,0.107450611889,0.796073317528,method_total_loss,false
+hybrid,Hybrid,9,0.106948316097,0.76611238718,method_total_loss,false
+hybrid,Hybrid,10,0.108972787857,0.78411000967,method_total_loss,false
+parallel_real,Parallel Real,1,0.342984348536,2.07237076759,method_total_loss,false
+parallel_real,Parallel Real,2,0.170986279845,1.29751873016,method_total_loss,false
+parallel_real,Parallel Real,3,0.142478093505,1.23682487011,method_total_loss,false
+parallel_real,Parallel Real,4,0.127467319369,1.03736400604,method_total_loss,false
+parallel_real,Parallel Real,5,0.118772521615,0.891258060932,method_total_loss,false
+parallel_real,Parallel Real,6,0.113253593445,0.826639473438,method_total_loss,false
+parallel_real,Parallel Real,7,0.109743230045,0.908869385719,method_total_loss,false
+parallel_real,Parallel Real,8,0.107183523476,0.793224394321,method_total_loss,false
+parallel_real,Parallel Real,9,0.106672503054,0.757853448391,method_total_loss,false
+parallel_real,Parallel Real,10,0.108762323856,0.784254312515,method_total_loss,false
+goal_hybrid,Goal Hybrid,1,0.360218346119,2.22728538513,method_total_loss,false
+goal_hybrid,Goal Hybrid,2,0.181650012732,1.3618298769,method_total_loss,false
+goal_hybrid,Goal Hybrid,3,0.150333032012,1.27208089828,method_total_loss,false
+goal_hybrid,Goal Hybrid,4,0.134912654757,1.05865812302,method_total_loss,false
+goal_hybrid,Goal Hybrid,5,0.126148864627,0.902375221252,method_total_loss,false
+goal_hybrid,Goal Hybrid,6,0.120478130877,0.833335042,method_total_loss,false
+goal_hybrid,Goal Hybrid,7,0.116687811911,0.927676022053,method_total_loss,false
+goal_hybrid,Goal Hybrid,8,0.114030919969,0.798571169376,method_total_loss,false
+goal_hybrid,Goal Hybrid,9,0.113622769713,0.766047775745,method_total_loss,false
+goal_hybrid,Goal Hybrid,10,0.115751698613,0.793632864952,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,1,0.342853993177,2.04816532135,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,2,0.16991302371,1.27245259285,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,3,0.142586499453,1.25573277473,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,4,0.127970650792,1.03676104546,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,5,0.119510114193,0.883029699326,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,6,0.113763406873,0.824499607086,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,7,0.110118813813,0.918882787228,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,8,0.107584170997,0.795279622078,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,9,0.107156164944,0.766026377678,method_total_loss,false
+imaginary_hybrid,Imaginary Hybrid,10,0.109176039696,0.788776814938,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,1,0.355154156685,2.14346146584,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,2,0.174561709166,1.2913326025,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,3,0.145639330149,1.24065816402,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,4,0.130980789661,1.02122247219,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,5,0.12190708518,0.890229701996,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,6,0.116181887686,0.828031122684,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,7,0.112587451935,0.915844857693,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,8,0.110024750233,0.798838555813,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,9,0.109677158296,0.759004354477,method_total_loss,false
+direct_goal_hybrid,Direct Goal Critic Hybrid,10,0.111773230135,0.792398929596,method_total_loss,false

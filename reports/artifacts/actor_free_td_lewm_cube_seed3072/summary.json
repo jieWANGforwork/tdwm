@@ -1,0 +1,3695 @@
+{
+  "methods": {
+    "direct_goal_hybrid": {
+      "combined_score_mode": "f_plus_c",
+      "display_name": "Direct Goal Critic Hybrid",
+      "evaluations": {
+        "c_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_a1d98a2/direct_goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/direct_goal_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "b3345e9eefdb5ef2db825a95ab3080279d7ca9545e23e056831233aa498ce41b",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "critic_parameter_count": 332289,
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1196.3957540988922,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "c3c83275a016cf1a9534748a71e8dfb3e468bcf5a196aa14c522dfc6195c8d57",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "a46255facf497b2d7c7777a36f457c695e429c80784f8f99143067786a69a345",
+            "results.json": "073987c04d1aeb62ce2356d1e3dac93ecdf7759d7a8caf48a736d8b9c2b60124"
+          },
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0,
+          "successes": 16,
+          "world_model_parameter_count": 18034628
+        },
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_a1d98a2/direct_goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/direct_goal_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "b3345e9eefdb5ef2db825a95ab3080279d7ca9545e23e056831233aa498ce41b",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "critic_parameter_count": 332289,
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1045.4840369224548,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "c3c83275a016cf1a9534748a71e8dfb3e468bcf5a196aa14c522dfc6195c8d57",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "c68364e8d03ed7608860c2e83ef6d985a8855eac8cb71e6ed66376cdd617db3d",
+            "results.json": "a6f746cc9a608ccbf1e78acd1ecd07fa6a362c739be4f800c7fef279709c3a63"
+          },
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0,
+          "successes": 22,
+          "world_model_parameter_count": 18034628
+        },
+        "f_plus_c": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_a1d98a2/direct_goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/direct_goal_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "b3345e9eefdb5ef2db825a95ab3080279d7ca9545e23e056831233aa498ce41b",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "critic_parameter_count": 332289,
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1127.350673675537,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "c3c83275a016cf1a9534748a71e8dfb3e468bcf5a196aa14c522dfc6195c8d57",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "31f0e84979a1d8b28acc54f971578461ce01280d3e58217d65c9074edee7181f",
+            "results.json": "9a884a28af2f5cd10d10a2480ce9a04ed36a35a14d0129e784d6583b2cb9a76a"
+          },
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0,
+          "successes": 19,
+          "world_model_parameter_count": 18034628
+        }
+      },
+      "family": "direct_goal_critic",
+      "method_spec": {
+        "inference": "CEM with F-only, C-only, or F+C cost.",
+        "loss": "L_LeWM + alpha_u (L_C-TD^real + L_C-TD^pred)",
+        "network": "LeWM + one scalar goal-conditioned critic for real/predicted histories",
+        "special": "Goal latent enters the critic directly; there is no SF factorization."
+      },
+      "score_modes": [
+        "f_only",
+        "c_only",
+        "f_plus_c"
+      ],
+      "training": {
+        "checkpoint_sha256": "b3345e9eefdb5ef2db825a95ab3080279d7ca9545e23e056831233aa498ce41b",
+        "common_protocol_sha256": "e83852dba438a56de2141253e3922e95d03e72e348bab45219343f7588c39648",
+        "critic_parameter_count": 332289,
+        "dataset": {
+          "conversion_manifest": {
+            "conversion": {
+              "api": "swm.data.convert",
+              "conversion_performed_in_this_run": false,
+              "execution_elapsed_seconds": 4.190842866897583,
+              "mode": "error",
+              "stable_worldmodel_version": "0.1.1"
+            },
+            "destination": {
+              "format": "lance",
+              "image_codec": "jpeg",
+              "jpeg_quality": 100,
+              "name": "cube_single_expert_jpeg100.lance",
+              "size_bytes": 36244499909
+            },
+            "schema_version": 1,
+            "source": {
+              "name": "cube_single_expert_chunk1.h5",
+              "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+              "size_bytes": 74104077358
+            },
+            "verification": {
+              "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+              "episodes": 10000,
+              "numeric_columns": {
+                "action": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+                  "exact": true,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 0.0,
+                  "mean_absolute_error": 0.0,
+                  "passed": true,
+                  "policy": "exact",
+                  "shape": [
+                    2010000,
+                    5
+                  ],
+                  "source_dtype": "float32",
+                  "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+                },
+                "observation": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+                  "exact": false,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 2.3840729657109705e-07,
+                  "mean_absolute_error": 1.7392796837827026e-08,
+                  "passed": true,
+                  "policy": "float32_cast_exact",
+                  "shape": [
+                    2010000,
+                    28
+                  ],
+                  "source_dtype": "float64",
+                  "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+                }
+              },
+              "pixels": {
+                "lossless": false,
+                "mae": 0.6259754206858524,
+                "maximum_absolute_error": 74.0,
+                "mse": 2.83425218231824,
+                "psnr_db": 43.606418711608875,
+                "samples": 128
+              },
+              "transitions": 2010000
+            }
+          },
+          "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+          "decoded_frame_store": {
+            "data_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.bin",
+            "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+            "data_sha256_verified": true,
+            "dtype": "uint8",
+            "manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.json",
+            "manifest_sha256": "ba124cfaf93a9ea239689ae202562d90443afe1131b3e886754a8718ffdccbdf",
+            "page_cache_warmed": true,
+            "preloaded": true,
+            "row_count": 2010000,
+            "shape": [
+              2010000,
+              3,
+              224,
+              224
+            ],
+            "source_binding": {
+              "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+              "conversion_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+              "dataset_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB"
+              },
+              "episode_count": 10000,
+              "episode_lengths_sha256": "0d77bdb0f8d01389e9b6ed1244e7cbc61884012baec78db0d32402e73e5ace3b",
+              "episode_offsets_sha256": "7a9f1c5227656d7ceb6a72f0af53afaad310ea21ac5f20d8ba85e76028fcf1c5",
+              "episode_payload_count": 10000,
+              "path_match": true,
+              "pixel_column": "pixels",
+              "row_count": 2010000,
+              "row_mapping": "binary frame i is decoded from Lance pixels row i",
+              "source_pixel_verification": {
+                "completed_at_utc": "2026-08-27T08:17:25.832352+00:00",
+                "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoded_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoder": {
+                  "api": "torchvision.io.decode_jpeg",
+                  "mode": "RGB"
+                },
+                "elapsed_seconds": 619.0961818234064,
+                "matches_data_sha256": true,
+                "method": "full_redecode_audit",
+                "row_count": 2010000,
+                "source_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+                "verification_log": "/root/tdwm-rf-successor-20260827/outputs/rf_successor_lewm_fullrf_fixed_20260827/logs/verify_lance_decoded_pixels_sha256.log",
+                "verification_log_sha256": "dea43eb209a23c071fd845a96613860d97bcc1045e80f869cd02835f9cdb8dae"
+              },
+              "store_source_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "verified": true
+            }
+          },
+          "format": "lance",
+          "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+          "sequence_samples": 1070000,
+          "size_bytes": 36244499909,
+          "split": {
+            "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_a1d98a2/direct_goal_hybrid/seed_3072/split_indices.npz",
+            "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+            "train_samples": 963000,
+            "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+            "validation_samples": 107000
+          }
+        },
+        "dataset_source_fingerprint_sha256": "552adf0bb25b4e4163793ac4a48e7f7c1af7954b52f8e12da4353d3ae1494c62",
+        "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_a1d98a2/direct_goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/direct_goal_hybrid/epoch_10.pt",
+        "epochs_completed": 10,
+        "global_step": 127960,
+        "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_a1d98a2/direct_goal_hybrid/seed_3072/checkpoints/lightning/last.ckpt",
+        "locked_protocol_sha256": "f9e2ee091aee487bcef521390f5032d586b7e1ffa98033412fdca30f7293a471",
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_loss": 0.3551541566848755,
+            "validation_loss": 2.1434614658355713
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.17456170916557312,
+            "validation_loss": 1.2913326025009155
+          },
+          {
+            "epoch": 3,
+            "train_loss": 0.1456393301486969,
+            "validation_loss": 1.240658164024353
+          },
+          {
+            "epoch": 4,
+            "train_loss": 0.13098078966140747,
+            "validation_loss": 1.021222472190857
+          },
+          {
+            "epoch": 5,
+            "train_loss": 0.12190708518028259,
+            "validation_loss": 0.8902297019958496
+          },
+          {
+            "epoch": 6,
+            "train_loss": 0.1161818876862526,
+            "validation_loss": 0.8280311226844788
+          },
+          {
+            "epoch": 7,
+            "train_loss": 0.11258745193481445,
+            "validation_loss": 0.9158448576927185
+          },
+          {
+            "epoch": 8,
+            "train_loss": 0.11002475023269653,
+            "validation_loss": 0.7988385558128357
+          },
+          {
+            "epoch": 9,
+            "train_loss": 0.10967715829610825,
+            "validation_loss": 0.7590043544769287
+          },
+          {
+            "epoch": 10,
+            "train_loss": 0.11177323013544083,
+            "validation_loss": 0.7923989295959473
+          }
+        ],
+        "metrics": {
+          "best_validation": {
+            "epoch": 9,
+            "metric": "validation/loss",
+            "value": 0.7590043544769287
+          },
+          "final_epoch": {
+            "epoch": 10,
+            "train/loss": 0.11177323013544083,
+            "validation/loss": 0.7923989295959473
+          }
+        },
+        "model": {
+          "action_block_dim": 25,
+          "config": {
+            "_target_": "stable_worldmodel.wm.lewm.LeWM",
+            "action_encoder": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+              "emb_dim": 192,
+              "input_dim": 25
+            },
+            "encoder": {
+              "_target_": "stable_pretraining.backbone.utils.vit_hf",
+              "image_size": 224,
+              "patch_size": 14,
+              "pretrained": false,
+              "size": "tiny",
+              "use_mask_token": false
+            },
+            "pred_proj": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            },
+            "predictor": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+              "depth": 6,
+              "dim_head": 64,
+              "dropout": 0.1,
+              "emb_dropout": 0.0,
+              "heads": 16,
+              "hidden_dim": 192,
+              "input_dim": 192,
+              "mlp_dim": 2048,
+              "num_frames": 3,
+              "output_dim": 192
+            },
+            "projector": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            }
+          },
+          "critic_parameters": 332289,
+          "lewm_parameters": 18034628
+        },
+        "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_a1d98a2/direct_goal_hybrid/seed_3072",
+        "runtime": {
+          "compatibility_adapter": {},
+          "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+          "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+          "python": "3.12.3",
+          "stable_worldmodel": "0.1.1",
+          "tdwm_git_revision": "a1d98a2d0881c836638c5176469214f370695872",
+          "torch": "2.8.0+cu128"
+        },
+        "runtime_fingerprint_sha256": "e3a583581371fcf36c8d805de9e07a0891e628fbf140e66ba346139dfd862f78",
+        "seed": 3072,
+        "source_files_sha256": {
+          "metrics.csv": "8920f278ed77c0e3fe26346d73c504a047704019da563a8c830d090560cb1972",
+          "training_manifest.json": "e7a1077b236780179861ebe7217be77c029f6d0f30cc66ed515d6207dc47f506",
+          "training_result.json": "f185283755054717120e819293d158238c6b760badc05e9851f6e1ab1487dbb8"
+        },
+        "status": "complete",
+        "training_commit": "a1d98a2d0881c836638c5176469214f370695872",
+        "world_model_parameter_count": 18034628
+      }
+    },
+    "goal_hybrid": {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Goal Hybrid",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_88ad2ec/goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/goal_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "a746912bddd078c4a64ddb4845248721226db51b5636289562586258438b32d3",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 945.3410656452179,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "461a40540751a995d5d9f2f24296e759de673260854cac086994e697541b7bc8",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "831c677a70dd63c3766eca3044367eb7b809fdad713b85149c8db3a8d58a09be",
+            "results.json": "2910c898fe5b7c1974ea563c048c566c22ba81bfc46d3e6968ec897c87532d8e"
+          },
+          "success_rate": 0.5,
+          "success_rate_percent": 50.0,
+          "successes": 25,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_88ad2ec/goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/goal_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "a746912bddd078c4a64ddb4845248721226db51b5636289562586258438b32d3",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1136.4660379886627,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "461a40540751a995d5d9f2f24296e759de673260854cac086994e697541b7bc8",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "2a416f9ba7f808d8c79b2d6eaa418a0f8a057a4daefe420e4a394a09762227e8",
+            "results.json": "e01fc068334cc1b9a8008387b1971b70fb50203c6ef8fdc7d6b98e01f5e53c11"
+          },
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0,
+          "successes": 19,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_88ad2ec/goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/goal_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "a746912bddd078c4a64ddb4845248721226db51b5636289562586258438b32d3",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1108.8112699985504,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "461a40540751a995d5d9f2f24296e759de673260854cac086994e697541b7bc8",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "99bbf9534a9f35ecc5985d979cac64e23a49318672ea5c7da68106ee47f14667",
+            "results.json": "e59eec1ce8313aa643c8ffb6f61399d0377b81a0ac671a556e2c40dca5c63b06"
+          },
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0,
+          "successes": 19,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        }
+      },
+      "family": "successor_feature",
+      "method_spec": {
+        "inference": "CEM with F-only, G-only, or F+G cost.",
+        "loss": "L_LeWM + alpha_u (L_SF-TD^real + L_SF-TD^pred + L_goal-TD^real + L_goal-TD^pred)",
+        "network": "Hybrid successor head with fixed linear goal readout G^T w(g)",
+        "special": "Goal readout is trained by hindsight goal-conditioned Bellman TD."
+      },
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "training": {
+        "checkpoint_sha256": "a746912bddd078c4a64ddb4845248721226db51b5636289562586258438b32d3",
+        "common_protocol_sha256": "e83852dba438a56de2141253e3922e95d03e72e348bab45219343f7588c39648",
+        "dataset": {
+          "conversion_manifest": {
+            "conversion": {
+              "api": "swm.data.convert",
+              "conversion_performed_in_this_run": false,
+              "execution_elapsed_seconds": 4.190842866897583,
+              "mode": "error",
+              "stable_worldmodel_version": "0.1.1"
+            },
+            "destination": {
+              "format": "lance",
+              "image_codec": "jpeg",
+              "jpeg_quality": 100,
+              "name": "cube_single_expert_jpeg100.lance",
+              "size_bytes": 36244499909
+            },
+            "schema_version": 1,
+            "source": {
+              "name": "cube_single_expert_chunk1.h5",
+              "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+              "size_bytes": 74104077358
+            },
+            "verification": {
+              "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+              "episodes": 10000,
+              "numeric_columns": {
+                "action": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+                  "exact": true,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 0.0,
+                  "mean_absolute_error": 0.0,
+                  "passed": true,
+                  "policy": "exact",
+                  "shape": [
+                    2010000,
+                    5
+                  ],
+                  "source_dtype": "float32",
+                  "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+                },
+                "observation": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+                  "exact": false,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 2.3840729657109705e-07,
+                  "mean_absolute_error": 1.7392796837827026e-08,
+                  "passed": true,
+                  "policy": "float32_cast_exact",
+                  "shape": [
+                    2010000,
+                    28
+                  ],
+                  "source_dtype": "float64",
+                  "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+                }
+              },
+              "pixels": {
+                "lossless": false,
+                "mae": 0.6259754206858524,
+                "maximum_absolute_error": 74.0,
+                "mse": 2.83425218231824,
+                "psnr_db": 43.606418711608875,
+                "samples": 128
+              },
+              "transitions": 2010000
+            }
+          },
+          "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+          "decoded_frame_store": {
+            "data_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.bin",
+            "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+            "data_sha256_verified": true,
+            "dtype": "uint8",
+            "manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.json",
+            "manifest_sha256": "ba124cfaf93a9ea239689ae202562d90443afe1131b3e886754a8718ffdccbdf",
+            "page_cache_warmed": true,
+            "preloaded": true,
+            "row_count": 2010000,
+            "shape": [
+              2010000,
+              3,
+              224,
+              224
+            ],
+            "source_binding": {
+              "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+              "conversion_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+              "dataset_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB"
+              },
+              "episode_count": 10000,
+              "episode_lengths_sha256": "0d77bdb0f8d01389e9b6ed1244e7cbc61884012baec78db0d32402e73e5ace3b",
+              "episode_offsets_sha256": "7a9f1c5227656d7ceb6a72f0af53afaad310ea21ac5f20d8ba85e76028fcf1c5",
+              "episode_payload_count": 10000,
+              "path_match": true,
+              "pixel_column": "pixels",
+              "row_count": 2010000,
+              "row_mapping": "binary frame i is decoded from Lance pixels row i",
+              "source_pixel_verification": {
+                "completed_at_utc": "2026-08-27T08:17:25.832352+00:00",
+                "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoded_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoder": {
+                  "api": "torchvision.io.decode_jpeg",
+                  "mode": "RGB"
+                },
+                "elapsed_seconds": 619.0961818234064,
+                "matches_data_sha256": true,
+                "method": "full_redecode_audit",
+                "row_count": 2010000,
+                "source_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+                "verification_log": "/root/tdwm-rf-successor-20260827/outputs/rf_successor_lewm_fullrf_fixed_20260827/logs/verify_lance_decoded_pixels_sha256.log",
+                "verification_log_sha256": "dea43eb209a23c071fd845a96613860d97bcc1045e80f869cd02835f9cdb8dae"
+              },
+              "store_source_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "verified": true
+            }
+          },
+          "format": "lance",
+          "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+          "sequence_samples": 1070000,
+          "size_bytes": 36244499909,
+          "split": {
+            "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_88ad2ec/goal_hybrid/seed_3072/split_indices.npz",
+            "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+            "train_samples": 963000,
+            "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+            "validation_samples": 107000
+          }
+        },
+        "dataset_source_fingerprint_sha256": "552adf0bb25b4e4163793ac4a48e7f7c1af7954b52f8e12da4353d3ae1494c62",
+        "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_88ad2ec/goal_hybrid/seed_3072/checkpoints/actor_free_td_lewm/goal_hybrid/epoch_10.pt",
+        "epochs_completed": 10,
+        "global_step": 127960,
+        "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_88ad2ec/goal_hybrid/seed_3072/checkpoints/lightning/last.ckpt",
+        "locked_protocol_sha256": "fdbf618cb45e8b856f1914df752e3aa44c741b579ec88191b8f92d3785a491be",
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_loss": 0.360218346118927,
+            "validation_loss": 2.227285385131836
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.18165001273155212,
+            "validation_loss": 1.3618298768997192
+          },
+          {
+            "epoch": 3,
+            "train_loss": 0.15033303201198578,
+            "validation_loss": 1.272080898284912
+          },
+          {
+            "epoch": 4,
+            "train_loss": 0.1349126547574997,
+            "validation_loss": 1.0586581230163574
+          },
+          {
+            "epoch": 5,
+            "train_loss": 0.12614886462688446,
+            "validation_loss": 0.9023752212524414
+          },
+          {
+            "epoch": 6,
+            "train_loss": 0.12047813087701797,
+            "validation_loss": 0.8333350419998169
+          },
+          {
+            "epoch": 7,
+            "train_loss": 0.11668781191110611,
+            "validation_loss": 0.9276760220527649
+          },
+          {
+            "epoch": 8,
+            "train_loss": 0.11403091996908188,
+            "validation_loss": 0.7985711693763733
+          },
+          {
+            "epoch": 9,
+            "train_loss": 0.1136227697134018,
+            "validation_loss": 0.7660477757453918
+          },
+          {
+            "epoch": 10,
+            "train_loss": 0.11575169861316681,
+            "validation_loss": 0.7936328649520874
+          }
+        ],
+        "metrics": {
+          "best_validation": {
+            "epoch": 9,
+            "metric": "validation/loss",
+            "value": 0.7660477757453918
+          },
+          "final_epoch": {
+            "epoch": 10,
+            "train/loss": 0.11575169861316681,
+            "validation/loss": 0.7936328649520874
+          }
+        },
+        "model": {
+          "action_block_dim": 25,
+          "config": {
+            "_target_": "stable_worldmodel.wm.lewm.LeWM",
+            "action_encoder": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+              "emb_dim": 192,
+              "input_dim": 25
+            },
+            "encoder": {
+              "_target_": "stable_pretraining.backbone.utils.vit_hf",
+              "image_size": 224,
+              "patch_size": 14,
+              "pretrained": false,
+              "size": "tiny",
+              "use_mask_token": false
+            },
+            "pred_proj": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            },
+            "predictor": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+              "depth": 6,
+              "dim_head": 64,
+              "dropout": 0.1,
+              "emb_dropout": 0.0,
+              "heads": 16,
+              "hidden_dim": 192,
+              "input_dim": 192,
+              "mlp_dim": 2048,
+              "num_frames": 3,
+              "output_dim": 192
+            },
+            "projector": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            }
+          },
+          "lewm_parameters": 18034628,
+          "successor_parameters": 283586
+        },
+        "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_88ad2ec/goal_hybrid/seed_3072",
+        "runtime": {
+          "compatibility_adapter": {},
+          "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+          "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+          "python": "3.12.3",
+          "stable_worldmodel": "0.1.1",
+          "tdwm_git_revision": "88ad2ec12c1d34e5a7308c97526463a67bb285be",
+          "torch": "2.8.0+cu128"
+        },
+        "runtime_fingerprint_sha256": "e3a583581371fcf36c8d805de9e07a0891e628fbf140e66ba346139dfd862f78",
+        "seed": 3072,
+        "source_files_sha256": {
+          "metrics.csv": "a5f85c64473412e7501fc0bdd7f2e6d700081bab89c0db71a1357ff05510f1b9",
+          "training_manifest.json": "7181b28eeae5b56cfb3e4eda9472ae9ed4e89d89df13625d8e3c039920f2443b",
+          "training_result.json": "1837879e4387da767e59e9c4815a67fbe8e3c37ffd2ffafc7eea08781d95f191"
+        },
+        "status": "complete",
+        "successor_parameter_count": 283586,
+        "training_commit": "88ad2ec12c1d34e5a7308c97526463a67bb285be",
+        "world_model_parameter_count": 18034628
+      }
+    },
+    "hybrid": {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Hybrid",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/hybrid/seed_3072/checkpoints/actor_free_td_lewm/hybrid/epoch_10.pt",
+          "checkpoint_sha256": "299222acff781fc8d20b0c8079297776f44f0b756f4007eeae370270c3547c3b",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 940.0485742092133,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "523a8e1faacfca03d7cf6267a9d095554efd02c1e5cdc4da2f7bb18b27392b55",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "42b58dbe35c670118a0041e7060b119b035e58121913e5795674466d5fd64fef",
+            "results.json": "1c44bca97ef742918b2f7279ba1f46ae82613a616cc255a43924d9a6f39c05bc"
+          },
+          "success_rate": 0.5,
+          "success_rate_percent": 50.0,
+          "successes": 25,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/hybrid/seed_3072/checkpoints/actor_free_td_lewm/hybrid/epoch_10.pt",
+          "checkpoint_sha256": "299222acff781fc8d20b0c8079297776f44f0b756f4007eeae370270c3547c3b",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 874.5624165534973,
+          "episodes": 50,
+          "evaluation_commit": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+          "formal_protocol_canonical_sha256": "523a8e1faacfca03d7cf6267a9d095554efd02c1e5cdc4da2f7bb18b27392b55",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": "/root/autodl-tmp/tdwm/stable_worldmodel",
+            "tdwm_git_revision": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "legacy_combined_default",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "889f14a8a28438605ff4980f977290d2c104cad9a3fd92d7b00fb54284ecd1e0",
+            "results.json": "23f1c331420e9ec44ad5db2581297fad5eda2206e542b33f1d26f50c1c8ca5bc"
+          },
+          "success_rate": 0.54,
+          "success_rate_percent": 54.0,
+          "successes": 27,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/hybrid/seed_3072/checkpoints/actor_free_td_lewm/hybrid/epoch_10.pt",
+          "checkpoint_sha256": "299222acff781fc8d20b0c8079297776f44f0b756f4007eeae370270c3547c3b",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1323.4087407588959,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "523a8e1faacfca03d7cf6267a9d095554efd02c1e5cdc4da2f7bb18b27392b55",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "b7e13cb3ec2a370d54fbd75447aef335bc6f333a88b46d122c0657581fa21459",
+            "results.json": "965617c02f6aa5a07387ee101119df93e64f0fd3f4948b588629fb109cccf139"
+          },
+          "success_rate": 0.26,
+          "success_rate_percent": 26.0,
+          "successes": 13,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        }
+      },
+      "family": "successor_feature",
+      "method_spec": {
+        "inference": "CEM with F-only, G-only, or F+G cost.",
+        "loss": "L_LeWM + alpha_u (L_TD^real + L_TD^pred)",
+        "network": "LeWM + one shared successor head for real and predicted histories",
+        "special": "The same head is trained on parallel-real and coupled-serial branches."
+      },
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "training": {
+        "checkpoint_sha256": "299222acff781fc8d20b0c8079297776f44f0b756f4007eeae370270c3547c3b",
+        "common_protocol_sha256": "e83852dba438a56de2141253e3922e95d03e72e348bab45219343f7588c39648",
+        "dataset": {
+          "conversion_manifest": {
+            "conversion": {
+              "api": "swm.data.convert",
+              "conversion_performed_in_this_run": false,
+              "execution_elapsed_seconds": 4.190842866897583,
+              "mode": "error",
+              "stable_worldmodel_version": "0.1.1"
+            },
+            "destination": {
+              "format": "lance",
+              "image_codec": "jpeg",
+              "jpeg_quality": 100,
+              "name": "cube_single_expert_jpeg100.lance",
+              "size_bytes": 36244499909
+            },
+            "schema_version": 1,
+            "source": {
+              "name": "cube_single_expert_chunk1.h5",
+              "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+              "size_bytes": 74104077358
+            },
+            "verification": {
+              "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+              "episodes": 10000,
+              "numeric_columns": {
+                "action": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+                  "exact": true,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 0.0,
+                  "mean_absolute_error": 0.0,
+                  "passed": true,
+                  "policy": "exact",
+                  "shape": [
+                    2010000,
+                    5
+                  ],
+                  "source_dtype": "float32",
+                  "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+                },
+                "observation": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+                  "exact": false,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 2.3840729657109705e-07,
+                  "mean_absolute_error": 1.7392796837827026e-08,
+                  "passed": true,
+                  "policy": "float32_cast_exact",
+                  "shape": [
+                    2010000,
+                    28
+                  ],
+                  "source_dtype": "float64",
+                  "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+                }
+              },
+              "pixels": {
+                "lossless": false,
+                "mae": 0.6259754206858524,
+                "maximum_absolute_error": 74.0,
+                "mse": 2.83425218231824,
+                "psnr_db": 43.606418711608875,
+                "samples": 128
+              },
+              "transitions": 2010000
+            }
+          },
+          "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+          "decoded_frame_store": {
+            "data_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.bin",
+            "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+            "data_sha256_verified": true,
+            "dtype": "uint8",
+            "manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.json",
+            "manifest_sha256": "ba124cfaf93a9ea239689ae202562d90443afe1131b3e886754a8718ffdccbdf",
+            "page_cache_warmed": true,
+            "preloaded": true,
+            "row_count": 2010000,
+            "shape": [
+              2010000,
+              3,
+              224,
+              224
+            ],
+            "source_binding": {
+              "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+              "conversion_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+              "dataset_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB"
+              },
+              "episode_count": 10000,
+              "episode_lengths_sha256": "0d77bdb0f8d01389e9b6ed1244e7cbc61884012baec78db0d32402e73e5ace3b",
+              "episode_offsets_sha256": "7a9f1c5227656d7ceb6a72f0af53afaad310ea21ac5f20d8ba85e76028fcf1c5",
+              "episode_payload_count": 10000,
+              "path_match": true,
+              "pixel_column": "pixels",
+              "row_count": 2010000,
+              "row_mapping": "binary frame i is decoded from Lance pixels row i",
+              "source_pixel_verification": {
+                "completed_at_utc": "2026-08-27T08:17:25.832352+00:00",
+                "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoded_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoder": {
+                  "api": "torchvision.io.decode_jpeg",
+                  "mode": "RGB"
+                },
+                "elapsed_seconds": 619.0961818234064,
+                "matches_data_sha256": true,
+                "method": "full_redecode_audit",
+                "row_count": 2010000,
+                "source_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+                "verification_log": "/root/tdwm-rf-successor-20260827/outputs/rf_successor_lewm_fullrf_fixed_20260827/logs/verify_lance_decoded_pixels_sha256.log",
+                "verification_log_sha256": "dea43eb209a23c071fd845a96613860d97bcc1045e80f869cd02835f9cdb8dae"
+              },
+              "store_source_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "verified": true
+            }
+          },
+          "format": "lance",
+          "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+          "sequence_samples": 1070000,
+          "size_bytes": 36244499909,
+          "split": {
+            "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/hybrid/seed_3072/split_indices.npz",
+            "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+            "train_samples": 963000,
+            "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+            "validation_samples": 107000
+          }
+        },
+        "dataset_source_fingerprint_sha256": "552adf0bb25b4e4163793ac4a48e7f7c1af7954b52f8e12da4353d3ae1494c62",
+        "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/hybrid/seed_3072/checkpoints/actor_free_td_lewm/hybrid/epoch_10.pt",
+        "epochs_completed": 10,
+        "global_step": 127960,
+        "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/hybrid/seed_3072/checkpoints/lightning/last.ckpt",
+        "locked_protocol_sha256": "bd0b207e27126d5534f137016a69a8402521522df60826b9bd442395484a13a9",
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_loss": 0.34300360083580017,
+            "validation_loss": 1.9791291952133179
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.16924792528152466,
+            "validation_loss": 1.306421160697937
+          },
+          {
+            "epoch": 3,
+            "train_loss": 0.14231769740581512,
+            "validation_loss": 1.2581777572631836
+          },
+          {
+            "epoch": 4,
+            "train_loss": 0.12768098711967468,
+            "validation_loss": 1.0241236686706543
+          },
+          {
+            "epoch": 5,
+            "train_loss": 0.11928121000528336,
+            "validation_loss": 0.8892258405685425
+          },
+          {
+            "epoch": 6,
+            "train_loss": 0.11360529810190201,
+            "validation_loss": 0.826511800289154
+          },
+          {
+            "epoch": 7,
+            "train_loss": 0.1099877581000328,
+            "validation_loss": 0.9222301244735718
+          },
+          {
+            "epoch": 8,
+            "train_loss": 0.10745061188936234,
+            "validation_loss": 0.796073317527771
+          },
+          {
+            "epoch": 9,
+            "train_loss": 0.10694831609725952,
+            "validation_loss": 0.7661123871803284
+          },
+          {
+            "epoch": 10,
+            "train_loss": 0.10897278785705566,
+            "validation_loss": 0.7841100096702576
+          }
+        ],
+        "metrics": {
+          "best_validation": {
+            "epoch": 9,
+            "metric": "validation/loss",
+            "value": 0.7661123871803284
+          },
+          "final_epoch": {
+            "epoch": 10,
+            "train/loss": 0.10897278785705566,
+            "validation/loss": 0.7841100096702576
+          }
+        },
+        "model": {
+          "action_block_dim": 25,
+          "config": {
+            "_target_": "stable_worldmodel.wm.lewm.LeWM",
+            "action_encoder": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+              "emb_dim": 192,
+              "input_dim": 25
+            },
+            "encoder": {
+              "_target_": "stable_pretraining.backbone.utils.vit_hf",
+              "image_size": 224,
+              "patch_size": 14,
+              "pretrained": false,
+              "size": "tiny",
+              "use_mask_token": false
+            },
+            "pred_proj": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            },
+            "predictor": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+              "depth": 6,
+              "dim_head": 64,
+              "dropout": 0.1,
+              "emb_dropout": 0.0,
+              "heads": 16,
+              "hidden_dim": 192,
+              "input_dim": 192,
+              "mlp_dim": 2048,
+              "num_frames": 3,
+              "output_dim": 192
+            },
+            "projector": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            }
+          },
+          "lewm_parameters": 18034628,
+          "successor_parameters": 283586
+        },
+        "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/hybrid/seed_3072",
+        "runtime": {
+          "compatibility_adapter": {},
+          "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+          "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+          "python": "3.12.3",
+          "stable_worldmodel": "0.1.1",
+          "tdwm_git_revision": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+          "torch": "2.8.0+cu128"
+        },
+        "runtime_fingerprint_sha256": "e3a583581371fcf36c8d805de9e07a0891e628fbf140e66ba346139dfd862f78",
+        "seed": 3072,
+        "source_files_sha256": {
+          "metrics.csv": "14f81c53402e654303ac8d1aaadc16d272271c582ed22fe134061650b6aef498",
+          "training_manifest.json": "33b9e7ef22dc56814b6c53339df4119e13a9bc4653ced9aa2053b92fa1e96930",
+          "training_result.json": "3840c6e158f7f03c784c2374d47f605054fb924bb223427582c626dcf865458e"
+        },
+        "status": "complete",
+        "successor_parameter_count": 283586,
+        "training_commit": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+        "world_model_parameter_count": 18034628
+      }
+    },
+    "imaginary_hybrid": {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Imaginary Hybrid",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_ea82e8f/imaginary_hybrid/seed_3072/checkpoints/actor_free_td_lewm/imaginary_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "e7656fed92a0332e15be34cfdeaa91eb3726d401cdec1f0d7baa9fe796f94ea9",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 973.8353445529938,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "13ad24379a2cfbf7b1e66fa783c46c9c88fc303113aa4fa13275f15f5403be11",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "44d41b7ed576ce007f815ec47f2a91e4e0fd2b8c7a4f73a591576856c6772553",
+            "results.json": "575c7bbd2b04bb93e538793d0ca89dfc2bf252804c9f0088c49d1a965155d39f"
+          },
+          "success_rate": 0.48,
+          "success_rate_percent": 48.0,
+          "successes": 24,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_ea82e8f/imaginary_hybrid/seed_3072/checkpoints/actor_free_td_lewm/imaginary_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "e7656fed92a0332e15be34cfdeaa91eb3726d401cdec1f0d7baa9fe796f94ea9",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 989.1952929496765,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "13ad24379a2cfbf7b1e66fa783c46c9c88fc303113aa4fa13275f15f5403be11",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "6374c69d3d5d677b16720c089cce31e7c0106d39da8a823f676a3454f01ed13b",
+            "results.json": "b3711d312a96da5eaecf699d1a656de68ff14cc742968c3b34cc769fb2f267fd"
+          },
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0,
+          "successes": 23,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_ea82e8f/imaginary_hybrid/seed_3072/checkpoints/actor_free_td_lewm/imaginary_hybrid/epoch_10.pt",
+          "checkpoint_sha256": "e7656fed92a0332e15be34cfdeaa91eb3726d401cdec1f0d7baa9fe796f94ea9",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1269.8867619037628,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "13ad24379a2cfbf7b1e66fa783c46c9c88fc303113aa4fa13275f15f5403be11",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "696d5779d2bdfe4c875ce223ed62b20e21b879be613a654906e3865c8ff2572e",
+            "results.json": "065f3bbf4cd396d3f4d184ac6ec0f19c0d48f182f86478f63b900427d8c78342"
+          },
+          "success_rate": 0.26,
+          "success_rate_percent": 26.0,
+          "successes": 13,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        }
+      },
+      "family": "successor_feature",
+      "method_spec": {
+        "inference": "CEM with F-only, G-only, or F+G cost.",
+        "loss": "L_LeWM + alpha_u (L_TD^real + L_TD^pred)",
+        "network": "Hybrid successor head with an EMA-LeWM imagined bootstrap state",
+        "special": "The TD target bootstraps one step through the stopped EMA predictor."
+      },
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "training": {
+        "checkpoint_sha256": "e7656fed92a0332e15be34cfdeaa91eb3726d401cdec1f0d7baa9fe796f94ea9",
+        "common_protocol_sha256": "e83852dba438a56de2141253e3922e95d03e72e348bab45219343f7588c39648",
+        "dataset": {
+          "conversion_manifest": {
+            "conversion": {
+              "api": "swm.data.convert",
+              "conversion_performed_in_this_run": false,
+              "execution_elapsed_seconds": 4.190842866897583,
+              "mode": "error",
+              "stable_worldmodel_version": "0.1.1"
+            },
+            "destination": {
+              "format": "lance",
+              "image_codec": "jpeg",
+              "jpeg_quality": 100,
+              "name": "cube_single_expert_jpeg100.lance",
+              "size_bytes": 36244499909
+            },
+            "schema_version": 1,
+            "source": {
+              "name": "cube_single_expert_chunk1.h5",
+              "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+              "size_bytes": 74104077358
+            },
+            "verification": {
+              "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+              "episodes": 10000,
+              "numeric_columns": {
+                "action": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+                  "exact": true,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 0.0,
+                  "mean_absolute_error": 0.0,
+                  "passed": true,
+                  "policy": "exact",
+                  "shape": [
+                    2010000,
+                    5
+                  ],
+                  "source_dtype": "float32",
+                  "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+                },
+                "observation": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+                  "exact": false,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 2.3840729657109705e-07,
+                  "mean_absolute_error": 1.7392796837827026e-08,
+                  "passed": true,
+                  "policy": "float32_cast_exact",
+                  "shape": [
+                    2010000,
+                    28
+                  ],
+                  "source_dtype": "float64",
+                  "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+                }
+              },
+              "pixels": {
+                "lossless": false,
+                "mae": 0.6259754206858524,
+                "maximum_absolute_error": 74.0,
+                "mse": 2.83425218231824,
+                "psnr_db": 43.606418711608875,
+                "samples": 128
+              },
+              "transitions": 2010000
+            }
+          },
+          "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+          "decoded_frame_store": {
+            "data_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.bin",
+            "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+            "data_sha256_verified": true,
+            "dtype": "uint8",
+            "manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.json",
+            "manifest_sha256": "ba124cfaf93a9ea239689ae202562d90443afe1131b3e886754a8718ffdccbdf",
+            "page_cache_warmed": true,
+            "preloaded": true,
+            "row_count": 2010000,
+            "shape": [
+              2010000,
+              3,
+              224,
+              224
+            ],
+            "source_binding": {
+              "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+              "conversion_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+              "dataset_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB"
+              },
+              "episode_count": 10000,
+              "episode_lengths_sha256": "0d77bdb0f8d01389e9b6ed1244e7cbc61884012baec78db0d32402e73e5ace3b",
+              "episode_offsets_sha256": "7a9f1c5227656d7ceb6a72f0af53afaad310ea21ac5f20d8ba85e76028fcf1c5",
+              "episode_payload_count": 10000,
+              "path_match": true,
+              "pixel_column": "pixels",
+              "row_count": 2010000,
+              "row_mapping": "binary frame i is decoded from Lance pixels row i",
+              "source_pixel_verification": {
+                "completed_at_utc": "2026-08-27T08:17:25.832352+00:00",
+                "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoded_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoder": {
+                  "api": "torchvision.io.decode_jpeg",
+                  "mode": "RGB"
+                },
+                "elapsed_seconds": 619.0961818234064,
+                "matches_data_sha256": true,
+                "method": "full_redecode_audit",
+                "row_count": 2010000,
+                "source_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+                "verification_log": "/root/tdwm-rf-successor-20260827/outputs/rf_successor_lewm_fullrf_fixed_20260827/logs/verify_lance_decoded_pixels_sha256.log",
+                "verification_log_sha256": "dea43eb209a23c071fd845a96613860d97bcc1045e80f869cd02835f9cdb8dae"
+              },
+              "store_source_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "verified": true
+            }
+          },
+          "format": "lance",
+          "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+          "sequence_samples": 1070000,
+          "size_bytes": 36244499909,
+          "split": {
+            "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_ea82e8f/imaginary_hybrid/seed_3072/split_indices.npz",
+            "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+            "train_samples": 963000,
+            "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+            "validation_samples": 107000
+          }
+        },
+        "dataset_source_fingerprint_sha256": "552adf0bb25b4e4163793ac4a48e7f7c1af7954b52f8e12da4353d3ae1494c62",
+        "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_ea82e8f/imaginary_hybrid/seed_3072/checkpoints/actor_free_td_lewm/imaginary_hybrid/epoch_10.pt",
+        "epochs_completed": 10,
+        "global_step": 127960,
+        "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_ea82e8f/imaginary_hybrid/seed_3072/checkpoints/lightning/last.ckpt",
+        "locked_protocol_sha256": "6e43c9f75351537bc5bec32c5f88ec47f295d9f2d943c8c9294d79423bfc7340",
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_loss": 0.34285399317741394,
+            "validation_loss": 2.0481653213500977
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.16991302371025085,
+            "validation_loss": 1.2724525928497314
+          },
+          {
+            "epoch": 3,
+            "train_loss": 0.14258649945259094,
+            "validation_loss": 1.255732774734497
+          },
+          {
+            "epoch": 4,
+            "train_loss": 0.1279706507921219,
+            "validation_loss": 1.0367610454559326
+          },
+          {
+            "epoch": 5,
+            "train_loss": 0.11951011419296265,
+            "validation_loss": 0.8830296993255615
+          },
+          {
+            "epoch": 6,
+            "train_loss": 0.11376340687274933,
+            "validation_loss": 0.8244996070861816
+          },
+          {
+            "epoch": 7,
+            "train_loss": 0.1101188138127327,
+            "validation_loss": 0.9188827872276306
+          },
+          {
+            "epoch": 8,
+            "train_loss": 0.10758417099714279,
+            "validation_loss": 0.7952796220779419
+          },
+          {
+            "epoch": 9,
+            "train_loss": 0.1071561649441719,
+            "validation_loss": 0.7660263776779175
+          },
+          {
+            "epoch": 10,
+            "train_loss": 0.10917603969573975,
+            "validation_loss": 0.7887768149375916
+          }
+        ],
+        "metrics": {
+          "best_validation": {
+            "epoch": 9,
+            "metric": "validation/loss",
+            "value": 0.7660263776779175
+          },
+          "final_epoch": {
+            "epoch": 10,
+            "train/loss": 0.10917603969573975,
+            "validation/loss": 0.7887768149375916
+          }
+        },
+        "model": {
+          "action_block_dim": 25,
+          "config": {
+            "_target_": "stable_worldmodel.wm.lewm.LeWM",
+            "action_encoder": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+              "emb_dim": 192,
+              "input_dim": 25
+            },
+            "encoder": {
+              "_target_": "stable_pretraining.backbone.utils.vit_hf",
+              "image_size": 224,
+              "patch_size": 14,
+              "pretrained": false,
+              "size": "tiny",
+              "use_mask_token": false
+            },
+            "pred_proj": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            },
+            "predictor": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+              "depth": 6,
+              "dim_head": 64,
+              "dropout": 0.1,
+              "emb_dropout": 0.0,
+              "heads": 16,
+              "hidden_dim": 192,
+              "input_dim": 192,
+              "mlp_dim": 2048,
+              "num_frames": 3,
+              "output_dim": 192
+            },
+            "projector": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            }
+          },
+          "lewm_parameters": 18034628,
+          "successor_parameters": 283586
+        },
+        "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_ea82e8f/imaginary_hybrid/seed_3072",
+        "runtime": {
+          "compatibility_adapter": {},
+          "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+          "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+          "python": "3.12.3",
+          "stable_worldmodel": "0.1.1",
+          "tdwm_git_revision": "ea82e8f2984f7a006999135505645c0665b628ca",
+          "torch": "2.8.0+cu128"
+        },
+        "runtime_fingerprint_sha256": "e3a583581371fcf36c8d805de9e07a0891e628fbf140e66ba346139dfd862f78",
+        "seed": 3072,
+        "source_files_sha256": {
+          "metrics.csv": "c9e56583f5f4bc18df93112448dfddb9bc4cf81954f16438e738cb49a60dceb6",
+          "training_manifest.json": "afafd808f84f97a3411e263ce591f1940b1572ff1a0b192b521d12ddc7b50e39",
+          "training_result.json": "1a505d41e2d374cca983efd2524ad1b925c940b6edf894833bc0278cb4afc908"
+        },
+        "status": "complete",
+        "successor_parameter_count": 283586,
+        "training_commit": "ea82e8f2984f7a006999135505645c0665b628ca",
+        "world_model_parameter_count": 18034628
+      }
+    },
+    "parallel_real": {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Parallel Real",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_e895637/parallel_real/seed_3072/checkpoints/actor_free_td_lewm/parallel_real/epoch_10.pt",
+          "checkpoint_sha256": "61b5614a7b9217e4b082b22d5168271c7a9248060774135e06d26c8792feb666",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1173.0104155540466,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "e3ed1b1fbb52592d00fa41c5ad0b556ff233740374469930aa39711ac403b499",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "f85c189452fe31cd22842b5208afb8d22cae77161e6813b5f50889c3b718fbed",
+            "results.json": "856ff534f97615af7b994f967c5a84b33e1275ceaf150cfa1644579486ea10c5"
+          },
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0,
+          "successes": 17,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_e895637/parallel_real/seed_3072/checkpoints/actor_free_td_lewm/parallel_real/epoch_10.pt",
+          "checkpoint_sha256": "61b5614a7b9217e4b082b22d5168271c7a9248060774135e06d26c8792feb666",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1040.3678290843964,
+          "episodes": 50,
+          "evaluation_commit": "e895637d8c7e92ca82b3b4dbfcb3d8cd2f94b904",
+          "formal_protocol_canonical_sha256": "e3ed1b1fbb52592d00fa41c5ad0b556ff233740374469930aa39711ac403b499",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": "/root/autodl-tmp/tdwm/stable_worldmodel",
+            "tdwm_git_revision": "e895637d8c7e92ca82b3b4dbfcb3d8cd2f94b904",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "legacy_combined_default",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "fe4eb1be911ba741aa3c6d2e841725ced7accaaf80778bc90be6849972a8cf95",
+            "results.json": "fdb11662e6fcbac3ec2a7741aaab6aca3b6fbe899b4d03c3938bead2ad465345"
+          },
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0,
+          "successes": 22,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_e895637/parallel_real/seed_3072/checkpoints/actor_free_td_lewm/parallel_real/epoch_10.pt",
+          "checkpoint_sha256": "61b5614a7b9217e4b082b22d5168271c7a9248060774135e06d26c8792feb666",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1248.1360025405884,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "e3ed1b1fbb52592d00fa41c5ad0b556ff233740374469930aa39711ac403b499",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "b319d690b810f34052998217d2dc44b98b4f148001f356a21e615e71f7a3ab78",
+            "results.json": "0f0545301c487ce20bfb40c46eaa58114a6de42e1ebe34fb3643005ba423e30c"
+          },
+          "success_rate": 0.26,
+          "success_rate_percent": 26.0,
+          "successes": 13,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        }
+      },
+      "family": "successor_feature",
+      "method_spec": {
+        "inference": "CEM with F-only, G-only, or F+G cost.",
+        "loss": "L_LeWM + alpha_u L_TD^real",
+        "network": "LeWM predictor and successor head are parallel on encoder latents",
+        "special": "TD uses real latent history and does not pass through the predictor."
+      },
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "training": {
+        "checkpoint_sha256": "61b5614a7b9217e4b082b22d5168271c7a9248060774135e06d26c8792feb666",
+        "common_protocol_sha256": "e83852dba438a56de2141253e3922e95d03e72e348bab45219343f7588c39648",
+        "dataset": {
+          "conversion_manifest": {
+            "conversion": {
+              "api": "swm.data.convert",
+              "conversion_performed_in_this_run": false,
+              "execution_elapsed_seconds": 4.190842866897583,
+              "mode": "error",
+              "stable_worldmodel_version": "0.1.1"
+            },
+            "destination": {
+              "format": "lance",
+              "image_codec": "jpeg",
+              "jpeg_quality": 100,
+              "name": "cube_single_expert_jpeg100.lance",
+              "size_bytes": 36244499909
+            },
+            "schema_version": 1,
+            "source": {
+              "name": "cube_single_expert_chunk1.h5",
+              "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+              "size_bytes": 74104077358
+            },
+            "verification": {
+              "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+              "episodes": 10000,
+              "numeric_columns": {
+                "action": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+                  "exact": true,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 0.0,
+                  "mean_absolute_error": 0.0,
+                  "passed": true,
+                  "policy": "exact",
+                  "shape": [
+                    2010000,
+                    5
+                  ],
+                  "source_dtype": "float32",
+                  "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+                },
+                "observation": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+                  "exact": false,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 2.3840729657109705e-07,
+                  "mean_absolute_error": 1.7392796837827026e-08,
+                  "passed": true,
+                  "policy": "float32_cast_exact",
+                  "shape": [
+                    2010000,
+                    28
+                  ],
+                  "source_dtype": "float64",
+                  "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+                }
+              },
+              "pixels": {
+                "lossless": false,
+                "mae": 0.6259754206858524,
+                "maximum_absolute_error": 74.0,
+                "mse": 2.83425218231824,
+                "psnr_db": 43.606418711608875,
+                "samples": 128
+              },
+              "transitions": 2010000
+            }
+          },
+          "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+          "decoded_frame_store": {
+            "data_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.bin",
+            "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+            "data_sha256_verified": true,
+            "dtype": "uint8",
+            "manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.json",
+            "manifest_sha256": "ba124cfaf93a9ea239689ae202562d90443afe1131b3e886754a8718ffdccbdf",
+            "page_cache_warmed": true,
+            "preloaded": true,
+            "row_count": 2010000,
+            "shape": [
+              2010000,
+              3,
+              224,
+              224
+            ],
+            "source_binding": {
+              "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+              "conversion_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+              "dataset_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB"
+              },
+              "episode_count": 10000,
+              "episode_lengths_sha256": "0d77bdb0f8d01389e9b6ed1244e7cbc61884012baec78db0d32402e73e5ace3b",
+              "episode_offsets_sha256": "7a9f1c5227656d7ceb6a72f0af53afaad310ea21ac5f20d8ba85e76028fcf1c5",
+              "episode_payload_count": 10000,
+              "path_match": true,
+              "pixel_column": "pixels",
+              "row_count": 2010000,
+              "row_mapping": "binary frame i is decoded from Lance pixels row i",
+              "source_pixel_verification": {
+                "completed_at_utc": "2026-08-27T08:17:25.832352+00:00",
+                "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoded_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoder": {
+                  "api": "torchvision.io.decode_jpeg",
+                  "mode": "RGB"
+                },
+                "elapsed_seconds": 619.0961818234064,
+                "matches_data_sha256": true,
+                "method": "full_redecode_audit",
+                "row_count": 2010000,
+                "source_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+                "verification_log": "/root/tdwm-rf-successor-20260827/outputs/rf_successor_lewm_fullrf_fixed_20260827/logs/verify_lance_decoded_pixels_sha256.log",
+                "verification_log_sha256": "dea43eb209a23c071fd845a96613860d97bcc1045e80f869cd02835f9cdb8dae"
+              },
+              "store_source_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "verified": true
+            }
+          },
+          "format": "lance",
+          "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+          "sequence_samples": 1070000,
+          "size_bytes": 36244499909,
+          "split": {
+            "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_e895637/parallel_real/seed_3072/split_indices.npz",
+            "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+            "train_samples": 963000,
+            "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+            "validation_samples": 107000
+          }
+        },
+        "dataset_source_fingerprint_sha256": "552adf0bb25b4e4163793ac4a48e7f7c1af7954b52f8e12da4353d3ae1494c62",
+        "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_e895637/parallel_real/seed_3072/checkpoints/actor_free_td_lewm/parallel_real/epoch_10.pt",
+        "epochs_completed": 10,
+        "global_step": 127960,
+        "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_e895637/parallel_real/seed_3072/checkpoints/lightning/last.ckpt",
+        "locked_protocol_sha256": "f3d3ca31e1f1b6405f02f63e0b11025d273cc567ff908599347b4be79c0e4fec",
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_loss": 0.3429843485355377,
+            "validation_loss": 2.072370767593384
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.17098627984523773,
+            "validation_loss": 1.2975187301635742
+          },
+          {
+            "epoch": 3,
+            "train_loss": 0.1424780935049057,
+            "validation_loss": 1.236824870109558
+          },
+          {
+            "epoch": 4,
+            "train_loss": 0.1274673193693161,
+            "validation_loss": 1.0373640060424805
+          },
+          {
+            "epoch": 5,
+            "train_loss": 0.11877252161502838,
+            "validation_loss": 0.8912580609321594
+          },
+          {
+            "epoch": 6,
+            "train_loss": 0.11325359344482422,
+            "validation_loss": 0.8266394734382629
+          },
+          {
+            "epoch": 7,
+            "train_loss": 0.10974323004484177,
+            "validation_loss": 0.9088693857192993
+          },
+          {
+            "epoch": 8,
+            "train_loss": 0.10718352347612381,
+            "validation_loss": 0.7932243943214417
+          },
+          {
+            "epoch": 9,
+            "train_loss": 0.106672503054142,
+            "validation_loss": 0.7578534483909607
+          },
+          {
+            "epoch": 10,
+            "train_loss": 0.10876232385635376,
+            "validation_loss": 0.7842543125152588
+          }
+        ],
+        "metrics": {
+          "best_validation": {
+            "epoch": 9,
+            "metric": "validation/loss",
+            "value": 0.7578534483909607
+          },
+          "final_epoch": {
+            "epoch": 10,
+            "train/loss": 0.10876232385635376,
+            "validation/loss": 0.7842543125152588
+          }
+        },
+        "model": {
+          "action_block_dim": 25,
+          "config": {
+            "_target_": "stable_worldmodel.wm.lewm.LeWM",
+            "action_encoder": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+              "emb_dim": 192,
+              "input_dim": 25
+            },
+            "encoder": {
+              "_target_": "stable_pretraining.backbone.utils.vit_hf",
+              "image_size": 224,
+              "patch_size": 14,
+              "pretrained": false,
+              "size": "tiny",
+              "use_mask_token": false
+            },
+            "pred_proj": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            },
+            "predictor": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+              "depth": 6,
+              "dim_head": 64,
+              "dropout": 0.1,
+              "emb_dropout": 0.0,
+              "heads": 16,
+              "hidden_dim": 192,
+              "input_dim": 192,
+              "mlp_dim": 2048,
+              "num_frames": 3,
+              "output_dim": 192
+            },
+            "projector": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            }
+          },
+          "lewm_parameters": 18034628,
+          "successor_parameters": 283586
+        },
+        "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_e895637/parallel_real/seed_3072",
+        "runtime": {
+          "compatibility_adapter": {},
+          "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+          "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+          "python": "3.12.3",
+          "stable_worldmodel": "0.1.1",
+          "tdwm_git_revision": "e895637d8c7e92ca82b3b4dbfcb3d8cd2f94b904",
+          "torch": "2.8.0+cu128"
+        },
+        "runtime_fingerprint_sha256": "e3a583581371fcf36c8d805de9e07a0891e628fbf140e66ba346139dfd862f78",
+        "seed": 3072,
+        "source_files_sha256": {
+          "metrics.csv": "206867ed3fc0a5b47444f5f0d8e8e826a1e85b575be6215e0b6c815f3005770e",
+          "training_manifest.json": "bd70fa62918f3a084c1532e6a95bef543bb908382e1f6b383a7b2bbfa9e2fba4",
+          "training_result.json": "1fa519d73d7ccee39a30776a4945478da523a44cd7db4af7f91e1d2eb8a2b0d0"
+        },
+        "status": "complete",
+        "successor_parameter_count": 283586,
+        "training_commit": "e895637d8c7e92ca82b3b4dbfcb3d8cd2f94b904",
+        "world_model_parameter_count": 18034628
+      }
+    },
+    "serial_coupled": {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Serial Coupled",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_coupled/seed_3072/checkpoints/actor_free_td_lewm/serial_coupled/epoch_10.pt",
+          "checkpoint_sha256": "2fe3fd5bcb2c8e5c71d88c80d372f4dd48855360373a3a41892bf57ee1a84de1",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 911.4657201766968,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "936f1a938ecac31473ebc2f81e492db93106ced0dd3a768ba72bde362be96acc",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "6814085715a3e800c052cca575169660837cbac88d8b65b6ae1804b05842d9da",
+            "results.json": "79abc164bd0ab8225cdfdd6c58fcc42897b275da0761d631f7e3f29fbe28c79d"
+          },
+          "success_rate": 0.52,
+          "success_rate_percent": 52.0,
+          "successes": 26,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_coupled/seed_3072/checkpoints/actor_free_td_lewm/serial_coupled/epoch_10.pt",
+          "checkpoint_sha256": "2fe3fd5bcb2c8e5c71d88c80d372f4dd48855360373a3a41892bf57ee1a84de1",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1075.8512394428253,
+          "episodes": 50,
+          "evaluation_commit": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+          "formal_protocol_canonical_sha256": "936f1a938ecac31473ebc2f81e492db93106ced0dd3a768ba72bde362be96acc",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": "/root/autodl-tmp/tdwm/stable_worldmodel",
+            "tdwm_git_revision": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "legacy_combined_default",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "7de34b3f8c4910f80e28364018384749a88dc46345a73e9b424ed3b03bfa21ee",
+            "results.json": "f258243815b00e18a082281270822622b34b5b17f697dbe704f6907ec5a7f709"
+          },
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0,
+          "successes": 20,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_coupled/seed_3072/checkpoints/actor_free_td_lewm/serial_coupled/epoch_10.pt",
+          "checkpoint_sha256": "2fe3fd5bcb2c8e5c71d88c80d372f4dd48855360373a3a41892bf57ee1a84de1",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1236.8507566452026,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "936f1a938ecac31473ebc2f81e492db93106ced0dd3a768ba72bde362be96acc",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "9d5b025a77419b8e476936684ba9e199ba4051d8f36334f0f2208f3de938572e",
+            "results.json": "275c767e69d2f40a936b636d2a0349b0ed144ede8e2e887ad8f62980bcef19df"
+          },
+          "success_rate": 0.28,
+          "success_rate_percent": 28.000000000000004,
+          "successes": 14,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        }
+      },
+      "family": "successor_feature",
+      "method_spec": {
+        "inference": "CEM with F-only, G-only, or F+G cost.",
+        "loss": "L_LeWM + alpha_u L_TD^pred",
+        "network": "LeWM + one successor-feature head on predicted latent history",
+        "special": "Predicted context stays differentiable; TD also reaches LeWM."
+      },
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "training": {
+        "checkpoint_sha256": "2fe3fd5bcb2c8e5c71d88c80d372f4dd48855360373a3a41892bf57ee1a84de1",
+        "common_protocol_sha256": "e83852dba438a56de2141253e3922e95d03e72e348bab45219343f7588c39648",
+        "dataset": {
+          "conversion_manifest": {
+            "conversion": {
+              "api": "swm.data.convert",
+              "conversion_performed_in_this_run": false,
+              "execution_elapsed_seconds": 4.190842866897583,
+              "mode": "error",
+              "stable_worldmodel_version": "0.1.1"
+            },
+            "destination": {
+              "format": "lance",
+              "image_codec": "jpeg",
+              "jpeg_quality": 100,
+              "name": "cube_single_expert_jpeg100.lance",
+              "size_bytes": 36244499909
+            },
+            "schema_version": 1,
+            "source": {
+              "name": "cube_single_expert_chunk1.h5",
+              "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+              "size_bytes": 74104077358
+            },
+            "verification": {
+              "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+              "episodes": 10000,
+              "numeric_columns": {
+                "action": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+                  "exact": true,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 0.0,
+                  "mean_absolute_error": 0.0,
+                  "passed": true,
+                  "policy": "exact",
+                  "shape": [
+                    2010000,
+                    5
+                  ],
+                  "source_dtype": "float32",
+                  "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+                },
+                "observation": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+                  "exact": false,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 2.3840729657109705e-07,
+                  "mean_absolute_error": 1.7392796837827026e-08,
+                  "passed": true,
+                  "policy": "float32_cast_exact",
+                  "shape": [
+                    2010000,
+                    28
+                  ],
+                  "source_dtype": "float64",
+                  "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+                }
+              },
+              "pixels": {
+                "lossless": false,
+                "mae": 0.6259754206858524,
+                "maximum_absolute_error": 74.0,
+                "mse": 2.83425218231824,
+                "psnr_db": 43.606418711608875,
+                "samples": 128
+              },
+              "transitions": 2010000
+            }
+          },
+          "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+          "decoded_frame_store": {
+            "data_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.bin",
+            "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+            "data_sha256_verified": true,
+            "dtype": "uint8",
+            "manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.json",
+            "manifest_sha256": "ba124cfaf93a9ea239689ae202562d90443afe1131b3e886754a8718ffdccbdf",
+            "page_cache_warmed": true,
+            "preloaded": true,
+            "row_count": 2010000,
+            "shape": [
+              2010000,
+              3,
+              224,
+              224
+            ],
+            "source_binding": {
+              "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+              "conversion_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+              "dataset_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB"
+              },
+              "episode_count": 10000,
+              "episode_lengths_sha256": "0d77bdb0f8d01389e9b6ed1244e7cbc61884012baec78db0d32402e73e5ace3b",
+              "episode_offsets_sha256": "7a9f1c5227656d7ceb6a72f0af53afaad310ea21ac5f20d8ba85e76028fcf1c5",
+              "episode_payload_count": 10000,
+              "path_match": true,
+              "pixel_column": "pixels",
+              "row_count": 2010000,
+              "row_mapping": "binary frame i is decoded from Lance pixels row i",
+              "source_pixel_verification": {
+                "completed_at_utc": "2026-08-27T08:17:25.832352+00:00",
+                "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoded_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoder": {
+                  "api": "torchvision.io.decode_jpeg",
+                  "mode": "RGB"
+                },
+                "elapsed_seconds": 619.0961818234064,
+                "matches_data_sha256": true,
+                "method": "full_redecode_audit",
+                "row_count": 2010000,
+                "source_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+                "verification_log": "/root/tdwm-rf-successor-20260827/outputs/rf_successor_lewm_fullrf_fixed_20260827/logs/verify_lance_decoded_pixels_sha256.log",
+                "verification_log_sha256": "dea43eb209a23c071fd845a96613860d97bcc1045e80f869cd02835f9cdb8dae"
+              },
+              "store_source_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "verified": true
+            }
+          },
+          "format": "lance",
+          "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+          "sequence_samples": 1070000,
+          "size_bytes": 36244499909,
+          "split": {
+            "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_coupled/seed_3072/split_indices.npz",
+            "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+            "train_samples": 963000,
+            "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+            "validation_samples": 107000
+          }
+        },
+        "dataset_source_fingerprint_sha256": "552adf0bb25b4e4163793ac4a48e7f7c1af7954b52f8e12da4353d3ae1494c62",
+        "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_coupled/seed_3072/checkpoints/actor_free_td_lewm/serial_coupled/epoch_10.pt",
+        "epochs_completed": 10,
+        "global_step": 127960,
+        "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_coupled/seed_3072/checkpoints/lightning/last.ckpt",
+        "locked_protocol_sha256": "e272feeb5081253d732dd761593a80750582dbaabdc6b0bff4d56d2b10497d6b",
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_loss": 0.3427344858646393,
+            "validation_loss": 2.2127084732055664
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.1710049957036972,
+            "validation_loss": 1.2997784614562988
+          },
+          {
+            "epoch": 3,
+            "train_loss": 0.14254026114940643,
+            "validation_loss": 1.2598888874053955
+          },
+          {
+            "epoch": 4,
+            "train_loss": 0.12754572927951813,
+            "validation_loss": 1.01120126247406
+          },
+          {
+            "epoch": 5,
+            "train_loss": 0.11897261440753937,
+            "validation_loss": 0.886408269405365
+          },
+          {
+            "epoch": 6,
+            "train_loss": 0.1132996529340744,
+            "validation_loss": 0.8266989588737488
+          },
+          {
+            "epoch": 7,
+            "train_loss": 0.10965713858604431,
+            "validation_loss": 0.901814341545105
+          },
+          {
+            "epoch": 8,
+            "train_loss": 0.1070152223110199,
+            "validation_loss": 0.789806604385376
+          },
+          {
+            "epoch": 9,
+            "train_loss": 0.10656564682722092,
+            "validation_loss": 0.7523965239524841
+          },
+          {
+            "epoch": 10,
+            "train_loss": 0.10864251852035522,
+            "validation_loss": 0.780158281326294
+          }
+        ],
+        "metrics": {
+          "best_validation": {
+            "epoch": 9,
+            "metric": "validation/loss",
+            "value": 0.7523965239524841
+          },
+          "final_epoch": {
+            "epoch": 10,
+            "train/loss": 0.10864251852035522,
+            "validation/loss": 0.780158281326294
+          }
+        },
+        "model": {
+          "action_block_dim": 25,
+          "config": {
+            "_target_": "stable_worldmodel.wm.lewm.LeWM",
+            "action_encoder": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+              "emb_dim": 192,
+              "input_dim": 25
+            },
+            "encoder": {
+              "_target_": "stable_pretraining.backbone.utils.vit_hf",
+              "image_size": 224,
+              "patch_size": 14,
+              "pretrained": false,
+              "size": "tiny",
+              "use_mask_token": false
+            },
+            "pred_proj": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            },
+            "predictor": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+              "depth": 6,
+              "dim_head": 64,
+              "dropout": 0.1,
+              "emb_dropout": 0.0,
+              "heads": 16,
+              "hidden_dim": 192,
+              "input_dim": 192,
+              "mlp_dim": 2048,
+              "num_frames": 3,
+              "output_dim": 192
+            },
+            "projector": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            }
+          },
+          "lewm_parameters": 18034628,
+          "successor_parameters": 283586
+        },
+        "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_coupled/seed_3072",
+        "runtime": {
+          "compatibility_adapter": {},
+          "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+          "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+          "python": "3.12.3",
+          "stable_worldmodel": "0.1.1",
+          "tdwm_git_revision": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+          "torch": "2.8.0+cu128"
+        },
+        "runtime_fingerprint_sha256": "e3a583581371fcf36c8d805de9e07a0891e628fbf140e66ba346139dfd862f78",
+        "seed": 3072,
+        "source_files_sha256": {
+          "metrics.csv": "b2e5b09988516c3e670cb282a620177a95d76c696533df228e7ec4de8da7dd9d",
+          "training_manifest.json": "77e9499b6d2b3d85b9a3baa545408b7e6a492196fe511e86fc2707538aeaa60b",
+          "training_result.json": "664daa8768c0dd2695decce3cf0d4ed2503ba86deaddee206521ffe6f9e2556f"
+        },
+        "status": "complete",
+        "successor_parameter_count": 283586,
+        "training_commit": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+        "world_model_parameter_count": 18034628
+      }
+    },
+    "serial_decoupled": {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Serial Decoupled",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_decoupled/seed_3072/checkpoints/actor_free_td_lewm/serial_decoupled/epoch_10.pt",
+          "checkpoint_sha256": "cb8be3f9a851fca4e79a107ddaa5e00f1ee7f19c703d51ac2448a9b374d9fb74",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1134.8572809696198,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "cb699fae6b342b0e7cc434372d746906ca1c88d2db07dbfe8b885c3a6294d81e",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "726b449fa10c29de063297d3c95fa7f119109e0df86bb52edfbb0e104695d2ff",
+            "results.json": "4593f539f427be4d2ac588203398a9768715c956f0bba1f23adce6802b55f24a"
+          },
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0,
+          "successes": 20,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_decoupled/seed_3072/checkpoints/actor_free_td_lewm/serial_decoupled/epoch_10.pt",
+          "checkpoint_sha256": "cb8be3f9a851fca4e79a107ddaa5e00f1ee7f19c703d51ac2448a9b374d9fb74",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 992.8903124332428,
+          "episodes": 50,
+          "evaluation_commit": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+          "formal_protocol_canonical_sha256": "cb699fae6b342b0e7cc434372d746906ca1c88d2db07dbfe8b885c3a6294d81e",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": "/root/autodl-tmp/tdwm/stable_worldmodel",
+            "tdwm_git_revision": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "legacy_combined_default",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "632fc3c2eb124a3d3623c2e095d88e38c10fedbd09d213a23fd74a41a89a150a",
+            "results.json": "0dfe88066f94aecd130d8da8140ae877fd415c797f63bd1b5a6b95a9c1d6e871"
+          },
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0,
+          "successes": 23,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_decoupled/seed_3072/checkpoints/actor_free_td_lewm/serial_decoupled/epoch_10.pt",
+          "checkpoint_sha256": "cb8be3f9a851fca4e79a107ddaa5e00f1ee7f19c703d51ac2448a9b374d9fb74",
+          "common_protocol_sha256": "6554d07b86c591ea1dabde9768afd73e724970adb6fef47a237eb100eb9b6d54",
+          "dataset": {
+            "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+            "episodes": 10000,
+            "format": "lance",
+            "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+            "size_bytes": 36244499909,
+            "transitions": 2010000
+          },
+          "dataset_fingerprint_sha256": "7272a940429f91b52cdfe64e344b6ff161b8304eb393ca6674903efc2b0b11ba",
+          "elapsed_seconds": 1232.0727689266205,
+          "episodes": 50,
+          "evaluation_commit": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+          "formal_protocol_canonical_sha256": "cb699fae6b342b0e7cc434372d746906ca1c88d2db07dbfe8b885c3a6294d81e",
+          "normalization": {
+            "action": {
+              "mean": [
+                0.0108846967805138,
+                -0.0031414329928013945,
+                0.0026465825646189004,
+                0.0004239286647865428,
+                0.15925256653030173
+              ],
+              "samples": 2000000,
+              "scale": [
+                0.2894198325506555,
+                0.39371697495490987,
+                0.6431365217957304,
+                0.3928016202283424,
+                0.2503073640045173
+              ],
+              "variance": [
+                0.08376383947364949,
+                0.15501305636764512,
+                0.41362458566751004,
+                0.15429311285401096,
+                0.06265377647488993
+              ]
+            }
+          },
+          "normalization_fingerprint_sha256": "2b5b46dc0bf0b32beb14674a51fe608f1054f10eef0307fb6a8b390944ce4860",
+          "runtime": {
+            "compatibility_adapter": null,
+            "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+            "device": "cuda",
+            "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+            "python": "3.12.3",
+            "stable_worldmodel": "0.1.1",
+            "stablewm_home": null,
+            "tdwm_git_revision": "fa46ed99b705a8d476f23db1133419cbdfaffdb2",
+            "torch": "2.8.0+cu128"
+          },
+          "runtime_fingerprint_sha256": "c94f9a544c9952cb2ec311cc1afe695dd11c1057821582e039d5808d4f7e9b0c",
+          "score_mode_source": "explicit",
+          "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "source_files_sha256": {
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "b686f70cf676fdfb5019e0b21f9b3408617f82f5af4fe06bd88c15ec95b59abd",
+            "results.json": "cb466e1c8dcaf85f9729a4a27940d0420b3eb4a06470b1f5057097d7a637827d"
+          },
+          "success_rate": 0.3,
+          "success_rate_percent": 30.0,
+          "successes": 15,
+          "successor_parameter_count": 283586,
+          "world_model_parameter_count": 18034628
+        }
+      },
+      "family": "successor_feature",
+      "method_spec": {
+        "inference": "CEM with F-only, G-only, or F+G cost.",
+        "loss": "L_LeWM + alpha_u L_TD^pred",
+        "network": "LeWM + one successor-feature head on predicted latent history",
+        "special": "Predicted context is detached; TD updates the successor head only."
+      },
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "training": {
+        "checkpoint_sha256": "cb8be3f9a851fca4e79a107ddaa5e00f1ee7f19c703d51ac2448a9b374d9fb74",
+        "common_protocol_sha256": "e83852dba438a56de2141253e3922e95d03e72e348bab45219343f7588c39648",
+        "dataset": {
+          "conversion_manifest": {
+            "conversion": {
+              "api": "swm.data.convert",
+              "conversion_performed_in_this_run": false,
+              "execution_elapsed_seconds": 4.190842866897583,
+              "mode": "error",
+              "stable_worldmodel_version": "0.1.1"
+            },
+            "destination": {
+              "format": "lance",
+              "image_codec": "jpeg",
+              "jpeg_quality": 100,
+              "name": "cube_single_expert_jpeg100.lance",
+              "size_bytes": 36244499909
+            },
+            "schema_version": 1,
+            "source": {
+              "name": "cube_single_expert_chunk1.h5",
+              "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+              "size_bytes": 74104077358
+            },
+            "verification": {
+              "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+              "episodes": 10000,
+              "numeric_columns": {
+                "action": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+                  "exact": true,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 0.0,
+                  "mean_absolute_error": 0.0,
+                  "passed": true,
+                  "policy": "exact",
+                  "shape": [
+                    2010000,
+                    5
+                  ],
+                  "source_dtype": "float32",
+                  "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+                },
+                "observation": {
+                  "destination_dtype": "float32",
+                  "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+                  "exact": false,
+                  "float32_cast_exact": true,
+                  "maximum_absolute_error": 2.3840729657109705e-07,
+                  "mean_absolute_error": 1.7392796837827026e-08,
+                  "passed": true,
+                  "policy": "float32_cast_exact",
+                  "shape": [
+                    2010000,
+                    28
+                  ],
+                  "source_dtype": "float64",
+                  "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+                }
+              },
+              "pixels": {
+                "lossless": false,
+                "mae": 0.6259754206858524,
+                "maximum_absolute_error": 74.0,
+                "mse": 2.83425218231824,
+                "psnr_db": 43.606418711608875,
+                "samples": 128
+              },
+              "transitions": 2010000
+            }
+          },
+          "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+          "decoded_frame_store": {
+            "data_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.bin",
+            "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+            "data_sha256_verified": true,
+            "dtype": "uint8",
+            "manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100_rgb224_uint8.json",
+            "manifest_sha256": "ba124cfaf93a9ea239689ae202562d90443afe1131b3e886754a8718ffdccbdf",
+            "page_cache_warmed": true,
+            "preloaded": true,
+            "row_count": 2010000,
+            "shape": [
+              2010000,
+              3,
+              224,
+              224
+            ],
+            "source_binding": {
+              "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+              "conversion_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+              "dataset_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "decoder": {
+                "api": "torchvision.io.decode_jpeg",
+                "mode": "RGB"
+              },
+              "episode_count": 10000,
+              "episode_lengths_sha256": "0d77bdb0f8d01389e9b6ed1244e7cbc61884012baec78db0d32402e73e5ace3b",
+              "episode_offsets_sha256": "7a9f1c5227656d7ceb6a72f0af53afaad310ea21ac5f20d8ba85e76028fcf1c5",
+              "episode_payload_count": 10000,
+              "path_match": true,
+              "pixel_column": "pixels",
+              "row_count": 2010000,
+              "row_mapping": "binary frame i is decoded from Lance pixels row i",
+              "source_pixel_verification": {
+                "completed_at_utc": "2026-08-27T08:17:25.832352+00:00",
+                "data_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoded_sha256": "6b06dfe73f98e13ebaba12cfdc11b1913f0e2b90fc15501bbd73eabff0c95a02",
+                "decoder": {
+                  "api": "torchvision.io.decode_jpeg",
+                  "mode": "RGB"
+                },
+                "elapsed_seconds": 619.0961818234064,
+                "matches_data_sha256": true,
+                "method": "full_redecode_audit",
+                "row_count": 2010000,
+                "source_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+                "verification_log": "/root/tdwm-rf-successor-20260827/outputs/rf_successor_lewm_fullrf_fixed_20260827/logs/verify_lance_decoded_pixels_sha256.log",
+                "verification_log_sha256": "dea43eb209a23c071fd845a96613860d97bcc1045e80f869cd02835f9cdb8dae"
+              },
+              "store_source_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+              "verified": true
+            }
+          },
+          "format": "lance",
+          "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+          "sequence_samples": 1070000,
+          "size_bytes": 36244499909,
+          "split": {
+            "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_decoupled/seed_3072/split_indices.npz",
+            "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+            "train_samples": 963000,
+            "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+            "validation_samples": 107000
+          }
+        },
+        "dataset_source_fingerprint_sha256": "552adf0bb25b4e4163793ac4a48e7f7c1af7954b52f8e12da4353d3ae1494c62",
+        "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_decoupled/seed_3072/checkpoints/actor_free_td_lewm/serial_decoupled/epoch_10.pt",
+        "epochs_completed": 10,
+        "global_step": 127960,
+        "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_decoupled/seed_3072/checkpoints/lightning/last.ckpt",
+        "locked_protocol_sha256": "6eaaf266bc6e303f5b72b1858925fb761d516673d7a8235d33b109fb206dcdc2",
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_loss": 0.3425295352935791,
+            "validation_loss": 1.9564625024795532
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.16881564259529114,
+            "validation_loss": 1.2592004537582397
+          },
+          {
+            "epoch": 3,
+            "train_loss": 0.14194393157958984,
+            "validation_loss": 1.2562357187271118
+          },
+          {
+            "epoch": 4,
+            "train_loss": 0.12717248499393463,
+            "validation_loss": 1.0114471912384033
+          },
+          {
+            "epoch": 5,
+            "train_loss": 0.11855052411556244,
+            "validation_loss": 0.8887290954589844
+          },
+          {
+            "epoch": 6,
+            "train_loss": 0.11317805200815201,
+            "validation_loss": 0.8291797637939453
+          },
+          {
+            "epoch": 7,
+            "train_loss": 0.10950793325901031,
+            "validation_loss": 0.9022485613822937
+          },
+          {
+            "epoch": 8,
+            "train_loss": 0.10684134811162949,
+            "validation_loss": 0.7914043664932251
+          },
+          {
+            "epoch": 9,
+            "train_loss": 0.10638636350631714,
+            "validation_loss": 0.7545045018196106
+          },
+          {
+            "epoch": 10,
+            "train_loss": 0.10842381417751312,
+            "validation_loss": 0.7800970077514648
+          }
+        ],
+        "metrics": {
+          "best_validation": {
+            "epoch": 9,
+            "metric": "validation/loss",
+            "value": 0.7545045018196106
+          },
+          "final_epoch": {
+            "epoch": 10,
+            "train/loss": 0.10842381417751312,
+            "validation/loss": 0.7800970077514648
+          }
+        },
+        "model": {
+          "action_block_dim": 25,
+          "config": {
+            "_target_": "stable_worldmodel.wm.lewm.LeWM",
+            "action_encoder": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+              "emb_dim": 192,
+              "input_dim": 25
+            },
+            "encoder": {
+              "_target_": "stable_pretraining.backbone.utils.vit_hf",
+              "image_size": 224,
+              "patch_size": 14,
+              "pretrained": false,
+              "size": "tiny",
+              "use_mask_token": false
+            },
+            "pred_proj": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            },
+            "predictor": {
+              "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+              "depth": 6,
+              "dim_head": 64,
+              "dropout": 0.1,
+              "emb_dropout": 0.0,
+              "heads": 16,
+              "hidden_dim": 192,
+              "input_dim": 192,
+              "mlp_dim": 2048,
+              "num_frames": 3,
+              "output_dim": 192
+            },
+            "projector": {
+              "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+              "hidden_dim": 2048,
+              "input_dim": 192,
+              "norm_fn": {
+                "_partial_": true,
+                "_target_": "torch.nn.BatchNorm1d"
+              },
+              "output_dim": 192
+            }
+          },
+          "lewm_parameters": 18034628,
+          "successor_parameters": 283586
+        },
+        "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_8e667cb/serial_decoupled/seed_3072",
+        "runtime": {
+          "compatibility_adapter": {},
+          "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+          "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+          "python": "3.12.3",
+          "stable_worldmodel": "0.1.1",
+          "tdwm_git_revision": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+          "torch": "2.8.0+cu128"
+        },
+        "runtime_fingerprint_sha256": "e3a583581371fcf36c8d805de9e07a0891e628fbf140e66ba346139dfd862f78",
+        "seed": 3072,
+        "source_files_sha256": {
+          "metrics.csv": "4f9ab1cef79dddd8b64507f26302442411256f3f02c7a0226fd1547c9c92a945",
+          "training_manifest.json": "837cde9befa69d43a17625d80272b4159e8c0f32d83a95184a5aef931a44ef74",
+          "training_result.json": "09eabed5cda0eee1507a629f5ac36650de4cc6ba1fce9989fdb062e2e12ff209"
+        },
+        "status": "complete",
+        "successor_parameter_count": 283586,
+        "training_commit": "8e667cb6a8e98dbdaed87f29395d69e9d209bdf1",
+        "world_model_parameter_count": 18034628
+      }
+    }
+  },
+  "ranking_by_combined": [
+    {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Hybrid",
+      "elapsed_seconds": 874.5624165534973,
+      "episodes": 50,
+      "rank": 1,
+      "success_rate": 0.54,
+      "success_rate_percent": 54.0,
+      "successes": 27,
+      "variant": "hybrid"
+    },
+    {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Serial Decoupled",
+      "elapsed_seconds": 992.8903124332428,
+      "episodes": 50,
+      "rank": 2,
+      "success_rate": 0.46,
+      "success_rate_percent": 46.0,
+      "successes": 23,
+      "variant": "serial_decoupled"
+    },
+    {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Imaginary Hybrid",
+      "elapsed_seconds": 989.1952929496765,
+      "episodes": 50,
+      "rank": 2,
+      "success_rate": 0.46,
+      "success_rate_percent": 46.0,
+      "successes": 23,
+      "variant": "imaginary_hybrid"
+    },
+    {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Parallel Real",
+      "elapsed_seconds": 1040.3678290843964,
+      "episodes": 50,
+      "rank": 4,
+      "success_rate": 0.44,
+      "success_rate_percent": 44.0,
+      "successes": 22,
+      "variant": "parallel_real"
+    },
+    {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Serial Coupled",
+      "elapsed_seconds": 1075.8512394428253,
+      "episodes": 50,
+      "rank": 5,
+      "success_rate": 0.4,
+      "success_rate_percent": 40.0,
+      "successes": 20,
+      "variant": "serial_coupled"
+    },
+    {
+      "combined_score_mode": "f_plus_g",
+      "display_name": "Goal Hybrid",
+      "elapsed_seconds": 1136.4660379886627,
+      "episodes": 50,
+      "rank": 6,
+      "success_rate": 0.38,
+      "success_rate_percent": 38.0,
+      "successes": 19,
+      "variant": "goal_hybrid"
+    },
+    {
+      "combined_score_mode": "f_plus_c",
+      "display_name": "Direct Goal Critic Hybrid",
+      "elapsed_seconds": 1127.350673675537,
+      "episodes": 50,
+      "rank": 6,
+      "success_rate": 0.38,
+      "success_rate_percent": 38.0,
+      "successes": 19,
+      "variant": "direct_goal_hybrid"
+    }
+  ],
+  "schema_version": 1,
+  "score_definitions": {
+    "c_only": "LeWM still rolls the candidate to form critic context, but ranking uses only the direct goal critic C.",
+    "f_only": "LeWM rolls and scores all H predicted states with the normalized discounted latent-goal cost.",
+    "f_plus_c": "F prefix cost plus discounted direct critic C tail cost.",
+    "f_plus_g": "F prefix cost plus discounted successor G tail cost.",
+    "g_only": "LeWM still rolls the candidate to form tail context, but ranking uses only the successor G readout."
+  },
+  "selection": {
+    "episode_selection_json_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+    "episodes": 50,
+    "pair_hash_definition": "SHA-256 of compact key-sorted JSON containing episode_index, goal_step, and start_step."
+  },
+  "study": {
+    "dataset_identifier": "quentinll/lewm-cube",
+    "environment": "swm/OGBCube-v0",
+    "episodes": 50,
+    "evaluation_count": 21,
+    "goal_offset": 50,
+    "id": "actor_free_td_lewm_cube_seed3072_o50_score_modes",
+    "interpretation": "One training seed and one matched O50 planning selection. Rank only combined inference scores; this is not a multi-seed claim.",
+    "method": "actor_free_td_lewm",
+    "optimizer_updates": 127960,
+    "planning_seed": 42,
+    "training_epochs": 10,
+    "training_seed": 3072,
+    "variant_count": 7
+  },
+  "validation": {
+    "common_selection_across_21_runs": true,
+    "complete_7x3_bundle": true,
+    "complete_locked_training_protocol_per_variant": true,
+    "formal_o50_only": true,
+    "locked_seed42_selection_sha256": true,
+    "same_checkpoint_within_each_variant": true,
+    "shared_action_normalization_fingerprint": true,
+    "shared_common_protocol_fingerprint": true,
+    "shared_critical_runtime_fingerprint": true,
+    "shared_dataset_provenance_fingerprint": true,
+    "shared_training_common_protocol_fingerprint": true,
+    "shared_training_critical_runtime_fingerprint": true,
+    "shared_training_dataset_provenance_fingerprint": true,
+    "shared_training_split_samples_and_index_hashes": true,
+    "shared_world_model_parameter_count": true,
+    "smoke_or_pilot_runs": 0,
+    "success_rates_match_episode_outcomes": true,
+    "training_checkpoint_path_matches_evaluation": true,
+    "training_metrics_derived_from_raw_lightning_csv": true
+  }
+}
