@@ -53,7 +53,7 @@ def test_training_queue_starts_heavy_variants_and_queues_c_last(tmp_path: Path) 
     assert all("--neighbor-index" not in job.argv for job in jobs[1:])
 
 
-def test_smoke_stages_share_output_and_use_exact_resume_contract(
+def test_smoke_max_steps_one_still_expects_two_batches_per_epoch(
     tmp_path: Path,
 ) -> None:
     paths = _paths(tmp_path)
@@ -67,8 +67,12 @@ def test_smoke_stages_share_output_and_use_exact_resume_contract(
     for first, second in zip(smoke1, smoke2):
         assert first.argv[-2:] == ("--resume", "never")
         assert second.argv[-2:] == ("--resume", "required")
-        assert first.expected_epoch == first.expected_global_step == 1
-        assert second.expected_epoch == second.expected_global_step == 2
+        assert first.argv[first.argv.index("--max-steps") + 1] == "1"
+        assert second.argv[second.argv.index("--max-steps") + 1] == "1"
+        assert first.expected_epoch == 1
+        assert first.expected_global_step == 2
+        assert second.expected_epoch == 2
+        assert second.expected_global_step == 4
         for flag in ("--smoke", "--max-steps", "--skip-validation"):
             assert flag in first.argv and flag in second.argv
 

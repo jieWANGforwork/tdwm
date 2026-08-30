@@ -304,7 +304,10 @@ def build_jobs(
     output_root = paths.smoke_root if smoke else paths.formal_root
     resume = "required" if stage == "smoke2" else formal_resume
     expected_epoch = 2 if stage == "smoke2" else 1 if stage == "smoke1" else 10
-    expected_step = 2 if stage == "smoke2" else 1 if stage == "smoke1" else 127_960
+    # resolve_train_batch_limit(smoke=True) deliberately runs two batches per
+    # epoch, independently of the smoke-only --max-steps CLI argument.  The
+    # second required-resume call therefore reaches four cumulative updates.
+    expected_step = 4 if stage == "smoke2" else 2 if stage == "smoke1" else 127_960
     for variant in VARIANTS:
         config = f"configs/experiment/actor_free_td_lewm_v2_{variant}_cube_train.yaml"
         output = output_root / variant
