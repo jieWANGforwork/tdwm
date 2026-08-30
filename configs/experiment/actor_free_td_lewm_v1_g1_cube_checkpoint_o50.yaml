@@ -1,0 +1,171 @@
+schema_version: 1
+id: actor_free_td_lewm_v1_g1_cube_checkpoint_o50
+method: actor_free_td_lewm_v1_g1
+method_family: actor_free_td_lewm_v1
+variant: g1
+display_name: Actor-Free TD-JEPA V1 Neighbor Action Advantage
+implementation_version: v1
+environment: cube
+stage: planner_evaluation
+
+runtime:
+  stable_worldmodel_version: 0.1.1
+  import: import stable_worldmodel as swm
+  precision: fp32
+
+pretrained_world_model:
+  source_method: lewm
+  source_seed: 3072
+  source_epoch: 10
+  checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
+  frozen: true
+
+image_preprocessing:
+  source: stable_pretraining.data.dataset_stats.ImageNet
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+dataset:
+  identifier: quentinll/lewm-cube
+  file: cube_single_expert_chunk1.h5
+  expected_size_bytes: 101942558720
+  accepted_size_bytes: [101942558720, 74104077358]
+  expected_episodes: 10000
+  expected_transitions: 2010000
+  episode_steps: 201
+  source:
+    file: cube_single_expert_chunk1.h5
+    size_bytes: 74104077358
+    sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  lance:
+    suffix: .lance
+    manifest_suffix: .manifest.json
+    manifest_sha256: 9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd
+    image_codec: jpeg
+    jpeg_quality: 100
+  keys_to_load:
+    - pixels
+    - action
+    - qpos
+    - qvel
+    - privileged_block_0_pos
+    - privileged_block_0_quat
+
+checkpoint:
+  source: actor_free_td_lewm_v1_deployment_export
+  checkpoint_path: required_cli_argument
+  contains_world_model: true
+  contains_predictor: true
+  deployment_checkpoint_version: 1
+
+model:
+  embed_dim: 192
+
+context:
+  g_state_frames: 1
+  lewm_rollout_history_frames: 3
+  plan_config_history_len: 1
+
+predictor:
+  objective_version: 0
+  architecture: td_jepa_forward_map_v1
+  state_dim: 192
+  raw_action_dim: 25
+  action_dim: 192
+  action_embedding_dim: 192
+  task_dim: 192
+  output_dim: 192
+  hidden_dim: 256
+  hidden_layers: 1
+  embedding_layers: 2
+  num_parallel: 1
+  action_processing: frozen_shared_lewm_action_encoder
+  shared_lewm_action_encoder: true
+  action_encoder_trainable: false
+  action_encoder_source: world_model.action_encoder
+  state_parameterization: symmetric_shared_frozen_lewm_latent
+  goal_conditioning: task_input
+  bootstrap_action: dataset_next_action
+  actor: none
+  reward: none
+  gamma: 0.95
+  target_ema_decay: 0.995
+  loss_warmup_fraction: 0.0
+
+task_sampling:
+  sampling: per_transition_bernoulli
+  goal_probability: 0.5
+  random_source: isotropic_gaussian_sphere
+  goal_source: uniform_reachable_future_frozen_latent_same_clip
+  normalization: sqrt_dim_l2_sphere
+  mix_unit: transition_minibatch
+  goal_sampling_seed_offset: 170003
+  task_sampling_seed_offset: 270007
+
+joint_objective:
+  base_td_population: all_transitions
+  random_task_weight: 1.0
+  goal_subset: goal_derived_tasks_only
+  final_weight_normalization: mean_one_over_all_transitions
+  weight_gradient: stop_gradient
+  candidate_td_targets: none
+  objective: neighbor_action_advantage
+  score_source: detached_online_predictor
+  candidate_source: other_episode_frozen_latent_knn_real_action_blocks
+  neighbor_temperature: 0.5
+  neighbors_per_anchor: 8
+  weight_temperature: 0.5
+  goal_subset_weighting: softmax_mean_one
+
+world:
+  env_name: swm/OGBCube-v0
+  env_type: single
+  ob_type: states
+  image_size: 224
+  multiview: false
+  visualize_info: false
+  terminate_at_goal: true
+  success_threshold_meters: 0.04
+
+evaluation:
+  episodes: 50
+  goal_offset: 50
+  start_goal_source: same_dataset_episode
+
+planning:
+  solver: CEM
+  horizon: 5
+  candidates: 300
+  iterations: 30
+  elites: 30
+  initial_variance: 1.0
+  action_block: 5
+  frame_skip: 5
+  receding_horizon: 1
+  episode_budget: 100
+  planning_seed: 42
+  solver_batch_size: 1
+  history_len: 1
+  warm_start: true
+  initial_distribution: cem_gaussian_no_actor
+
+inference_objective:
+  score_mode: f_plus_g
+  f_score: lewm_rollout_goal_distance
+  f_score_reducer: final_predicted_latent_summed_mse
+  g_score: negative_goal_projection_of_v1_predictor
+  f_plus_g_split: first_h_minus_one_blocks_with_f_last_block_with_g
+  f_plus_g_combination: prefix_final_f_cost_minus_gamma_power_tail_g_score
+  g_only_horizon: 1
+  goal_enters_predictor: true
+  learned_actor: false
+  training_only_auxiliary: [neighbor_action_retrieval]
+  training_only_auxiliary_used_at_evaluation: false
+  replanning: every_action_block
+
+provenance:
+  training_protocol: configs/experiment/actor_free_td_lewm_v1_g1_cube_train.yaml
+  comparison_protocol: configs/experiment/lewm_cube_seed3072_o50.yaml
+  status: implementation_ready_checkpoint_pending
+  note: Default O50 mode is the explicit F-plus-G hybrid; CLI g_only switches CEM to horizon one, and neighbor/prefix/batch-goal machinery is never used at evaluation.
