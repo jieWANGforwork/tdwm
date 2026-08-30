@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from tdwm.methods import (
+    action_prefix_marginal_advantage,
+    action_prefix_mean_advantage,
     goal_projected_td,
     goal_value_weighted_td,
     same_future_goal_advantage,
@@ -17,6 +19,8 @@ from tdwm.methods import (
         (goal_value_weighted_td, "goal_value_weighted_td"),
         (same_future_goal_advantage, "same_future_goal_advantage"),
         (state_neighbor_advantage, "neighbor_action_advantage"),
+        (action_prefix_mean_advantage, "prefix_mean_action_advantage"),
+        (action_prefix_marginal_advantage, "prefix_marginal_action_advantage"),
     ],
 )
 def test_each_frozen_method_has_an_independent_versioned_module(module, variant):

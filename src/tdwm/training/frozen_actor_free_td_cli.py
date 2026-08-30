@@ -1,4 +1,4 @@
-"""Small CLI harness shared by the four standalone frozen methods."""
+"""Small CLI harness shared by the standalone frozen methods."""
 
 from __future__ import annotations
 

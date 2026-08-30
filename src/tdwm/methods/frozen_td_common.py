@@ -1,6 +1,6 @@
 """Shared alignment and weighting primitives for frozen-LeWM TD methods.
 
-This module owns only mechanics common to C, D, F, and G1.  Each research
+This module owns only mechanics common to C, D, F, G1, G2, and G3.  Each research
 method keeps its objective and output type in its own module.
 """
 

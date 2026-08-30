@@ -6,30 +6,18 @@ import pytest
 import torch
 from torch import nn
 
-from tdwm.adapters.actor_free_td_lewm_c import (
-    METHOD_SPEC as C_SPEC,
-)
-from tdwm.adapters.actor_free_td_lewm_c import (
-    load_actor_free_td_lewm_c_checkpoint,
-)
-from tdwm.adapters.actor_free_td_lewm_d import (
-    METHOD_SPEC as D_SPEC,
-)
-from tdwm.adapters.actor_free_td_lewm_d import (
-    load_actor_free_td_lewm_d_checkpoint,
-)
-from tdwm.adapters.actor_free_td_lewm_f import (
-    METHOD_SPEC as F_SPEC,
-)
-from tdwm.adapters.actor_free_td_lewm_f import (
-    load_actor_free_td_lewm_f_checkpoint,
-)
-from tdwm.adapters.actor_free_td_lewm_g1 import (
-    METHOD_SPEC as G1_SPEC,
-)
-from tdwm.adapters.actor_free_td_lewm_g1 import (
-    load_actor_free_td_lewm_g1_checkpoint,
-)
+from tdwm.adapters.actor_free_td_lewm_c import METHOD_SPEC as C_SPEC
+from tdwm.adapters.actor_free_td_lewm_c import load_actor_free_td_lewm_c_checkpoint
+from tdwm.adapters.actor_free_td_lewm_d import METHOD_SPEC as D_SPEC
+from tdwm.adapters.actor_free_td_lewm_d import load_actor_free_td_lewm_d_checkpoint
+from tdwm.adapters.actor_free_td_lewm_f import METHOD_SPEC as F_SPEC
+from tdwm.adapters.actor_free_td_lewm_f import load_actor_free_td_lewm_f_checkpoint
+from tdwm.adapters.actor_free_td_lewm_g1 import METHOD_SPEC as G1_SPEC
+from tdwm.adapters.actor_free_td_lewm_g1 import load_actor_free_td_lewm_g1_checkpoint
+from tdwm.adapters.actor_free_td_lewm_g2 import METHOD_SPEC as G2_SPEC
+from tdwm.adapters.actor_free_td_lewm_g2 import load_actor_free_td_lewm_g2_checkpoint
+from tdwm.adapters.actor_free_td_lewm_g3 import METHOD_SPEC as G3_SPEC
+from tdwm.adapters.actor_free_td_lewm_g3 import load_actor_free_td_lewm_g3_checkpoint
 from tdwm.methods.actor_free_td_lewm import ActorFreeSuccessorHead
 
 
@@ -80,6 +68,36 @@ METHOD_CASES = [
             "weight_temperature": 0.83,
             "weight_gradient": "stop_gradient",
             "neighbors_per_anchor": 2,
+        },
+    ),
+    (
+        G2_SPEC,
+        load_actor_free_td_lewm_g2_checkpoint,
+        {
+            "candidate_source": (
+                "same_transition_normalized_action_zero_mean_suffix_prefixes"
+            ),
+            "candidate_td_targets": "none",
+            "prefix_slots": 5,
+            "suffix_fill": "normalized_zero_mean_action",
+            "advantage_reducer": "full_score_minus_all_prefix_mean",
+            "weight_temperature": 0.83,
+            "weight_gradient": "stop_gradient",
+        },
+    ),
+    (
+        G3_SPEC,
+        load_actor_free_td_lewm_g3_checkpoint,
+        {
+            "candidate_source": (
+                "same_transition_normalized_action_zero_mean_suffix_prefixes"
+            ),
+            "candidate_td_targets": "none",
+            "prefix_slots": 5,
+            "suffix_fill": "normalized_zero_mean_action",
+            "advantage_reducer": "mean_adjacent_prefix_score_deltas",
+            "weight_temperature": 0.83,
+            "weight_gradient": "stop_gradient",
         },
     ),
 ]

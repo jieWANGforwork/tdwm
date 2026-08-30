@@ -210,8 +210,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build one immutable global-row latent/action store shared by the "
-            "frozen C, D, F, and G1 experiments. The extractor traverses global "
-            "frames, never overlapping sequence clips."
+            "frozen C, D, F, G1, G2, and G3 experiments. The extractor "
+            "traverses global frames, never overlapping sequence clips."
         )
     )
     parser.add_argument("--checkpoint", required=True, type=Path)

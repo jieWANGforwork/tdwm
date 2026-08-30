@@ -1,4 +1,4 @@
-"""Shared frozen-latent training runtime for standalone C/D/F/G1 methods.
+"""Shared frozen-latent training runtime for standalone C/D/F/G1/G2/G3 methods.
 
 The legacy Actor-Free TD-LeWM trainer intentionally does not import this module.
 Each new method supplies a fixed :class:`FrozenActorFreeTDSpec`; this file owns
@@ -84,12 +84,16 @@ GOAL_PROJECTED_VARIANT = "goal_projected_td"
 GOAL_VALUE_WEIGHTED_VARIANT = "goal_value_weighted_td"
 SAME_FUTURE_GOAL_ADVANTAGE_VARIANT = "same_future_goal_advantage"
 NEIGHBOR_ACTION_ADVANTAGE_VARIANT = "neighbor_action_advantage"
+PREFIX_MEAN_ACTION_ADVANTAGE_VARIANT = "prefix_mean_action_advantage"
+PREFIX_MARGINAL_ACTION_ADVANTAGE_VARIANT = "prefix_marginal_action_advantage"
 FROZEN_PRETRAINED_VARIANTS = frozenset(
     {
         GOAL_PROJECTED_VARIANT,
         GOAL_VALUE_WEIGHTED_VARIANT,
         SAME_FUTURE_GOAL_ADVANTAGE_VARIANT,
         NEIGHBOR_ACTION_ADVANTAGE_VARIANT,
+        PREFIX_MEAN_ACTION_ADVANTAGE_VARIANT,
+        PREFIX_MARGINAL_ACTION_ADVANTAGE_VARIANT,
     }
 )
 NEIGHBOR_INDEX_VARIANTS = frozenset({NEIGHBOR_ACTION_ADVANTAGE_VARIANT})
@@ -98,6 +102,8 @@ FROZEN_OBJECTIVE_VERSIONS = {
     GOAL_VALUE_WEIGHTED_VARIANT: 1,
     SAME_FUTURE_GOAL_ADVANTAGE_VARIANT: 1,
     NEIGHBOR_ACTION_ADVANTAGE_VARIANT: 1,
+    PREFIX_MEAN_ACTION_ADVANTAGE_VARIANT: 1,
+    PREFIX_MARGINAL_ACTION_ADVANTAGE_VARIANT: 1,
 }
 HINDSIGHT_GOAL_VARIANTS = frozenset(
     {GOAL_VARIANT, DIRECT_GOAL_VARIANT, *FROZEN_PRETRAINED_VARIANTS}
@@ -2424,6 +2430,8 @@ __all__ = [
     "GOAL_VALUE_WEIGHTED_VARIANT",
     "METHOD_FAMILY",
     "NEIGHBOR_ACTION_ADVANTAGE_VARIANT",
+    "PREFIX_MARGINAL_ACTION_ADVANTAGE_VARIANT",
+    "PREFIX_MEAN_ACTION_ADVANTAGE_VARIANT",
     "SAME_FUTURE_GOAL_ADVANTAGE_VARIANT",
     "_canonical_protocol_sha256",
     "_build_training_module",

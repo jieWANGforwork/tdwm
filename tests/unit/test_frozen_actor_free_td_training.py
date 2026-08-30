@@ -11,6 +11,8 @@ from tdwm.training.actor_free_td_lewm_c import SPEC as C_SPEC
 from tdwm.training.actor_free_td_lewm_d import SPEC as D_SPEC
 from tdwm.training.actor_free_td_lewm_f import SPEC as F_SPEC
 from tdwm.training.actor_free_td_lewm_g1 import SPEC as G1_SPEC
+from tdwm.training.actor_free_td_lewm_g2 import SPEC as G2_SPEC
+from tdwm.training.actor_free_td_lewm_g3 import SPEC as G3_SPEC
 from tdwm.training.frozen_actor_free_td import (
     _build_training_module,
     load_bound_training_split,
@@ -27,6 +29,34 @@ METHOD_CASES = [
     (
         G1_SPEC,
         {"weight_temperature": 0.83, "neighbor_temperature": 0.41},
+    ),
+    (
+        G2_SPEC,
+        {
+            "candidate_source": (
+                "same_transition_normalized_action_zero_mean_suffix_prefixes"
+            ),
+            "candidate_td_targets": "none",
+            "prefix_slots": 5,
+            "suffix_fill": "normalized_zero_mean_action",
+            "advantage_reducer": "full_score_minus_all_prefix_mean",
+            "weight_temperature": 0.83,
+            "weight_gradient": "stop_gradient",
+        },
+    ),
+    (
+        G3_SPEC,
+        {
+            "candidate_source": (
+                "same_transition_normalized_action_zero_mean_suffix_prefixes"
+            ),
+            "candidate_td_targets": "none",
+            "prefix_slots": 5,
+            "suffix_fill": "normalized_zero_mean_action",
+            "advantage_reducer": "mean_adjacent_prefix_score_deltas",
+            "weight_temperature": 0.83,
+            "weight_gradient": "stop_gradient",
+        },
     ),
 ]
 
@@ -122,7 +152,7 @@ def test_training_rejects_split_that_does_not_partition_dataset(tmp_path):
 
 
 @pytest.mark.parametrize(("spec", "objective"), METHOD_CASES)
-def test_c_d_f_g1_train_directly_from_frozen_latent_batch(spec, objective):
+def test_c_d_f_g1_g2_g3_train_directly_from_frozen_latent_batch(spec, objective):
     class NeverEncodingWorld(nn.Module):
         def __init__(self):
             super().__init__()
