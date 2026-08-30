@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -14,6 +15,7 @@ from tdwm.training.actor_free_td_lewm_v2 import (
     V2_SPECS,
     V2Initialization,
     _build_v2_training_module,
+    build_hybrid_tdjepa_td_batch_v2,
     load_actor_free_td_lewm_v2_training_protocol,
     load_v2_initialization,
     sample_matched_future_goals_v2,
@@ -29,6 +31,9 @@ from tdwm.training.frozen_actor_free_td_v1 import (
 
 ROOT = Path(__file__).resolve().parents[2]
 VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
+TEST_PROTOCOL_SHA256 = "1" * 64
+TEST_V2_START_REVISION = "2" * 40
+TEST_NEIGHBOR_SHA256 = "3" * 64
 
 
 def _v2_protocol(variant: str = "c") -> dict:
@@ -301,29 +306,57 @@ class _DifferentiableSIGReg(nn.Module):
         return value.square().mean()
 
 
-def _v2_module(monkeypatch: pytest.MonkeyPatch):
+class _NeighborIndex:
+    def lookup(
+        self,
+        global_rows: torch.Tensor,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> SimpleNamespace:
+        count = int(global_rows.numel())
+        return SimpleNamespace(
+            actions=torch.randn(count, 2, 25, device=device, dtype=dtype),
+            distances=torch.ones(count, 2, device=device, dtype=torch.float32),
+            neighbor_rows=torch.zeros(count, 2, device=device, dtype=torch.int64),
+        )
+
+
+def _v2_module(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    variant: str = "c",
+    protocol_sha256: str = TEST_PROTOCOL_SHA256,
+    v2_start_revision: str = TEST_V2_START_REVISION,
+    neighbor_index_manifest_sha256: str | None = None,
+):
     import stable_worldmodel as swm
 
     monkeypatch.setattr(swm.wm, "SIGReg", _DifferentiableSIGReg)
-    payload = _v1_payload("c")
+    payload = _v1_payload(variant)
     initialization = V2Initialization(
         payload=payload,
-        checkpoint_path="/locked/v1-c.pt",
-        checkpoint_sha256=V1_SOURCE_SHA256["c"],
+        checkpoint_path=f"/locked/v1-{variant}.pt",
+        checkpoint_sha256=V1_SOURCE_SHA256[variant],
         predictor_config=payload["predictor_config"],
     )
+    if variant == "g1" and neighbor_index_manifest_sha256 is None:
+        neighbor_index_manifest_sha256 = TEST_NEIGHBOR_SHA256
     return _build_v2_training_module(
         _TrainableWorld(),
         initialization,
-        _v2_protocol("c"),
+        _v2_protocol(variant),
         total_steps=20,
-        spec=V2_SPECS["c"],
+        spec=V2_SPECS[variant],
         data_generator=torch.Generator().manual_seed(1),
         goal_generator=torch.Generator().manual_seed(2),
         task_generator=torch.Generator().manual_seed(3),
         validation_goal_generator=torch.Generator().manual_seed(4),
         validation_task_generator=torch.Generator().manual_seed(5),
-        neighbor_index=None,
+        neighbor_index=_NeighborIndex() if variant == "g1" else None,
+        protocol_sha256=protocol_sha256,
+        v2_start_revision=v2_start_revision,
+        neighbor_index_manifest_sha256=neighbor_index_manifest_sha256,
         device_image_preprocessing=False,
     )
 
@@ -376,6 +409,106 @@ def test_v2_module_restores_both_v1_gs_but_starts_a_fresh_joint_optimizer(
     assert not module.target_predictor.training
 
 
+def test_v2_lightning_checkpoint_embeds_and_requires_exact_resume_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _v2_module(monkeypatch)
+    checkpoint: dict[str, object] = {}
+
+    module.on_save_checkpoint(checkpoint)
+
+    assert checkpoint["v2_resume_identity"] == {
+        "schema_version": 1,
+        "method": "actor_free_td_lewm_v2_c",
+        "method_family": "actor_free_td_lewm_v2",
+        "variant": "c",
+        "implementation_version": "v2",
+        "objective_version": 0,
+        "deployment_checkpoint_version": 1,
+        "protocol_sha256": TEST_PROTOCOL_SHA256,
+        "source_v1_sha256": V1_SOURCE_SHA256["c"],
+        "v2_start_revision": TEST_V2_START_REVISION,
+        "neighbor_index_manifest_sha256": None,
+    }
+    module.on_load_checkpoint(checkpoint)
+
+    missing = dict(checkpoint)
+    missing.pop("v2_resume_identity")
+    with pytest.raises(RuntimeError, match="missing its embedded identity"):
+        module.on_load_checkpoint(missing)
+
+
+def test_v2_resume_rejects_another_methods_shape_compatible_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _v2_module(monkeypatch, variant="d")
+    destination = _v2_module(monkeypatch, variant="c")
+    checkpoint: dict[str, object] = {}
+    source.on_save_checkpoint(checkpoint)
+
+    with pytest.raises(RuntimeError, match="checkpoint method differs"):
+        destination.on_load_checkpoint(checkpoint)
+
+
+def test_v2_resume_rejects_a_replaced_variant_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _v2_module(monkeypatch)
+    checkpoint: dict[str, object] = {}
+    module.on_save_checkpoint(checkpoint)
+    changed = dict(checkpoint)
+    changed_identity = dict(checkpoint["v2_resume_identity"])
+    changed_identity["variant"] = "d"
+    changed["v2_resume_identity"] = changed_identity
+
+    with pytest.raises(RuntimeError, match="checkpoint variant differs"):
+        module.on_load_checkpoint(changed)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("protocol_sha256", "4" * 64),
+        ("source_v1_sha256", "5" * 64),
+        ("v2_start_revision", "6" * 40),
+    ),
+)
+def test_v2_resume_rejects_protocol_source_or_revision_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    replacement: str,
+) -> None:
+    module = _v2_module(monkeypatch)
+    checkpoint: dict[str, object] = {}
+    module.on_save_checkpoint(checkpoint)
+    changed = dict(checkpoint)
+    changed_identity = dict(checkpoint["v2_resume_identity"])
+    changed_identity[field] = replacement
+    changed["v2_resume_identity"] = changed_identity
+
+    with pytest.raises(RuntimeError, match=rf"checkpoint {field} differs"):
+        module.on_load_checkpoint(changed)
+
+
+def test_v2_g1_resume_binds_the_neighbor_index_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _v2_module(monkeypatch, variant="g1")
+    destination = _v2_module(
+        monkeypatch,
+        variant="g1",
+        neighbor_index_manifest_sha256="7" * 64,
+    )
+    checkpoint: dict[str, object] = {}
+    source.on_save_checkpoint(checkpoint)
+
+    with pytest.raises(
+        RuntimeError,
+        match="checkpoint neighbor_index_manifest_sha256 differs",
+    ):
+        destination.on_load_checkpoint(checkpoint)
+
+
 def test_v2_full_loss_backpropagates_through_online_lewm_f_ea_and_shared_g_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -406,3 +539,65 @@ def test_v2_full_loss_backpropagates_through_online_lewm_f_ea_and_shared_g_only(
     assert all(
         parameter.grad is None for parameter in module.target_predictor.parameters()
     )
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_v2_all_variants_align_g_context_under_cpu_bfloat16_autocast(
+    variant: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch.manual_seed(83)
+    module = _v2_module(monkeypatch, variant=variant)
+    module.train()
+    batch = {
+        "pixels": torch.randn(2, 19, 3, 2, 2),
+        "action": torch.randn(2, 19, 25),
+        "_tdwm_global_start": torch.tensor([100, 500], dtype=torch.int64),
+    }
+    observed: dict[str, torch.Tensor] = {}
+    original = build_hybrid_tdjepa_td_batch_v2
+    original_goal_sampler = sample_matched_future_goals_v2
+
+    def sample_float32_goals(*args, **kwargs):
+        goals, offsets = original_goal_sampler(*args, **kwargs)
+        return goals.float(), offsets
+
+    def record_context(*args, **kwargs):
+        names = (
+            "real_state",
+            "predicted_state",
+            "action_embedding",
+            "task",
+            "ema_next_state",
+            "target_next_action_embedding",
+        )
+        observed.update(zip(names, args[2:8], strict=True))
+        result = original(*args, **kwargs)
+        observed["td_target"] = result.target
+        return result
+
+    monkeypatch.setattr(
+        "tdwm.training.actor_free_td_lewm_v2.build_hybrid_tdjepa_td_batch_v2",
+        record_context,
+    )
+    monkeypatch.setattr(
+        "tdwm.training.actor_free_td_lewm_v2.sample_matched_future_goals_v2",
+        sample_float32_goals,
+    )
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        loss = module._forward_loss(batch, "train")
+
+    assert torch.isfinite(loss)
+    for name in (
+        "real_state",
+        "predicted_state",
+        "action_embedding",
+        "task",
+        "ema_next_state",
+        "target_next_action_embedding",
+    ):
+        assert observed[name].dtype == torch.bfloat16
+        assert observed[name].device == observed["real_state"].device
+    assert not observed["task"].requires_grad
+    assert observed["td_target"].dtype == torch.float32
+    assert not observed["td_target"].requires_grad
