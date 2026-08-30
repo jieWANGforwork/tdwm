@@ -478,7 +478,9 @@ def _torch_load_checkpoint(path: Path) -> dict[str, Any]:
     try:
         import torch
     except ImportError as error:
-        raise RuntimeError("Checkpoint evidence verification requires torch.") from error
+        raise RuntimeError(
+            "Checkpoint evidence verification requires torch."
+        ) from error
     value = torch.load(path, map_location="cpu", weights_only=False)
     if not isinstance(value, Mapping):
         raise ValueError(f"Expected checkpoint mapping: {path}")
@@ -514,9 +516,9 @@ def _formal_output_evidence(
     manifest = _read_json(manifest_path)
     protocol = _require_mapping(manifest.get("protocol"), label="training protocol")
     protocol_sha256 = canonical_json_sha256(protocol)
-    expected_source_v1_sha256 = input_audit["initial_v1_checkpoints"][
-        job.variant
-    ]["sha256"]
+    expected_source_v1_sha256 = input_audit["initial_v1_checkpoints"][job.variant][
+        "sha256"
+    ]
     if expected_source_v1_sha256 != V1_SHA256[job.variant]:
         raise ValueError("Audited V1 checkpoint differs from the locked V1 input.")
     expected_neighbor_sha256 = (

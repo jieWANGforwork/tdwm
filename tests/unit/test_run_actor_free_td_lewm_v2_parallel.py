@@ -40,9 +40,7 @@ def _formal_input_audit() -> dict[str, object]:
     return {
         "dataset": {"manifest": {"sha256": LAUNCHER.DATASET_MANIFEST_SHA256}},
         "split_indices": {"sha256": LAUNCHER.SPLIT_SHA256},
-        "neighbor_index": {
-            "manifest": {"sha256": LAUNCHER.NEIGHBOR_MANIFEST_SHA256}
-        },
+        "neighbor_index": {"manifest": {"sha256": LAUNCHER.NEIGHBOR_MANIFEST_SHA256}},
         "initial_v1_checkpoints": {
             variant: {"sha256": digest}
             for variant, digest in LAUNCHER.V1_SHA256.items()
@@ -59,9 +57,7 @@ def _install_formal_checkpoints(
     method = f"actor_free_td_lewm_v2_{job.variant}"
     protocol = {"protocol": "test", "variant": job.variant}
     protocol_sha256 = LAUNCHER.canonical_json_sha256(protocol)
-    neighbor_sha256 = (
-        LAUNCHER.NEIGHBOR_MANIFEST_SHA256 if job.variant == "g1" else None
-    )
+    neighbor_sha256 = LAUNCHER.NEIGHBOR_MANIFEST_SHA256 if job.variant == "g1" else None
     resume_identity = {
         "schema_version": 1,
         "method": method,
@@ -102,9 +98,7 @@ def _install_formal_checkpoints(
         "deployment_checkpoint_version": 1,
         "protocol": protocol,
         "protocol_sha256": protocol_sha256,
-        "source_v1": {
-            "checkpoint_sha256": LAUNCHER.V1_SHA256[job.variant]
-        },
+        "source_v1": {"checkpoint_sha256": LAUNCHER.V1_SHA256[job.variant]},
         "runtime": {"tdwm_git_revision": revision},
         "neighbor_index": (
             {"manifest_sha256": neighbor_sha256}
@@ -532,9 +526,7 @@ def test_formal_evidence_matches_acceptance_schema(
         "last.ckpt['v2_resume_identity']"
     )
     assert last["resume_identity"]["v2_start_revision"] == revision
-    assert deployment["sha256"] == LAUNCHER.file_sha256(
-        Path(job.expected_checkpoint)
-    )
+    assert deployment["sha256"] == LAUNCHER.file_sha256(Path(job.expected_checkpoint))
 
 
 def test_non_g1_formal_evidence_uses_null_neighbor(
@@ -568,8 +560,9 @@ def test_non_g1_formal_evidence_uses_null_neighbor(
     )
     assert evidence["inputs"]["neighbor_index"] is None
     assert (
-        evidence["outputs"]["lightning_last"]["resume_identity"]
-        ["neighbor_index_manifest_sha256"]
+        evidence["outputs"]["lightning_last"]["resume_identity"][
+            "neighbor_index_manifest_sha256"
+        ]
         is None
     )
 
@@ -607,9 +600,7 @@ def test_formal_output_evidence_rejects_tampered_checkpoint_identity(
         stage="formal", paths=paths, python="python", formal_resume="never"
     )[0]
     revision = "b" * 40
-    payloads, _ = _install_formal_checkpoints(
-        monkeypatch, job, revision=revision
-    )
+    payloads, _ = _install_formal_checkpoints(monkeypatch, job, revision=revision)
     if checkpoint == "last":
         payloads[checkpoint]["v2_resume_identity"][field] = replacement
     else:
@@ -631,9 +622,7 @@ def test_formal_output_evidence_rejects_tampered_protocol_manifest(
         stage="formal", paths=paths, python="python", formal_resume="never"
     )[0]
     revision = "b" * 40
-    _, manifest_path = _install_formal_checkpoints(
-        monkeypatch, job, revision=revision
-    )
+    _, manifest_path = _install_formal_checkpoints(monkeypatch, job, revision=revision)
     manifest = json.loads(manifest_path.read_text())
     manifest["protocol"]["protocol"] = "tampered"
     manifest_path.write_text(json.dumps(manifest))
