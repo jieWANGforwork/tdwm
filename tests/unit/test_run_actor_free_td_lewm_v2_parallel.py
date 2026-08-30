@@ -358,6 +358,69 @@ def test_python_runtime_requires_pinned_stable_worldmodel(
         LAUNCHER.audit_python_runtime(python)
 
 
+def test_dry_run_executes_and_preserves_symlinked_venv_python(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    paths = _paths(tmp_path)
+    paths.bundle_root.parent.mkdir(parents=True)
+    interpreter_target = tmp_path / "base-python"
+    interpreter_target.write_text(
+        f"""#!{sys.executable}
+import json
+import sys
+print(json.dumps({{
+    "executable": sys.argv[0],
+    "python": "3.12.0",
+    "stable_worldmodel": "0.1.1",
+    "torch": "2.7.0",
+    "lightning": "2.5.0",
+}}))
+"""
+    )
+    interpreter_target.chmod(0o755)
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(interpreter_target)
+    assert venv_python.is_symlink()
+
+    monkeypatch.setattr(
+        LAUNCHER,
+        "audited_git_state",
+        lambda repository: {
+            "revision": "f" * 40,
+            "short_revision": "fffffff",
+            "clean": True,
+        },
+    )
+    monkeypatch.setattr(LAUNCHER, "_paths", lambda *args, **kwargs: paths)
+    monkeypatch.setattr(LAUNCHER, "audit_inputs", lambda *args, **kwargs: {})
+    monkeypatch.setattr(LAUNCHER, "validate_stage_outputs", lambda *args: None)
+    monkeypatch.setattr(LAUNCHER, "query_gpus", _available_gpus)
+
+    code = LAUNCHER.main(
+        [
+            "--stage",
+            "formal",
+            "--artifact-root",
+            str(paths.artifact_root),
+            "--python",
+            str(venv_python),
+            "--minimum-initial-disk-gib",
+            "0",
+            "--dry-run",
+        ]
+    )
+    plan = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert plan["input_audit"]["runtime"]["stable_worldmodel"] == "0.1.1"
+    assert plan["input_audit"]["runtime"]["executable"] == str(venv_python)
+    assert all(job["argv"][0] == str(venv_python) for job in plan["jobs"])
+    assert venv_python.is_symlink()
+
+
 def test_gpu_query_preserves_uuid_memory_and_compute_occupancy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

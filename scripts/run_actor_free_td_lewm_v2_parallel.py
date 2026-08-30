@@ -133,6 +133,13 @@ print(json.dumps({
     return runtime
 
 
+def absolute_path_preserving_symlinks(value: str | os.PathLike[str]) -> Path:
+    """Make a path absolute without collapsing a virtualenv interpreter link."""
+
+    expanded = Path(value).expanduser()
+    return Path(os.path.abspath(os.fspath(expanded)))
+
+
 @dataclass(frozen=True)
 class GPUInfo:
     index: int
@@ -1182,7 +1189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     repository = Path(__file__).resolve().parents[1]
     git = audited_git_state(repository)
     paths = _paths(args, repository, git["short_revision"])
-    python = Path(args.python).expanduser().resolve()
+    python = absolute_path_preserving_symlinks(args.python)
     jobs = build_jobs(
         stage=args.stage,
         paths=paths,
