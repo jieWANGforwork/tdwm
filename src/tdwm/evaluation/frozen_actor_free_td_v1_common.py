@@ -507,11 +507,16 @@ def validate_v1_raw_action_compatibility(
         )
 
 
-def evaluate_frozen_actor_free_td_v1(
+def evaluate_actor_free_td_predictor_runtime(
     *,
-    spec: FrozenActorFreeTDV1MethodSpec,
+    spec: Any,
     checkpoint_loader: CheckpointLoader,
     policy_factory: PolicyFactory,
+    protocol_loader: Callable[..., dict[str, Any]],
+    protocol_configurer: Callable[..., dict[str, Any]],
+    checkpoint_validator: Callable[..., None],
+    raw_action_validator: Callable[..., None],
+    checkpoint_provenance_keys: tuple[str, ...],
     protocol_path: str | Path,
     dataset_path: str | Path,
     output_dir: str | Path,
@@ -521,13 +526,13 @@ def evaluate_frozen_actor_free_td_v1(
     pilot: bool = False,
     score_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Run the audited Stable World Model Cube evaluation for one V1 method."""
+    """Run the shared online-world/online-G Cube evaluation runtime."""
 
-    formal_protocol = load_frozen_actor_free_td_v1_evaluation_protocol(
+    formal_protocol = protocol_loader(
         protocol_path,
         spec=spec,
     )
-    protocol = configure_frozen_actor_free_td_v1_evaluation_mode(
+    protocol = protocol_configurer(
         formal_protocol,
         smoke=smoke,
         pilot=pilot,
@@ -555,7 +560,7 @@ def evaluate_frozen_actor_free_td_v1(
         checkpoint_file,
         map_location=device,
     )
-    validate_frozen_actor_free_td_v1_checkpoint_protocol(
+    checkpoint_validator(
         payload=payload,
         predictor_config=predictor_config,
         protocol=formal_protocol,
@@ -575,7 +580,7 @@ def evaluate_frozen_actor_free_td_v1(
         raise ValueError("Dataset episode count differs from protocol.")
     if actual_transitions != dataset_cfg["expected_transitions"]:
         raise ValueError("Dataset transition count differs from protocol.")
-    validate_v1_raw_action_compatibility(
+    raw_action_validator(
         primitive_action_dim=int(dataset.get_dim("action")),
         action_block=int(protocol["planning"]["action_block"]),
         predictor_config=predictor_config,
@@ -643,6 +648,24 @@ def evaluate_frozen_actor_free_td_v1(
     }
     if torch.cuda.is_available():
         runtime["cuda_device"] = torch.cuda.get_device_name(0)
+    checkpoint_manifest = {
+        "path": str(checkpoint_file),
+        "sha256": _sha256(checkpoint_file),
+        "method": payload["method"],
+        "method_family": payload["method_family"],
+        "variant": payload["variant"],
+        "implementation_version": payload["implementation_version"],
+        "objective_version": payload["objective_version"],
+        "epoch": payload["epoch"],
+        "global_step": payload["global_step"],
+        "formal_completion_required": not (smoke or pilot),
+        "predictor_config": predictor_config,
+    }
+    for key in checkpoint_provenance_keys:
+        provenance = payload.get(key)
+        if not isinstance(provenance, Mapping):
+            raise ValueError(f"Checkpoint is missing {key}.")
+        checkpoint_manifest[key] = deepcopy(provenance)
     manifest = {
         "score_mode": protocol["inference_objective"]["score_mode"],
         "protocol": protocol,
@@ -653,22 +676,7 @@ def evaluate_frozen_actor_free_td_v1(
             "episodes": actual_episodes,
             "transitions": actual_transitions,
         },
-        "checkpoint": {
-            "path": str(checkpoint_file),
-            "sha256": _sha256(checkpoint_file),
-            "method": payload["method"],
-            "method_family": payload["method_family"],
-            "variant": payload["variant"],
-            "implementation_version": payload["implementation_version"],
-            "objective_version": payload["objective_version"],
-            "epoch": payload["epoch"],
-            "global_step": payload["global_step"],
-            "formal_completion_required": not (smoke or pilot),
-            "predictor_config": predictor_config,
-            "pretrained_world_model_provenance": deepcopy(
-                payload["pretrained_world_model_provenance"]
-            ),
-        },
+        "checkpoint": checkpoint_manifest,
         "selection": selection,
         "normalization": {"action": action_stats},
         "runtime": runtime,
@@ -724,9 +732,9 @@ def evaluate_frozen_actor_free_td_v1(
         "world_model_parameter_count": world_parameter_count,
         "predictor_parameter_count": predictor_parameter_count,
         "method": spec.method,
-        "method_family": METHOD_FAMILY,
+        "method_family": formal_protocol["method_family"],
         "variant": spec.variant,
-        "implementation_version": IMPLEMENTATION_VERSION,
+        "implementation_version": formal_protocol["implementation_version"],
         "score_mode": protocol["inference_objective"]["score_mode"],
         "planning_horizon": planning["horizon"],
         "smoke": smoke,
@@ -737,11 +745,48 @@ def evaluate_frozen_actor_free_td_v1(
     return _jsonable(result)
 
 
+def evaluate_frozen_actor_free_td_v1(
+    *,
+    spec: FrozenActorFreeTDV1MethodSpec,
+    checkpoint_loader: CheckpointLoader,
+    policy_factory: PolicyFactory,
+    protocol_path: str | Path,
+    dataset_path: str | Path,
+    output_dir: str | Path,
+    checkpoint_path: str | Path,
+    video: bool = False,
+    smoke: bool = False,
+    pilot: bool = False,
+    score_mode: str | None = None,
+) -> dict[str, Any]:
+    """Run the audited Stable World Model Cube evaluation for one V1 method."""
+
+    return evaluate_actor_free_td_predictor_runtime(
+        spec=spec,
+        checkpoint_loader=checkpoint_loader,
+        policy_factory=policy_factory,
+        protocol_loader=load_frozen_actor_free_td_v1_evaluation_protocol,
+        protocol_configurer=configure_frozen_actor_free_td_v1_evaluation_mode,
+        checkpoint_validator=validate_frozen_actor_free_td_v1_checkpoint_protocol,
+        raw_action_validator=validate_v1_raw_action_compatibility,
+        checkpoint_provenance_keys=("pretrained_world_model_provenance",),
+        protocol_path=protocol_path,
+        dataset_path=dataset_path,
+        output_dir=output_dir,
+        checkpoint_path=checkpoint_path,
+        video=video,
+        smoke=smoke,
+        pilot=pilot,
+        score_mode=score_mode,
+    )
+
+
 __all__ = [
     "FORMAL_HORIZON_BY_SCORE_MODE",
     "FORMAL_O50_PLANNING",
     "actor_free_td_v1_output_directory_name",
     "configure_frozen_actor_free_td_v1_evaluation_mode",
+    "evaluate_actor_free_td_predictor_runtime",
     "evaluate_frozen_actor_free_td_v1",
     "load_frozen_actor_free_td_v1_evaluation_protocol",
     "validate_frozen_actor_free_td_v1_checkpoint_protocol",

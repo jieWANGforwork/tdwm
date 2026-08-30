@@ -163,6 +163,9 @@ class StrideAwareLanceDatasetTest(unittest.TestCase):
         self.assertEqual(source.requested_rows, [0, 2, 4, 6])
         self.assertEqual(source.transform_calls, 2)
         self.assertEqual(tuple(samples[0]["pixels"].shape), (3, 3, 8, 8))
+        self.assertEqual(samples[0]["_tdwm_global_start"].item(), 0)
+        self.assertEqual(samples[1]["_tdwm_global_start"].item(), 2)
+        self.assertEqual(samples[0]["_tdwm_global_start"].dtype, torch.int64)
         torch.testing.assert_close(
             samples[0]["action"],
             torch.tensor(source.action[0:6]).reshape(3, 4),
@@ -394,6 +397,14 @@ class EpisodeStreamingBatchDatasetTest(unittest.TestCase):
             self.assertLessEqual(batch["_tdwm_cache_bytes"], 1024 * 1024)
             self.assertEqual(tuple(batch["pixels"].shape), (4, 2, 3, 8, 8))
             self.assertEqual(tuple(batch["action"].shape), (4, 2, 4))
+            self.assertEqual(batch["_tdwm_global_start"].dtype, torch.int64)
+            self.assertEqual(tuple(batch["_tdwm_global_start"].shape), (4,))
+            # The fake action's first normalized scalar equals its source row,
+            # so this also proves metadata follows shuffled clip selection.
+            torch.testing.assert_close(
+                batch["_tdwm_global_start"],
+                batch["action"][:, 0, 0].to(dtype=torch.int64),
+            )
 
     def test_epoch_schedule_is_reproducible(self):
         _, first = self._stream()

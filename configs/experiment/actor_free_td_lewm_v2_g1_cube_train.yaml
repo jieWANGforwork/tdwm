@@ -1,0 +1,29 @@
+extends: actor_free_td_lewm_v2_common_cube_train.yaml
+id: actor_free_td_lewm_v2_g1_cube_v2
+method: actor_free_td_lewm_v2_g1
+variant: g1
+display_name: Actor-Free TD-JEPA V2 Coupled Hybrid Neighbor Action Advantage
+
+source_v1:
+  method: actor_free_td_lewm_v1_g1
+  method_family: actor_free_td_lewm_v1
+  variant: g1
+  implementation_version: v1
+  objective_version: 0
+  deployment_checkpoint_version: 1
+  source_seed: 3072
+  source_epoch: 10
+  source_global_step: 127960
+  checkpoint_sha256: c224d18fcd8390247f115239c4b2db013479a062438cca92003674c739f3e24b
+  source_code_revision: 3c4e62ef2ab72387536433f27ef11bce75477e7e
+  optimizer_state: reset
+
+joint_objective:
+  objective: neighbor_action_advantage
+  score_source: detached_online_predictor
+  candidate_source: other_episode_frozen_latent_knn_real_action_blocks
+  candidate_action_processing: online_shared_lewm_action_encoder
+  neighbor_temperature: 0.5
+  neighbors_per_anchor: 8
+  weight_temperature: 0.5
+  goal_subset_weighting: softmax_mean_one

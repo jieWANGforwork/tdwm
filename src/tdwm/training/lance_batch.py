@@ -341,6 +341,11 @@ class StrideAwareLanceDataset:
             steps["action"] = steps["action"].reshape(
                 int(self.dataset.num_steps), -1
             )
+            # Preserve clip identity for transition-aligned objectives such as
+            # V2 G1.  The field is metadata and never enters the world model.
+            steps["_tdwm_global_start"] = _numeric_tensor(
+                np.asarray(global_start, dtype=np.int64)
+            )
             results.append(steps)
         return results
 
@@ -695,6 +700,13 @@ class EpisodeStreamingBatchDataset(IterableDataset):
             batch = source.transform(batch)
         batch["action"] = batch["action"].reshape(
             len(selections), num_steps, -1
+        )
+        batch["_tdwm_global_start"] = torch.tensor(
+            [
+                int(source.offsets[episode.episode]) + int(start)
+                for episode, start in selections
+            ],
+            dtype=torch.int64,
         )
         batch["_tdwm_episode_id"] = torch.tensor(
             [episode.episode for episode, _ in selections], dtype=torch.int32

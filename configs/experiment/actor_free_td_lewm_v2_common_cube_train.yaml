@@ -1,0 +1,241 @@
+schema_version: 1
+method_family: actor_free_td_lewm_v2
+implementation_version: v2
+environment: cube
+stage: coupled_hybrid_finetuning
+initialization: corresponding_v1_deployment_finetune
+
+# The six overlays bind this common protocol to the matching archived V1 run.
+seeds: [3072]
+
+runtime:
+  stable_worldmodel_version: 0.1.1
+  import: import stable_worldmodel as swm
+
+pretrained_world_model:
+  source_method: lewm
+  source_seed: 3072
+  source_epoch: 10
+  checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
+  initialization_source: v1_embedded_state
+  online_trainable: true
+
+dataset:
+  identifier: quentinll/lewm-cube
+  file: ogbench/cube_single_expert.h5
+  expected_size_bytes: 101942558720
+  accepted_size_bytes: [101942558720, 74104077358]
+  optimized_layout:
+    file: cube_single_expert_chunk1.h5
+    pixels_chunk_frames: 1
+    lossless: true
+    sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  lance:
+    suffix: .lance
+    manifest_suffix: .manifest.json
+    stable_worldmodel_version: 0.1.1
+    image_codec: jpeg
+    jpeg_quality: 100
+    minimum_pixel_verification_samples: 128
+    numeric_verification:
+      action: exact
+      observation: float32_cast_exact
+    source:
+      file: cube_single_expert_chunk1.h5
+      size_bytes: 74104077358
+      sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  expected_episodes: 10000
+  expected_transitions: 2010000
+  keys_to_load: [pixels, action, observation]
+  keys_to_cache: [action, observation]
+  keys_to_merge:
+    proprio: observation
+
+split:
+  unit: sequence_clip
+  implementation: prebuilt_exact_indices
+  train_fraction: 0.9
+  validation_fraction: 0.1
+  seed_source: training_seed
+  exact_indices_artifact: split_indices.npz
+
+source_artifacts:
+  split_file_sha256: 4594afb3603b4258431ff9076c82acbe3ddcaccb277940b825a99017ce83d830
+  train_indices_sha256: a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561
+  validation_indices_sha256: e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c
+  column_normalization_sha256: 7fd14e6a72841a36abd8f1d4aedf4f17f4f71ca508cacefe331e989664954818
+  frozen_latent_store_manifest_sha256: fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e
+  g1_neighbor_index_manifest_sha256: 3b2d785790d86c4c45bc10f1cf706f9fc186a02071fb4f8b586eca75a2af76f2
+
+sequence:
+  frame_skip: 5
+  history_frames: 3
+  prediction_frames: 1
+  num_steps: 19
+
+context:
+  g_state_frames: 1
+  lewm_rollout_history_frames: 3
+  real_branch: online_encoded_state
+  predicted_branch: online_lewm_one_step_prediction
+
+image_preprocessing:
+  source: stable_pretraining.data.dataset_stats.ImageNet
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+normalization:
+  fit_population: complete_dataset
+  columns: [action, observation]
+  boundary_nan_policy: preserve_during_preprocessing_then_zero_actions_before_forward
+
+model:
+  parameters: 18034628
+  encoder_size: tiny
+  patch_size: 14
+  embed_dim: 192
+  predictor_depth: 6
+  predictor_heads: 16
+  predictor_mlp_dim: 2048
+  predictor_dim_head: 64
+  predictor_dropout: 0.1
+  predictor_embedding_dropout: 0.0
+  projector_hidden_dim: 2048
+
+world_model:
+  online:
+    source: corresponding_v1_embedded_pretrained_lewm
+    full_lewm_trainable: true
+    visual_encoder_trainable: true
+    predictor_trainable: true
+    projector_trainable: true
+    action_encoder_trainable: true
+  target:
+    type: exponential_moving_average
+    trainable: false
+    tracks_full_world_model: true
+    tracks_action_encoder: true
+
+predictor:
+  objective_version: 0
+  architecture: td_jepa_forward_map_v1
+  state_dim: 192
+  raw_action_dim: 25
+  action_dim: 192
+  action_embedding_dim: 192
+  task_dim: 192
+  output_dim: 192
+  hidden_dim: 256
+  hidden_layers: 1
+  embedding_layers: 2
+  num_parallel: 1
+  action_processing: online_shared_lewm_action_encoder
+  shared_lewm_action_encoder: true
+  action_encoder_trainable: true
+  action_encoder_source: world_model.action_encoder
+  state_parameterization: coupled_online_lewm_latent
+  goal_conditioning: task_input
+  bootstrap_action: ema_dataset_next_action_embedding
+  actor: none
+  reward: none
+  gamma: 0.95
+  target_ema_decay: 0.995
+  target_world_ema_decay: 0.995
+  loss_warmup_fraction: 0.05
+
+task_sampling:
+  sampling: per_transition_bernoulli
+  goal_probability: 0.5
+  random_source: isotropic_gaussian_sphere
+  goal_source: uniform_reachable_future_ema_latent_same_clip
+  normalization: sqrt_dim_l2_sphere
+  mix_unit: flattened_transition_minibatch
+  goal_sampling_seed_offset: 170003
+  task_sampling_seed_offset: 270007
+
+joint_objective:
+  local_prediction: original_lewm_one_step_mse
+  local_prediction_weight: 1.0
+  regularization: original_lewm_sigreg
+  target_encoder: ema_world_model
+  td_target: ema_next_latent_plus_ema_predictor_dataset_next_action
+  bootstrap_action: ema_world_model_action_encoder
+  real_td_weight: 1.0
+  predicted_td_weight: 1.0
+  predicted_context_detach: false
+  hybrid_reduction: sum
+  per_transition_td_reduction: feature_sum
+  batch_td_reduction: transition_mean
+  base_td_population: all_transitions
+  random_task_weight: 1.0
+  goal_subset: goal_derived_tasks_only
+  final_weight_normalization: mean_one_over_all_transitions
+  weight_gradient: stop_gradient
+  candidate_td_targets: none
+  actor: none
+  reward: none
+
+loss:
+  prediction: mse
+  sigreg:
+    weight: 0.09
+    knots: 17
+    num_projections: 1024
+    effective_batch_size: 128
+
+loader:
+  batch_size: 8
+  sampling_unit: sequence_clip
+  stride_aware_lance: true
+  device_image_preprocessing: true
+  workers: 6
+  prefetch_factor: 2
+  validation_workers: 8
+  validation_locality: true
+  block_shuffle: false
+  block_size: 2048
+  episode_streaming: true
+  episode_pool_size: 384
+  episode_read_size: 16
+  episode_cache_bytes: 6442450944
+  episode_prefetch_blocks: 16
+  minimum_unique_episodes_per_batch: 8
+  train_shuffle: true
+  train_drop_last: true
+  validation_shuffle: false
+  validation_drop_last: false
+  pin_memory: true
+
+logging:
+  type: csv
+  flush_every_n_steps: 50
+
+optimizer:
+  type: AdamW
+  world_model_learning_rate: 0.00005
+  predictor_learning_rate: 0.0001
+  initialize_state: fresh
+  weight_decay: 0.001
+
+scheduler:
+  type: linear_warmup_cosine_annealing
+  interval: optimizer_step
+  warmup_fraction: 0.01
+
+training:
+  epochs: 10
+  scheduler_epochs: 10
+  optimizer_steps_per_epoch: 12796
+  precision: bf16-mixed
+  model_compile: false
+  model_compile_mode: reduce-overhead
+  gradient_clip_norm: 1.0
+  checkpoint_every_epochs: 1
+  resume: true
+
+provenance:
+  base_protocol: configs/experiment/actor_free_td_lewm_hybrid_cube_train.yaml
+  source_v1_code_revision: 3c4e62ef2ab72387536433f27ef11bce75477e7e
+  status: implementation_ready_untrained
+  note: V2 jointly fine-tunes full online LeWM and the matching V1 G with summed real-state and differentiable predicted-state TD branches; there is no actor, reward model, or action loss.

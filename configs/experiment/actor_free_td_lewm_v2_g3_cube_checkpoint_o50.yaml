@@ -1,0 +1,89 @@
+extends: actor_free_td_lewm_v2_g3_cube_train.yaml
+id: actor_free_td_lewm_v2_g3_cube_checkpoint_o50
+stage: planner_evaluation
+
+dataset:
+  file: cube_single_expert_chunk1.h5
+  source:
+    file: cube_single_expert_chunk1.h5
+    size_bytes: 74104077358
+    sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  lance:
+    manifest_sha256: 9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd
+  keys_to_load:
+    - pixels
+    - action
+    - qpos
+    - qvel
+    - privileged_block_0_pos
+    - privileged_block_0_quat
+
+checkpoint:
+  source: actor_free_td_lewm_v2_deployment_export
+  checkpoint_path: required_cli_argument
+  contains_online_world_model: true
+  contains_target_world_model: true
+  contains_online_predictor: true
+  contains_target_predictor: true
+  deployment_checkpoint_version: 1
+
+context:
+  plan_config_history_len: 1
+
+world:
+  env_name: swm/OGBCube-v0
+  env_type: single
+  ob_type: states
+  image_size: 224
+  multiview: false
+  visualize_info: false
+  terminate_at_goal: true
+  success_threshold_meters: 0.04
+
+evaluation:
+  episodes: 50
+  goal_offset: 50
+  start_goal_source: same_dataset_episode
+
+planning:
+  solver: CEM
+  horizon: 5
+  candidates: 300
+  iterations: 30
+  elites: 30
+  initial_variance: 1.0
+  action_block: 5
+  frame_skip: 5
+  receding_horizon: 1
+  episode_budget: 100
+  planning_seed: 42
+  solver_batch_size: 1
+  history_len: 1
+  warm_start: true
+  initial_distribution: cem_gaussian_no_actor
+
+inference_objective:
+  score_mode: f_plus_g
+  f_score: lewm_rollout_goal_distance
+  f_score_reducer: final_predicted_latent_summed_mse
+  g_score: negative_goal_projection_of_v2_online_predictor
+  f_plus_g_split: first_h_minus_one_blocks_with_f_last_block_with_g
+  f_plus_g_combination: prefix_final_f_cost_minus_gamma_power_tail_g_score
+  g_only_horizon: 1
+  goal_enters_predictor: true
+  learned_actor: false
+  deployed_world_model: online_v2_world_model
+  deployed_predictor: online_v2_predictor
+  target_modules_used_at_evaluation: false
+  deployed_modules_frozen: true
+  training_only_auxiliary:
+    - coupled_hybrid_real_and_predicted_td
+    - original_lewm_one_step_mse
+    - original_lewm_sigreg
+    - method_specific_advantage_or_projection
+  training_only_auxiliary_used_at_evaluation: false
+  replanning: every_action_block
+
+provenance:
+  status: implementation_ready_checkpoint_pending
+  note: V2 evaluation deploys only the jointly fine-tuned online LeWM and online G; target modules are checkpoint-audited but never used by CEM.

@@ -1,0 +1,30 @@
+extends: actor_free_td_lewm_v2_common_cube_train.yaml
+id: actor_free_td_lewm_v2_g2_cube_v2
+method: actor_free_td_lewm_v2_g2
+variant: g2
+display_name: Actor-Free TD-JEPA V2 Coupled Hybrid Prefix-Mean Advantage
+
+source_v1:
+  method: actor_free_td_lewm_v1_g2
+  method_family: actor_free_td_lewm_v1
+  variant: g2
+  implementation_version: v1
+  objective_version: 0
+  deployment_checkpoint_version: 1
+  source_seed: 3072
+  source_epoch: 10
+  source_global_step: 127960
+  checkpoint_sha256: 1c290f91772b42fdf6824d92832c6fff4e2d8ca3ea08089ff1a41016ea1c2ebe
+  source_code_revision: 3c4e62ef2ab72387536433f27ef11bce75477e7e
+  optimizer_state: reset
+
+joint_objective:
+  objective: prefix_mean_advantage
+  score_source: detached_online_predictor
+  candidate_source: same_transition_normalized_action_zero_mean_suffix_prefixes
+  candidate_action_processing: online_shared_lewm_action_encoder
+  prefix_slots: 5
+  suffix_fill: normalized_zero_mean_action
+  advantage_reducer: full_score_minus_all_prefix_mean
+  weight_temperature: 0.5
+  goal_subset_weighting: softmax_mean_one
