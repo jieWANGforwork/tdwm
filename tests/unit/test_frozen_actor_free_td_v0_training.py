@@ -1,0 +1,262 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import torch
+from torch import nn
+
+from tdwm.training.frozen_actor_free_td_v0 import (
+    OBJECTIVE_VERSION,
+    V0_SPECS,
+    _build_v0_training_module,
+    _deployment_payload,
+    load_actor_free_td_lewm_v0_training_protocol,
+    validate_actor_free_td_lewm_v0_training_protocol,
+)
+
+ROOT = Path(__file__).resolve().parents[2]
+VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
+
+
+def _protocol(variant: str) -> dict:
+    return load_actor_free_td_lewm_v0_training_protocol(
+        ROOT
+        / "configs"
+        / "experiment"
+        / f"actor_free_td_lewm_v0_{variant}_cube_train.yaml",
+        spec=V0_SPECS[variant],
+    )
+
+
+class _FrozenWorld(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.unused = nn.Parameter(torch.ones(()))
+        self.encode_calls = 0
+
+    def encode(self, data):
+        del data
+        self.encode_calls += 1
+        raise AssertionError("V0 frozen-cache training must not call encode().")
+
+
+class _NeighborIndex:
+    def lookup(self, global_rows, *, device, dtype):
+        count = int(global_rows.numel())
+        return SimpleNamespace(
+            actions=torch.randn(count, 2, 25, device=device, dtype=dtype),
+            distances=torch.ones(count, 2, device=device, dtype=dtype),
+            neighbor_rows=torch.zeros(count, 2, device=device, dtype=torch.int64),
+        )
+
+
+def _small_protocol(variant: str) -> dict:
+    protocol = _protocol(variant)
+    protocol["sequence"]["num_steps"] = 7
+    protocol["predictor"]["hidden_dim"] = 32
+    protocol["training"]["epochs"] = 1
+    protocol["training"]["scheduler_epochs"] = 1
+    protocol["training"]["optimizer_steps_per_epoch"] = 1
+    return protocol
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_v0_variants_train_only_the_single_predictor_from_frozen_inputs(
+    variant: str,
+) -> None:
+    protocol = _small_protocol(variant)
+    world = _FrozenWorld()
+    data_generator = torch.Generator().manual_seed(11)
+    goal_generator = torch.Generator().manual_seed(12)
+    task_generator = torch.Generator().manual_seed(13)
+    module = _build_v0_training_module(
+        world,
+        protocol,
+        total_steps=1,
+        spec=V0_SPECS[variant],
+        data_generator=data_generator,
+        goal_generator=goal_generator,
+        task_generator=task_generator,
+        neighbor_index=_NeighborIndex() if variant == "g1" else None,
+    )
+    batch_size = 8
+    batch = {
+        "state": torch.randn(batch_size, 192),
+        "action": torch.randn(batch_size, 25),
+        "next_state": torch.randn(batch_size, 192),
+        "next_action": torch.randn(batch_size, 25),
+        "terminal": torch.zeros(batch_size, dtype=torch.bool),
+        "global_row": torch.arange(batch_size, dtype=torch.int64) * 5 + 100,
+        "goal_future_end_row": (
+            torch.arange(batch_size, dtype=torch.int64) * 5 + 105
+        ),
+        "_tdwm_matched_goal": torch.randn(batch_size, 192),
+    }
+
+    loss = module._forward_loss(batch, "train")
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert world.encode_calls == 0
+    assert all(parameter.grad is None for parameter in world.parameters())
+    assert all(
+        parameter.grad is None for parameter in module.target_predictor.parameters()
+    )
+    assert any(parameter.grad is not None for parameter in module.predictor.parameters())
+    assert not hasattr(module.predictor, "heads")
+    assert not hasattr(module.predictor, "num_parallel")
+
+
+def test_v0_checkpoint_round_trip_records_training_and_validation_rng_streams() -> None:
+    protocol = _small_protocol("c")
+    generators = [
+        torch.Generator().manual_seed(seed) for seed in (21, 22, 23, 24)
+    ]
+    module = _build_v0_training_module(
+        _FrozenWorld(),
+        protocol,
+        total_steps=1,
+        spec=V0_SPECS["c"],
+        data_generator=generators[0],
+        goal_generator=generators[1],
+        task_generator=generators[2],
+        validation_task_generator=generators[3],
+        neighbor_index=None,
+    )
+    checkpoint: dict = {}
+    module.on_save_checkpoint(checkpoint)
+    expected = [torch.rand(4, generator=generator) for generator in generators]
+    for generator in generators:
+        torch.rand(9, generator=generator)
+
+    module.on_load_checkpoint(checkpoint)
+
+    for generator, expected_values in zip(generators, expected, strict=True):
+        assert torch.equal(torch.rand(4, generator=generator), expected_values)
+
+
+def test_validation_task_sampling_does_not_consume_training_task_rng() -> None:
+    protocol = _small_protocol("c")
+    task_generator = torch.Generator().manual_seed(32)
+    validation_task_generator = torch.Generator().manual_seed(33)
+    module = _build_v0_training_module(
+        _FrozenWorld(),
+        protocol,
+        total_steps=1,
+        spec=V0_SPECS["c"],
+        data_generator=torch.Generator().manual_seed(30),
+        goal_generator=torch.Generator().manual_seed(31),
+        task_generator=task_generator,
+        validation_task_generator=validation_task_generator,
+        neighbor_index=None,
+    )
+    batch_size = 4
+    batch = {
+        "state": torch.randn(batch_size, 192),
+        "action": torch.randn(batch_size, 25),
+        "next_state": torch.randn(batch_size, 192),
+        "next_action": torch.randn(batch_size, 25),
+        "terminal": torch.zeros(batch_size, dtype=torch.bool),
+        "global_row": torch.arange(batch_size, dtype=torch.int64) * 5,
+        "goal_future_end_row": torch.arange(batch_size, dtype=torch.int64) * 5 + 5,
+        "_tdwm_matched_goal": torch.randn(batch_size, 192),
+    }
+    training_state = task_generator.get_state().clone()
+    validation_state = validation_task_generator.get_state().clone()
+
+    module._forward_loss(batch, "validation")
+
+    assert torch.equal(task_generator.get_state(), training_state)
+    assert not torch.equal(validation_task_generator.get_state(), validation_state)
+
+
+def test_v0_deployment_contains_one_online_and_one_ema_target_predictor() -> None:
+    protocol = _protocol("f")
+    module = SimpleNamespace(
+        model=nn.Linear(2, 3),
+        predictor=nn.Linear(3, 4),
+        target_predictor=nn.Linear(3, 4),
+    )
+    payload = _deployment_payload(
+        module,
+        protocol=protocol,
+        spec=V0_SPECS["f"],
+        model_config={"_target_": "example.WorldModel"},
+        initialization_info={"frozen": True},
+        epoch=1,
+        global_step=2,
+    )
+
+    assert payload["objective_version"] == OBJECTIVE_VERSION == 0
+    assert payload["predictor_config"]["num_parallel"] == 1
+    assert payload["predictor_config"]["state_dim"] == 192
+    assert payload["predictor_config"]["action_dim"] == 25
+    assert payload["predictor_config"]["task_dim"] == 192
+    assert payload["predictor_config"]["output_dim"] == 192
+    assert "predictor_state_dict" in payload
+    assert "target_predictor_state_dict" in payload
+    assert "successor_state_dict" not in payload
+    assert "actor_state_dict" not in payload
+
+
+def test_v0_protocol_rejects_parallel_heads_and_exact_half_sampling() -> None:
+    protocol = _protocol("c")
+    parallel = deepcopy(protocol)
+    parallel["predictor"]["num_parallel"] = 2
+    with pytest.raises(ValueError, match="num_parallel"):
+        validate_actor_free_td_lewm_v0_training_protocol(
+            parallel, spec=V0_SPECS["c"]
+        )
+
+    exact_half = deepcopy(protocol)
+    exact_half["task_sampling"]["sampling"] = "exact_half"
+    with pytest.raises(ValueError, match="sampling"):
+        validate_actor_free_td_lewm_v0_training_protocol(
+            exact_half, spec=V0_SPECS["c"]
+        )
+
+
+def test_v0_protocol_locks_transition_minibatches() -> None:
+    protocol = _protocol("f")
+    assert protocol["loader"]["batch_size"] == 256
+    assert protocol["loader"]["sampling_unit"] == "transition"
+    assert protocol["loader"]["train_sampling"] == "random_with_replacement"
+    assert protocol["loader"]["transition_population"] == (
+        "unique_legal_td_rows_from_exact_clip_split"
+    )
+    assert protocol["task_sampling"]["mix_unit"] == "transition_minibatch"
+    assert protocol["context"] == {
+        "g_state_frames": 1,
+        "lewm_rollout_history_frames": 3,
+    }
+
+    clip_batch = deepcopy(protocol)
+    clip_batch["loader"]["sampling_unit"] = "sequence_clip"
+    with pytest.raises(ValueError, match="sampling_unit"):
+        validate_actor_free_td_lewm_v0_training_protocol(
+            clip_batch, spec=V0_SPECS["f"]
+        )
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_v0_protocol_locks_each_variant_objective_semantics(variant: str) -> None:
+    protocol = _protocol(variant)
+    changed = deepcopy(protocol)
+    changed["joint_objective"]["objective"] = "different_objective"
+    with pytest.raises(ValueError, match="joint_objective.objective"):
+        validate_actor_free_td_lewm_v0_training_protocol(
+            changed, spec=V0_SPECS[variant]
+        )
+
+
+def test_v0_protocol_locks_default_tdjepa_forward_map_widths() -> None:
+    protocol = _protocol("c")
+    changed = deepcopy(protocol)
+    changed["predictor"]["hidden_dim"] = 512
+    with pytest.raises(ValueError, match="predictor.hidden_dim"):
+        validate_actor_free_td_lewm_v0_training_protocol(
+            changed, spec=V0_SPECS["c"]
+        )

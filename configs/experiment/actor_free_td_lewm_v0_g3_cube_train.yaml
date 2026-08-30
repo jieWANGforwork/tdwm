@@ -1,0 +1,190 @@
+schema_version: 1
+id: actor_free_td_lewm_v0_g3_cube_v0
+method: actor_free_td_lewm_v0_g3
+method_family: actor_free_td_lewm_v0
+variant: g3
+display_name: Actor-Free TD-JEPA V0 Prefix-Marginal Advantage
+implementation_version: v0
+environment: cube
+stage: full_training
+initialization: frozen_pretrained_lewm
+
+pretrained_world_model:
+  source_method: lewm
+  source_seed: 3072
+  source_epoch: 10
+  checkpoint_sha256: 0ce38860a672c4a304d6921c6f07158977bb1d2c8f0eed8a002bb7c89502b579
+  frozen: true
+
+runtime:
+  stable_worldmodel_version: 0.1.1
+  import: import stable_worldmodel as swm
+
+seeds: [0, 42, 3072]
+
+dataset:
+  identifier: quentinll/lewm-cube
+  file: ogbench/cube_single_expert.h5
+  expected_size_bytes: 101942558720
+  accepted_size_bytes: [101942558720, 74104077358]
+  optimized_layout:
+    file: cube_single_expert_chunk1.h5
+    pixels_chunk_frames: 1
+    lossless: true
+    sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  lance:
+    suffix: .lance
+    manifest_suffix: .manifest.json
+    stable_worldmodel_version: 0.1.1
+    image_codec: jpeg
+    jpeg_quality: 100
+    minimum_pixel_verification_samples: 128
+    numeric_verification:
+      action: exact
+      observation: float32_cast_exact
+    source:
+      file: cube_single_expert_chunk1.h5
+      size_bytes: 74104077358
+      sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  expected_episodes: 10000
+  expected_transitions: 2010000
+  keys_to_load: [action]
+  keys_to_cache: []
+  keys_to_merge: {}
+
+split:
+  unit: sequence_clip
+  implementation: torch.utils.data.random_split
+  train_fraction: 0.9
+  validation_fraction: 0.1
+  seed_source: training_seed
+  exact_indices_artifact: split_indices.npz
+
+sequence:
+  frame_skip: 5
+  history_frames: 3
+  prediction_frames: 1
+  num_steps: 19
+
+context:
+  g_state_frames: 1
+  lewm_rollout_history_frames: 3
+
+image_preprocessing:
+  source: stable_pretraining.data.dataset_stats.ImageNet
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+normalization:
+  fit_population: complete_dataset
+  columns: [action, observation]
+  boundary_nan_policy: preserve_then_zero_invalid_action_values_for_forward
+
+model:
+  parameters: 18034628
+  encoder_size: tiny
+  patch_size: 14
+  embed_dim: 192
+  predictor_depth: 6
+  predictor_heads: 16
+  predictor_mlp_dim: 2048
+  predictor_dim_head: 64
+  predictor_dropout: 0.1
+  predictor_embedding_dropout: 0.0
+  projector_hidden_dim: 2048
+
+predictor:
+  objective_version: 0
+  architecture: td_jepa_forward_map_v0
+  state_dim: 192
+  action_dim: 25
+  task_dim: 192
+  output_dim: 192
+  hidden_dim: 256
+  hidden_layers: 1
+  embedding_layers: 2
+  num_parallel: 1
+  action_processing: normalized_raw_lewm_action_block
+  shared_lewm_action_encoder: false
+  state_parameterization: symmetric_shared_frozen_lewm_latent
+  goal_conditioning: task_input
+  bootstrap_action: dataset_next_action
+  actor: none
+  reward: none
+  gamma: 0.95
+  target_ema_decay: 0.995
+  loss_warmup_fraction: 0.0
+
+task_sampling:
+  sampling: per_transition_bernoulli
+  goal_probability: 0.5
+  random_source: isotropic_gaussian_sphere
+  goal_source: uniform_reachable_future_frozen_latent_same_clip
+  normalization: sqrt_dim_l2_sphere
+  mix_unit: transition_minibatch
+  goal_sampling_seed_offset: 170003
+  task_sampling_seed_offset: 270007
+
+joint_objective:
+  base_td_population: all_transitions
+  random_task_weight: 1.0
+  goal_subset: goal_derived_tasks_only
+  final_weight_normalization: mean_one_over_all_transitions
+  weight_gradient: stop_gradient
+  candidate_td_targets: none
+  objective: prefix_marginal_advantage
+  score_source: detached_online_predictor
+  candidate_source: same_transition_normalized_action_zero_mean_suffix_prefixes
+  prefix_slots: 5
+  suffix_fill: normalized_zero_mean_action
+  advantage_reducer: mean_adjacent_prefix_score_deltas
+  weight_temperature: 0.5
+  goal_subset_weighting: softmax_mean_one
+
+loader:
+  batch_size: 256
+  sampling_unit: transition
+  transition_population: unique_legal_td_rows_from_exact_clip_split
+  train_sampling: random_with_replacement
+  validation_sampling: sequential_without_replacement
+  frozen_latent_mmap: true
+  device_image_preprocessing: false
+  workers: 6
+  prefetch_factor: 2
+  validation_workers: 2
+  train_drop_last: true
+  validation_drop_last: false
+  pin_memory: true
+
+logging:
+  type: csv
+  flush_every_n_steps: 50
+
+optimizer:
+  type: AdamW
+  world_model_learning_rate: 0.0
+  predictor_learning_rate: 0.0001
+  weight_decay: 0.001
+
+scheduler:
+  type: linear_warmup_cosine_annealing
+  interval: optimizer_step
+  warmup_fraction: 0.01
+
+training:
+  epochs: 10
+  scheduler_epochs: 10
+  optimizer_steps_per_epoch: 12796
+  precision: bf16-mixed
+  model_compile: false
+  model_compile_mode: reduce-overhead
+  gradient_clip_norm: 1.0
+  checkpoint_every_epochs: 1
+  resume: true
+
+provenance:
+  base_protocol: configs/experiment/lewm_cube_train.yaml
+  predecessor: actor_free_td_lewm_g3
+  status: implementation_ready_untrained
+  note: V0 freezes LeWM and trains one symmetric single-head goal-conditioned TD-JEPA predictor from cached latents, normalized raw action blocks, and dataset next actions.
