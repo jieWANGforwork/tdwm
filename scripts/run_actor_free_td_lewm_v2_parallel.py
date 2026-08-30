@@ -465,6 +465,164 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _torch_load_checkpoint(path: Path) -> dict[str, Any]:
+    """Load a trusted local training output without importing torch at CLI import."""
+
+    try:
+        import torch
+    except ImportError as error:
+        raise RuntimeError("Checkpoint evidence verification requires torch.") from error
+    value = torch.load(path, map_location="cpu", weights_only=False)
+    if not isinstance(value, Mapping):
+        raise ValueError(f"Expected checkpoint mapping: {path}")
+    return dict(value)
+
+
+def _require_mapping(value: Any, *, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"Expected mapping for {label}.")
+    return dict(value)
+
+
+def _formal_output_evidence(
+    *,
+    job: Job,
+    git: Mapping[str, Any],
+    input_audit: Mapping[str, Any],
+) -> dict[str, Any]:
+    method = f"actor_free_td_lewm_v2_{job.variant}"
+    revision = git.get("revision")
+    if (
+        not isinstance(revision, str)
+        or len(revision) != 40
+        or any(character not in "0123456789abcdef" for character in revision)
+    ):
+        raise ValueError("Formal evidence requires a full lowercase Git revision.")
+    if git.get("clean") is not True:
+        raise ValueError("Formal evidence requires the locked clean Git revision.")
+
+    deployment_path = Path(str(job.expected_checkpoint))
+    last_path = Path(job.run_dir) / "checkpoints" / "lightning" / "last.ckpt"
+    manifest_path = Path(job.run_dir) / "training_manifest.json"
+    manifest = _read_json(manifest_path)
+    protocol = _require_mapping(manifest.get("protocol"), label="training protocol")
+    protocol_sha256 = canonical_json_sha256(protocol)
+    expected_source_v1_sha256 = input_audit["initial_v1_checkpoints"][
+        job.variant
+    ]["sha256"]
+    if expected_source_v1_sha256 != V1_SHA256[job.variant]:
+        raise ValueError("Audited V1 checkpoint differs from the locked V1 input.")
+    expected_neighbor_sha256 = (
+        input_audit["neighbor_index"]["manifest"]["sha256"]
+        if job.variant == "g1"
+        else None
+    )
+    if job.variant == "g1" and expected_neighbor_sha256 != NEIGHBOR_MANIFEST_SHA256:
+        raise ValueError("Audited G1 neighbor index differs from the locked input.")
+
+    expected_manifest = {
+        "method": method,
+        "method_family": "actor_free_td_lewm_v2",
+        "variant": job.variant,
+        "implementation_version": "v2",
+        "objective_version": 0,
+        "deployment_checkpoint_version": 1,
+        "protocol_sha256": protocol_sha256,
+    }
+    for key, expected_value in expected_manifest.items():
+        if manifest.get(key) != expected_value:
+            raise ValueError(
+                f"Formal training_manifest.{key} differs from {expected_value!r}."
+            )
+    manifest_source = _require_mapping(
+        manifest.get("source_v1"), label="training_manifest.source_v1"
+    )
+    if manifest_source.get("checkpoint_sha256") != expected_source_v1_sha256:
+        raise ValueError("Formal training manifest binds another V1 checkpoint.")
+    manifest_runtime = _require_mapping(
+        manifest.get("runtime"), label="training_manifest.runtime"
+    )
+    if manifest_runtime.get("tdwm_git_revision") != revision:
+        raise ValueError("Formal training manifest binds another Git revision.")
+    manifest_neighbor = manifest.get("neighbor_index")
+    if expected_neighbor_sha256 is None:
+        if manifest_neighbor is not None:
+            raise ValueError("Only formal G1 may bind a neighbor index.")
+    else:
+        manifest_neighbor = _require_mapping(
+            manifest_neighbor, label="training_manifest.neighbor_index"
+        )
+        if manifest_neighbor.get("manifest_sha256") != expected_neighbor_sha256:
+            raise ValueError("Formal training manifest binds another neighbor index.")
+
+    deployment = _torch_load_checkpoint(deployment_path)
+    expected_deployment = {
+        "method": method,
+        "variant": job.variant,
+        "epoch": FORMAL_EPOCH,
+        "global_step": FORMAL_GLOBAL_STEP,
+    }
+    for key, expected_value in expected_deployment.items():
+        if deployment.get(key) != expected_value:
+            raise ValueError(
+                f"Formal deployment checkpoint {key} differs from {expected_value!r}."
+            )
+    deployment_source = _require_mapping(
+        deployment.get("source_v1_provenance"),
+        label="deployment source_v1_provenance",
+    )
+    if deployment_source.get("checkpoint_sha256") != expected_source_v1_sha256:
+        raise ValueError("Formal deployment checkpoint binds another V1 checkpoint.")
+
+    last = _torch_load_checkpoint(last_path)
+    resume_identity = _require_mapping(
+        last.get("v2_resume_identity"), label="last.ckpt v2_resume_identity"
+    )
+    expected_resume_identity = {
+        "schema_version": 1,
+        "method": method,
+        "method_family": "actor_free_td_lewm_v2",
+        "variant": job.variant,
+        "implementation_version": "v2",
+        "objective_version": 0,
+        "deployment_checkpoint_version": 1,
+        "protocol_sha256": protocol_sha256,
+        "source_v1_sha256": expected_source_v1_sha256,
+        "v2_start_revision": revision,
+        "neighbor_index_manifest_sha256": expected_neighbor_sha256,
+    }
+    if resume_identity != expected_resume_identity:
+        differing = sorted(
+            key
+            for key in set(resume_identity) | set(expected_resume_identity)
+            if resume_identity.get(key) != expected_resume_identity.get(key)
+        )
+        raise ValueError(
+            "Formal last.ckpt resume identity differs from locked run inputs: "
+            f"{differing}"
+        )
+
+    deployment_audit = _audit_file(deployment_path)
+    last_audit = _audit_file(last_path)
+    return {
+        "deployment_checkpoint": {
+            "path": deployment_audit["path"],
+            "size_bytes": deployment_audit["size_bytes"],
+            "sha256": deployment_audit["sha256"],
+            "epoch": FORMAL_EPOCH,
+            "global_step": FORMAL_GLOBAL_STEP,
+            "resume_identity": resume_identity,
+            "resume_identity_source": f"{last_path}['v2_resume_identity']",
+        },
+        "lightning_last": {
+            "path": last_audit["path"],
+            "size_bytes": last_audit["size_bytes"],
+            "sha256": last_audit["sha256"],
+            "resume_identity": resume_identity,
+        },
+    }
+
+
 def verify_job_output(job: Job) -> dict[str, Any]:
     output = Path(job.run_dir)
     if job.stage == "eval":
@@ -540,6 +698,7 @@ def _formal_execution_evidence(
             "path": str(paths.neighbor_index),
             "manifest_sha256": input_audit["neighbor_index"]["manifest"]["sha256"],
         }
+    outputs = _formal_output_evidence(job=job, git=git, input_audit=input_audit)
     return {
         "schema_version": 1,
         "source": "v2_formal_training_launcher",
@@ -579,6 +738,7 @@ def _formal_execution_evidence(
             },
             "neighbor_index": neighbor,
         },
+        "outputs": outputs,
         "disk": {"free_bytes_before": free_before, "free_bytes_after": free_after},
     }
 

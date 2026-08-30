@@ -36,6 +36,96 @@ def _paths(tmp_path: Path) -> object:
     )
 
 
+def _formal_input_audit() -> dict[str, object]:
+    return {
+        "dataset": {"manifest": {"sha256": LAUNCHER.DATASET_MANIFEST_SHA256}},
+        "split_indices": {"sha256": LAUNCHER.SPLIT_SHA256},
+        "neighbor_index": {
+            "manifest": {"sha256": LAUNCHER.NEIGHBOR_MANIFEST_SHA256}
+        },
+        "initial_v1_checkpoints": {
+            variant: {"sha256": digest}
+            for variant, digest in LAUNCHER.V1_SHA256.items()
+        },
+    }
+
+
+def _install_formal_checkpoints(
+    monkeypatch: pytest.MonkeyPatch,
+    job: object,
+    *,
+    revision: str,
+) -> tuple[dict[str, dict[str, object]], Path]:
+    method = f"actor_free_td_lewm_v2_{job.variant}"
+    protocol = {"protocol": "test", "variant": job.variant}
+    protocol_sha256 = LAUNCHER.canonical_json_sha256(protocol)
+    neighbor_sha256 = (
+        LAUNCHER.NEIGHBOR_MANIFEST_SHA256 if job.variant == "g1" else None
+    )
+    resume_identity = {
+        "schema_version": 1,
+        "method": method,
+        "method_family": "actor_free_td_lewm_v2",
+        "variant": job.variant,
+        "implementation_version": "v2",
+        "objective_version": 0,
+        "deployment_checkpoint_version": 1,
+        "protocol_sha256": protocol_sha256,
+        "source_v1_sha256": LAUNCHER.V1_SHA256[job.variant],
+        "v2_start_revision": revision,
+        "neighbor_index_manifest_sha256": neighbor_sha256,
+    }
+    payloads = {
+        "deployment": {
+            "method": method,
+            "variant": job.variant,
+            "epoch": LAUNCHER.FORMAL_EPOCH,
+            "global_step": LAUNCHER.FORMAL_GLOBAL_STEP,
+            "source_v1_provenance": {
+                "checkpoint_sha256": LAUNCHER.V1_SHA256[job.variant]
+            },
+        },
+        "last": {"v2_resume_identity": resume_identity},
+    }
+    deployment_path = Path(job.expected_checkpoint)
+    last_path = Path(job.run_dir) / "checkpoints" / "lightning" / "last.ckpt"
+    deployment_path.parent.mkdir(parents=True, exist_ok=True)
+    last_path.parent.mkdir(parents=True, exist_ok=True)
+    deployment_path.write_bytes(b"deployment checkpoint")
+    last_path.write_bytes(b"lightning checkpoint")
+    manifest = {
+        "method": method,
+        "method_family": "actor_free_td_lewm_v2",
+        "variant": job.variant,
+        "implementation_version": "v2",
+        "objective_version": 0,
+        "deployment_checkpoint_version": 1,
+        "protocol": protocol,
+        "protocol_sha256": protocol_sha256,
+        "source_v1": {
+            "checkpoint_sha256": LAUNCHER.V1_SHA256[job.variant]
+        },
+        "runtime": {"tdwm_git_revision": revision},
+        "neighbor_index": (
+            {"manifest_sha256": neighbor_sha256}
+            if neighbor_sha256 is not None
+            else None
+        ),
+    }
+    manifest_path = Path(job.run_dir) / "training_manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+
+    def load_checkpoint(path: Path) -> dict[str, object]:
+        if path == deployment_path:
+            return payloads["deployment"]
+        if path == last_path:
+            return payloads["last"]
+        raise AssertionError(path)
+
+    monkeypatch.setattr(LAUNCHER, "_torch_load_checkpoint", load_checkpoint)
+    return payloads, manifest_path
+
+
 def test_training_queue_starts_heavy_variants_and_queues_c_last(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     jobs = LAUNCHER.build_jobs(
@@ -332,11 +422,15 @@ def test_dry_run_prints_audited_plan_without_creating_bundle(
     assert not paths.bundle_root.exists()
 
 
-def test_formal_evidence_matches_acceptance_schema(tmp_path: Path) -> None:
+def test_formal_evidence_matches_acceptance_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     paths = _paths(tmp_path)
     job = LAUNCHER.build_jobs(
         stage="formal", paths=paths, python="python", formal_resume="never"
     )[0]
+    revision = "b" * 40
+    _install_formal_checkpoints(monkeypatch, job, revision=revision)
     log = tmp_path / "job.log"
     log.write_text("completed\n")
     evidence = LAUNCHER._formal_execution_evidence(
@@ -348,18 +442,8 @@ def test_formal_evidence_matches_acceptance_schema(tmp_path: Path) -> None:
         return_code=0,
         log_path=log,
         paths=paths,
-        git={"revision": "b" * 40, "clean": True},
-        input_audit={
-            "dataset": {"manifest": {"sha256": LAUNCHER.DATASET_MANIFEST_SHA256}},
-            "split_indices": {"sha256": LAUNCHER.SPLIT_SHA256},
-            "neighbor_index": {
-                "manifest": {"sha256": LAUNCHER.NEIGHBOR_MANIFEST_SHA256}
-            },
-            "initial_v1_checkpoints": {
-                variant: {"sha256": digest}
-                for variant, digest in LAUNCHER.V1_SHA256.items()
-            },
-        },
+        git={"revision": revision, "clean": True},
+        input_audit=_formal_input_audit(),
         free_before=55 * 1024**3,
         free_after=50 * 1024**3,
     )
@@ -376,9 +460,23 @@ def test_formal_evidence_matches_acceptance_schema(tmp_path: Path) -> None:
         LAUNCHER.NEIGHBOR_MANIFEST_SHA256
     )
     assert evidence["log"]["size_bytes"] == log.stat().st_size
+    deployment = evidence["outputs"]["deployment_checkpoint"]
+    last = evidence["outputs"]["lightning_last"]
+    assert deployment["epoch"] == 10
+    assert deployment["global_step"] == 127_960
+    assert deployment["resume_identity"] == last["resume_identity"]
+    assert deployment["resume_identity_source"].endswith(
+        "last.ckpt['v2_resume_identity']"
+    )
+    assert last["resume_identity"]["v2_start_revision"] == revision
+    assert deployment["sha256"] == LAUNCHER.file_sha256(
+        Path(job.expected_checkpoint)
+    )
 
 
-def test_non_g1_formal_evidence_uses_null_neighbor(tmp_path: Path) -> None:
+def test_non_g1_formal_evidence_uses_null_neighbor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     paths = _paths(tmp_path)
     job = next(
         job
@@ -387,6 +485,8 @@ def test_non_g1_formal_evidence_uses_null_neighbor(tmp_path: Path) -> None:
         )
         if job.variant == "d"
     )
+    revision = "c" * 40
+    _install_formal_checkpoints(monkeypatch, job, revision=revision)
     log = tmp_path / "job.log"
     log.write_text("")
     evidence = LAUNCHER._formal_execution_evidence(
@@ -398,20 +498,89 @@ def test_non_g1_formal_evidence_uses_null_neighbor(tmp_path: Path) -> None:
         return_code=0,
         log_path=log,
         paths=paths,
-        git={"revision": "c" * 40},
-        input_audit={
-            "dataset": {"manifest": {"sha256": "dataset"}},
-            "split_indices": {"sha256": "split"},
-            "neighbor_index": {"manifest": {"sha256": "neighbor"}},
-            "initial_v1_checkpoints": {
-                variant: {"sha256": digest}
-                for variant, digest in LAUNCHER.V1_SHA256.items()
-            },
-        },
+        git={"revision": revision, "clean": True},
+        input_audit=_formal_input_audit(),
         free_before=2,
         free_after=1,
     )
     assert evidence["inputs"]["neighbor_index"] is None
+    assert (
+        evidence["outputs"]["lightning_last"]["resume_identity"]
+        ["neighbor_index_manifest_sha256"]
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "field", "replacement", "message"),
+    (
+        ("deployment", "method", "actor_free_td_lewm_v2_d", "method differs"),
+        ("deployment", "variant", "d", "variant differs"),
+        ("deployment", "epoch", 9, "epoch differs"),
+        ("deployment", "global_step", 127_959, "global_step differs"),
+        ("last", "method", "actor_free_td_lewm_v2_d", "resume identity differs"),
+        ("last", "variant", "d", "resume identity differs"),
+        ("last", "protocol_sha256", "1" * 64, "resume identity differs"),
+        ("last", "source_v1_sha256", "2" * 64, "resume identity differs"),
+        ("last", "v2_start_revision", "3" * 40, "resume identity differs"),
+        (
+            "last",
+            "neighbor_index_manifest_sha256",
+            "4" * 64,
+            "resume identity differs",
+        ),
+    ),
+)
+def test_formal_output_evidence_rejects_tampered_checkpoint_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    checkpoint: str,
+    field: str,
+    replacement: object,
+    message: str,
+) -> None:
+    paths = _paths(tmp_path)
+    job = LAUNCHER.build_jobs(
+        stage="formal", paths=paths, python="python", formal_resume="never"
+    )[0]
+    revision = "b" * 40
+    payloads, _ = _install_formal_checkpoints(
+        monkeypatch, job, revision=revision
+    )
+    if checkpoint == "last":
+        payloads[checkpoint]["v2_resume_identity"][field] = replacement
+    else:
+        payloads[checkpoint][field] = replacement
+
+    with pytest.raises(ValueError, match=message):
+        LAUNCHER._formal_output_evidence(
+            job=job,
+            git={"revision": revision, "clean": True},
+            input_audit=_formal_input_audit(),
+        )
+
+
+def test_formal_output_evidence_rejects_tampered_protocol_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _paths(tmp_path)
+    job = LAUNCHER.build_jobs(
+        stage="formal", paths=paths, python="python", formal_resume="never"
+    )[0]
+    revision = "b" * 40
+    _, manifest_path = _install_formal_checkpoints(
+        monkeypatch, job, revision=revision
+    )
+    manifest = json.loads(manifest_path.read_text())
+    manifest["protocol"]["protocol"] = "tampered"
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="training_manifest.protocol_sha256"):
+        LAUNCHER._formal_output_evidence(
+            job=job,
+            git={"revision": revision, "clean": True},
+            input_audit=_formal_input_audit(),
+        )
 
 
 class _ImmediateProcess:
