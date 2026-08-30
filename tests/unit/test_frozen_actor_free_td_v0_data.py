@@ -316,7 +316,7 @@ def test_reachable_future_sampling_is_matched_and_reproducible(tmp_path: Path) -
     )
 
 
-def test_validation_future_selection_uses_inclusive_end_without_rng(
+def test_explicit_endpoint_selection_uses_inclusive_end_without_rng(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -327,7 +327,7 @@ def test_validation_future_selection_uses_inclusive_end_without_rng(
 
     def fail_random_sample(*args, **kwargs):
         del args, kwargs
-        raise AssertionError("deterministic validation must not sample RNG")
+        raise AssertionError("explicit endpoint mode must not sample RNG")
 
     monkeypatch.setattr(torch, "rand", fail_random_sample)
 

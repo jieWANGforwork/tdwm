@@ -17,7 +17,7 @@ pretrained_world_model:
   source_method: lewm
   source_seed: 3072
   source_epoch: 10
-  checkpoint_sha256: 0ce38860a672c4a304d6921c6f07158977bb1d2c8f0eed8a002bb7c89502b579
+  checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
   frozen: true
 
 image_preprocessing:

@@ -106,6 +106,7 @@ def validate_frozen_actor_free_td_v0_payload(
     )
     required = {
         "predictor_state_dict",
+        "target_predictor_state_dict",
         "predictor_config",
         "world_model_state_dict",
         "world_model_config",
@@ -248,6 +249,14 @@ def load_frozen_actor_free_td_v0_checkpoint(
         embedding_layers=int(config["embedding_layers"]),
     )
     predictor.load_state_dict(payload["predictor_state_dict"], strict=True)
+    # Deployment uses only the online predictor, but the artifact is also the
+    # auditable record of a completed online/EMA TD-JEPA training pair.  Load
+    # the target state strictly into an identical module so a missing or
+    # structurally incompatible EMA target cannot pass checkpoint validation.
+    target_predictor = predictor.make_target()
+    target_predictor.load_state_dict(
+        payload["target_predictor_state_dict"], strict=True
+    )
 
     import hydra
     from omegaconf import OmegaConf

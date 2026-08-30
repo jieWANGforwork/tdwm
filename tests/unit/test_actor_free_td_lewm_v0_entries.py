@@ -8,6 +8,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
+SERVER_PRETRAINED_SHA256 = (
+    "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257"
+)
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -36,6 +39,10 @@ def test_v0_training_entry_loads_its_resolved_protocol(variant: str) -> None:
     assert protocol["predictor"]["shared_lewm_action_encoder"] is False
     assert protocol["task_sampling"]["sampling"] == "per_transition_bernoulli"
     assert "exact_half" not in protocol["task_sampling"]
+    assert (
+        protocol["pretrained_world_model"]["checkpoint_sha256"]
+        == SERVER_PRETRAINED_SHA256
+    )
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -58,6 +65,10 @@ def test_v0_o50_protocol_is_bound_to_matching_training_method(variant: str) -> N
     assert evaluation["method"] == training["method"]
     assert evaluation["variant"] == training["variant"]
     assert evaluation["pretrained_world_model"] == training["pretrained_world_model"]
+    assert (
+        evaluation["pretrained_world_model"]["checkpoint_sha256"]
+        == SERVER_PRETRAINED_SHA256
+    )
     assert evaluation["predictor"] == training["predictor"]
     assert evaluation["predictor"]["objective_version"] == 0
     assert evaluation["predictor"]["num_parallel"] == 1

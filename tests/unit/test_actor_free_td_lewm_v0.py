@@ -186,6 +186,72 @@ def test_td_batch_detaches_frozen_inputs_and_updates_only_online_predictor():
     assert all(parameter.grad is None for parameter in target.parameters())
 
 
+@pytest.mark.skipif(
+    not hasattr(torch, "autocast"), reason="torch.autocast requires modern PyTorch"
+)
+def test_bfloat16_autocast_uses_float32_td_and_goal_score_accumulation():
+    """The formal bf16 policy must not change targets, reductions, or gradients."""
+
+    torch.manual_seed(23)
+    online = _predictor()
+    target = online.make_target()
+    state = torch.randn(4, 192)
+    action = torch.randn(4, 25)
+    task = torch.randn(4, 192)
+    next_state = torch.randn(4, 192)
+    next_action = torch.randn(4, 25)
+    terminal = torch.tensor([False, True, False, False])
+
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        batch = build_tdjepa_td_batch_v0(
+            online,
+            target,
+            state,
+            action,
+            task,
+            next_state,
+            next_action,
+            gamma=0.97,
+            terminal=terminal,
+        )
+        goal_score = tdjepa_goal_score_v0(batch.prediction, batch.task)
+        loss = batch.td_loss - 0.01 * goal_score.mean()
+
+    assert batch.prediction.dtype == torch.bfloat16
+    assert batch.target.dtype == torch.float32
+    assert batch.per_transition_td_loss.dtype == torch.float32
+    assert batch.td_loss.dtype == torch.float32
+    assert goal_score.dtype == torch.float32
+    assert not batch.target.requires_grad
+    assert torch.equal(
+        goal_score,
+        (batch.prediction.float() * batch.task.float()).sum(dim=-1),
+    )
+    with torch.no_grad(), torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        expected_next_prediction = target(next_state, next_action, task)
+    expected_target = next_state + 0.97 * (~terminal).float().unsqueeze(-1) * (
+        expected_next_prediction.float()
+    )
+    assert torch.equal(batch.target, expected_target)
+    assert torch.equal(
+        batch.per_transition_td_loss,
+        (batch.prediction.float() - expected_target).square().sum(dim=-1),
+    )
+
+    score_gradient = torch.autograd.grad(
+        goal_score.mean(), batch.prediction, retain_graph=True
+    )[0]
+    assert score_gradient.dtype == torch.bfloat16
+    assert torch.count_nonzero(score_gradient) > 0
+
+    loss.backward()
+    assert any(
+        parameter.grad is not None and torch.count_nonzero(parameter.grad) > 0
+        for parameter in online.parameters()
+    )
+    assert all(parameter.grad is None for parameter in target.parameters())
+
+
 def test_td_batch_bootstrap_queries_the_dataset_next_action():
     online = _predictor()
     target = online.make_target()

@@ -253,7 +253,13 @@ def tdjepa_goal_score_v0(
     prediction: torch.Tensor,
     task: torch.Tensor,
 ) -> torch.Tensor:
-    """Return the single predictor's ``G(state, action, task) dot task``."""
+    """Return the single predictor's ``G(state, action, task) dot task``.
+
+    Predictor outputs may be bfloat16 under the formal autocast policy while
+    frozen tasks remain float32.  Cast both operands to float32 before the
+    reduction so the 192-term dot product is accumulated stably without
+    breaking the gradient from the score back to the online prediction.
+    """
 
     if not isinstance(prediction, torch.Tensor):
         raise TypeError("prediction must be a torch.Tensor.")
@@ -268,9 +274,9 @@ def tdjepa_goal_score_v0(
     _validate_floating_vector("task", task, final_dim=V0_TASK_DIM)
     if prediction.shape != task.shape:
         raise ValueError("task must have the same shape as prediction.")
-    if prediction.device != task.device or prediction.dtype != task.dtype:
-        raise ValueError("prediction and task must share a device and dtype.")
-    return (prediction * task).sum(dim=-1)
+    if prediction.device != task.device:
+        raise ValueError("prediction and task must share a device.")
+    return (prediction.float() * task.float()).sum(dim=-1)
 
 
 def _normalize_terminal_v0(
@@ -313,12 +319,9 @@ def tdjepa_successor_td_target_v0(
         raise ValueError("target_next_prediction must match next_state.")
     if not target_next_prediction.is_floating_point():
         raise TypeError("target_next_prediction must have a floating-point dtype.")
-    if (
-        target_next_prediction.device != next_state.device
-        or target_next_prediction.dtype != next_state.dtype
-    ):
+    if target_next_prediction.device != next_state.device:
         raise ValueError(
-            "target_next_prediction and next_state must share a device and dtype."
+            "target_next_prediction and next_state must share a device."
         )
     if not bool(torch.isfinite(target_next_prediction.detach()).all()):
         raise ValueError("target_next_prediction must contain only finite values.")
@@ -328,9 +331,14 @@ def tdjepa_successor_td_target_v0(
         leading_shape=next_state.shape[:-1],
         device=next_state.device,
     )
-    continuation = (~terminal_bool).to(dtype=next_state.dtype).unsqueeze(-1)
-    discounted_bootstrap = float(gamma) * continuation * target_next_prediction.detach()
-    return next_state.detach() + discounted_bootstrap
+    # The EMA prediction is bfloat16 under autocast whereas frozen LeWM states
+    # are float32.  Form the complete detached bootstrap in float32 so neither
+    # the feature sum nor the Bellman target is rounded to bfloat16.
+    continuation = (~terminal_bool).to(dtype=torch.float32).unsqueeze(-1)
+    discounted_bootstrap = (
+        float(gamma) * continuation * target_next_prediction.detach().float()
+    )
+    return next_state.detach().float() + discounted_bootstrap
 
 
 @dataclass(frozen=True)
@@ -425,7 +433,10 @@ def build_tdjepa_td_batch_v0(
 
     # Match the symmetric TD-JEPA reduction: sum feature error per transition,
     # then average transitions in the scalar objective.
-    per_transition = (prediction - td_target).square().sum(dim=-1)
+    # Autocast returns bfloat16 predictor features.  Promote before subtracting
+    # and summing the 192 squared residuals; ``float()`` remains differentiable
+    # and therefore preserves the online predictor's gradient path.
+    per_transition = (prediction.float() - td_target.float()).square().sum(dim=-1)
     if not bool(torch.isfinite(per_transition.detach()).all()):
         raise FloatingPointError("V0 TD loss produced a non-finite value.")
     return TDJEPATDBatchV0(

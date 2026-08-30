@@ -267,6 +267,7 @@ def test_v0_checkpoint_loader_restores_single_predictor_and_rejects_parallel(
             "out_features": 2,
         },
         "predictor_state_dict": predictor.state_dict(),
+        "target_predictor_state_dict": predictor.make_target().state_dict(),
         "predictor_config": config,
     }
     checkpoint = tmp_path / "v0-c.pt"
@@ -284,6 +285,20 @@ def test_v0_checkpoint_loader_restores_single_predictor_and_rejects_parallel(
     )
     assert not any(parameter.requires_grad for parameter in restored_world.parameters())
     assert not any(parameter.requires_grad for parameter in restored_g.parameters())
+
+    missing_target = deepcopy(payload)
+    missing_target.pop("target_predictor_state_dict")
+    torch.save(missing_target, checkpoint)
+    with pytest.raises(ValueError, match="target_predictor_state_dict"):
+        load_actor_free_td_lewm_v0_c_checkpoint(checkpoint)
+
+    malformed_target = deepcopy(payload)
+    malformed_target["target_predictor_state_dict"] = {
+        "not_a_predictor_parameter": torch.zeros(1)
+    }
+    torch.save(malformed_target, checkpoint)
+    with pytest.raises(RuntimeError):
+        load_actor_free_td_lewm_v0_c_checkpoint(checkpoint)
 
     parallel = deepcopy(payload)
     parallel["predictor_config"] = deepcopy(config)

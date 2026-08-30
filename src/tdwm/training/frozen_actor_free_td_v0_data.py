@@ -423,9 +423,11 @@ def sample_reachable_future_latents_v0(
     ``future_end_rows`` is inclusive.  The first eligible row is always the
     dataset next-state row, ``global_row + frame_skip``.  With a caller-owned
     CPU ``generator``, selection is uniform and keeps goal randomness
-    independent from predictor dropout and CUDA RNG state.  ``generator=None``
-    deterministically selects the inclusive end row for validation without
-    consuming the training RNG stream.
+    independent from predictor dropout and CUDA RNG state.  Formal validation
+    passes its own generator and resets it at every validation epoch, so it
+    follows this same uniform distribution over one fixed sampled population.
+    ``generator=None`` remains an explicit endpoint-selection mode for audits
+    and diagnostics; it is not the formal validation sampler.
     """
 
     if not isinstance(store, FrozenLatentStore):

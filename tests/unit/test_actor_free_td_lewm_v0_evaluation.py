@@ -38,7 +38,7 @@ from tdwm.evaluation.frozen_actor_free_td_v0_common import (
 )
 
 CONFIG_ROOT = Path("configs/experiment")
-SOURCE_SHA = "0ce38860a672c4a304d6921c6f07158977bb1d2c8f0eed8a002bb7c89502b579"
+SOURCE_SHA = "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257"
 METHOD_CASES = [
     (
         "c",

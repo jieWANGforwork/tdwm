@@ -364,6 +364,7 @@ def _build_v0_training_module(
     data_generator: torch.Generator,
     goal_generator: torch.Generator,
     task_generator: torch.Generator,
+    validation_goal_generator: torch.Generator | None = None,
     validation_task_generator: torch.Generator | None = None,
     neighbor_index: StateNeighborActionIndex | None,
     latent_store: Any | None = None,
@@ -386,10 +387,21 @@ def _build_v0_training_module(
             self.data_generator = data_generator
             self.goal_generator = goal_generator
             self.task_generator = task_generator
+            self.validation_goal_generator = (
+                validation_goal_generator
+                if validation_goal_generator is not None
+                else torch.Generator().manual_seed(0)
+            )
             self.validation_task_generator = (
                 validation_task_generator
                 if validation_task_generator is not None
                 else torch.Generator().manual_seed(0)
+            )
+            self._validation_goal_epoch_state = (
+                self.validation_goal_generator.get_state().clone()
+            )
+            self._validation_task_epoch_state = (
+                self.validation_task_generator.get_state().clone()
             )
             self.neighbor_index = neighbor_index
             self.latent_store = latent_store
@@ -408,28 +420,67 @@ def _build_v0_training_module(
             checkpoint["v0_data_generator_state"] = self.data_generator.get_state()
             checkpoint["v0_goal_generator_state"] = self.goal_generator.get_state()
             checkpoint["v0_task_generator_state"] = self.task_generator.get_state()
+            checkpoint["v0_validation_goal_generator_state"] = (
+                self.validation_goal_generator.get_state()
+            )
             checkpoint["v0_validation_task_generator_state"] = (
                 self.validation_task_generator.get_state()
+            )
+            checkpoint["v0_validation_goal_epoch_state"] = (
+                self._validation_goal_epoch_state.clone()
+            )
+            checkpoint["v0_validation_task_epoch_state"] = (
+                self._validation_task_epoch_state.clone()
             )
 
         def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
             data_state = checkpoint.get("v0_data_generator_state")
             goal_state = checkpoint.get("v0_goal_generator_state")
             task_state = checkpoint.get("v0_task_generator_state")
+            validation_goal_state = checkpoint.get(
+                "v0_validation_goal_generator_state"
+            )
             validation_task_state = checkpoint.get(
                 "v0_validation_task_generator_state"
+            )
+            validation_goal_epoch_state = checkpoint.get(
+                "v0_validation_goal_epoch_state"
+            )
+            validation_task_epoch_state = checkpoint.get(
+                "v0_validation_task_epoch_state"
             )
             if (
                 data_state is None
                 or goal_state is None
                 or task_state is None
+                or validation_goal_state is None
                 or validation_task_state is None
+                or validation_goal_epoch_state is None
+                or validation_task_epoch_state is None
             ):
                 raise RuntimeError("V0 resume checkpoint is missing RNG state.")
             self.data_generator.set_state(data_state.cpu())
             self.goal_generator.set_state(goal_state.cpu())
             self.task_generator.set_state(task_state.cpu())
+            self.validation_goal_generator.set_state(validation_goal_state.cpu())
             self.validation_task_generator.set_state(validation_task_state.cpu())
+            self._validation_goal_epoch_state = (
+                validation_goal_epoch_state.cpu().clone()
+            )
+            self._validation_task_epoch_state = (
+                validation_task_epoch_state.cpu().clone()
+            )
+
+        def on_validation_epoch_start(self) -> None:
+            # Validation follows the configured uniform-future/Bernoulli task
+            # distributions, but evaluates exactly the same sampled population
+            # at every epoch so curves do not include advancing-RNG noise.
+            self.validation_goal_generator.set_state(
+                self._validation_goal_epoch_state.clone()
+            )
+            self.validation_task_generator.set_state(
+                self._validation_task_epoch_state.clone()
+            )
 
         def _score_neighbors(
             self,
@@ -654,7 +705,11 @@ def _build_v0_training_module(
                     self.latent_store,
                     global_rows,
                     future_end_rows,
-                    generator=self.goal_generator if stage == "train" else None,
+                    generator=(
+                        self.goal_generator
+                        if stage == "train"
+                        else self.validation_goal_generator
+                    ),
                     device=tensors["state"].device,
                 ).latents.to(dtype=tensors["state"].dtype)
             mixed = sample_mixed_tasks_v0(
@@ -693,7 +748,11 @@ def _build_v0_training_module(
                 global_rows,
                 stage=stage,
             )
-            loss = method_loss
+            # The common base TD is the primary validation metric for all six
+            # variants.  Method-specific objectives remain diagnostics where
+            # they are evaluable; G1 cannot query every fixed validation anchor
+            # from its immutable training-anchor-only neighbor artifact.
+            loss = td_batch.td_loss if stage == "validation" else method_loss
             metrics: dict[str, torch.Tensor] = {
                 f"{stage}/loss": loss.detach(),
                 f"{stage}/base_td_loss": td_batch.td_loss.detach(),
@@ -809,6 +868,41 @@ def _deployment_payload(
     }
 
 
+def _deployment_checkpoint_path(
+    run_dir: Path,
+    *,
+    spec: ActorFreeTDLeWMV0Spec,
+    epoch: int,
+) -> Path:
+    return (
+        run_dir
+        / "checkpoints"
+        / spec.method
+        / spec.variant
+        / f"epoch_{int(epoch):02d}.pt"
+    )
+
+
+def _checkpoint_result_fields(
+    run_dir: Path,
+    *,
+    spec: ActorFreeTDLeWMV0Spec,
+    deployment_epoch: int,
+) -> dict[str, str]:
+    return {
+        "last_checkpoint": str(
+            run_dir / "checkpoints" / "lightning" / "last.ckpt"
+        ),
+        "deployment_checkpoint": str(
+            _deployment_checkpoint_path(
+                run_dir,
+                spec=spec,
+                epoch=deployment_epoch,
+            )
+        ),
+    }
+
+
 def _build_export_callback(
     run_dir: Path,
     *,
@@ -826,7 +920,12 @@ def _build_export_callback(
             epoch = int(trainer.current_epoch) + 1
             if epoch % int(protocol["training"]["checkpoint_every_epochs"]):
                 return
-            destination = run_dir / "checkpoints" / spec.method / spec.variant
+            checkpoint_path = _deployment_checkpoint_path(
+                run_dir,
+                spec=spec,
+                epoch=epoch,
+            )
+            destination = checkpoint_path.parent
             destination.mkdir(parents=True, exist_ok=True)
             torch.save(
                 _deployment_payload(
@@ -838,7 +937,7 @@ def _build_export_callback(
                     epoch=epoch,
                     global_step=int(trainer.global_step),
                 ),
-                destination / f"epoch_{epoch:02d}.pt",
+                checkpoint_path,
             )
 
     return V0ExportCallback()
@@ -1072,6 +1171,9 @@ def train_actor_free_td_lewm_v0(
     task_generator = torch.Generator().manual_seed(
         seed + int(protocol["task_sampling"]["task_sampling_seed_offset"])
     )
+    validation_goal_generator = torch.Generator().manual_seed(
+        seed + int(protocol["task_sampling"]["goal_sampling_seed_offset"]) + 1
+    )
     validation_task_generator = torch.Generator().manual_seed(
         seed + int(protocol["task_sampling"]["task_sampling_seed_offset"]) + 1
     )
@@ -1083,6 +1185,7 @@ def train_actor_free_td_lewm_v0(
         data_generator=data_generator,
         goal_generator=goal_generator,
         task_generator=task_generator,
+        validation_goal_generator=validation_goal_generator,
         validation_task_generator=validation_task_generator,
         neighbor_index=neighbor_index,
         latent_store=store,
@@ -1181,6 +1284,9 @@ def train_actor_free_td_lewm_v0(
             "data_source": "frozen_latent_store",
             "sampling_unit": "transition",
             "train_sampling": "random_with_replacement",
+            "validation_goal_sampling": "uniform_reachable_future_fixed_per_epoch",
+            "validation_task_sampling": "bernoulli_mixture_fixed_per_epoch",
+            "validation_primary_objective": "common_base_td_all_variants",
             "transition_batch_size": transition_batch_size,
             "world_model_encode_during_training": False,
         },
@@ -1215,6 +1321,16 @@ def train_actor_free_td_lewm_v0(
         val_dataloaders=validation_loader,
         ckpt_path=checkpoint_path,
     )
+    deployment_checkpoint = _deployment_checkpoint_path(
+        run_dir,
+        spec=spec,
+        epoch=schedule.max_epochs,
+    )
+    if not deployment_checkpoint.is_file():
+        raise RuntimeError(
+            "The completed V0 run did not produce its expected deployment "
+            f"checkpoint: {deployment_checkpoint}"
+        )
     result = {
         "method": spec.method,
         "method_family": METHOD_FAMILY,
@@ -1222,7 +1338,11 @@ def train_actor_free_td_lewm_v0(
         "implementation_version": IMPLEMENTATION_VERSION,
         "run_dir": str(run_dir),
         "seed": seed,
-        "last_checkpoint": str(last_checkpoint),
+        **_checkpoint_result_fields(
+            run_dir,
+            spec=spec,
+            deployment_epoch=schedule.max_epochs,
+        ),
         "final_epoch": int(trainer.current_epoch),
         "global_step": int(trainer.global_step),
         "protocol_sha256": protocol_hash,

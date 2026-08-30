@@ -12,6 +12,8 @@ from tdwm.training.frozen_actor_free_td_v0 import (
     OBJECTIVE_VERSION,
     V0_SPECS,
     _build_v0_training_module,
+    _checkpoint_result_fields,
+    _deployment_checkpoint_path,
     _deployment_payload,
     load_actor_free_td_lewm_v0_training_protocol,
     validate_actor_free_td_lewm_v0_training_protocol,
@@ -113,7 +115,7 @@ def test_v0_variants_train_only_the_single_predictor_from_frozen_inputs(
 def test_v0_checkpoint_round_trip_records_training_and_validation_rng_streams() -> None:
     protocol = _small_protocol("c")
     generators = [
-        torch.Generator().manual_seed(seed) for seed in (21, 22, 23, 24)
+        torch.Generator().manual_seed(seed) for seed in (21, 22, 23, 24, 25)
     ]
     module = _build_v0_training_module(
         _FrozenWorld(),
@@ -123,7 +125,8 @@ def test_v0_checkpoint_round_trip_records_training_and_validation_rng_streams() 
         data_generator=generators[0],
         goal_generator=generators[1],
         task_generator=generators[2],
-        validation_task_generator=generators[3],
+        validation_goal_generator=generators[3],
+        validation_task_generator=generators[4],
         neighbor_index=None,
     )
     checkpoint: dict = {}
@@ -134,14 +137,18 @@ def test_v0_checkpoint_round_trip_records_training_and_validation_rng_streams() 
 
     module.on_load_checkpoint(checkpoint)
 
-    for generator, expected_values in zip(generators, expected, strict=True):
+    assert len(generators) == len(expected)
+    for generator, expected_values in zip(generators, expected):
         assert torch.equal(torch.rand(4, generator=generator), expected_values)
 
 
-def test_validation_task_sampling_does_not_consume_training_task_rng() -> None:
+def test_validation_goal_and_task_streams_reset_to_one_fixed_epoch_population(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     protocol = _small_protocol("c")
     task_generator = torch.Generator().manual_seed(32)
-    validation_task_generator = torch.Generator().manual_seed(33)
+    validation_goal_generator = torch.Generator().manual_seed(33)
+    validation_task_generator = torch.Generator().manual_seed(34)
     module = _build_v0_training_module(
         _FrozenWorld(),
         protocol,
@@ -150,8 +157,83 @@ def test_validation_task_sampling_does_not_consume_training_task_rng() -> None:
         data_generator=torch.Generator().manual_seed(30),
         goal_generator=torch.Generator().manual_seed(31),
         task_generator=task_generator,
+        validation_goal_generator=validation_goal_generator,
         validation_task_generator=validation_task_generator,
         neighbor_index=None,
+        latent_store=object(),
+    )
+    batch_size = 4
+    batch = {
+        "state": torch.randn(batch_size, 192),
+        "action": torch.randn(batch_size, 25),
+        "next_state": torch.randn(batch_size, 192),
+        "next_action": torch.randn(batch_size, 25),
+        "terminal": torch.zeros(batch_size, dtype=torch.bool),
+        "global_row": torch.arange(batch_size, dtype=torch.int64) * 5,
+        "goal_future_end_row": torch.arange(batch_size, dtype=torch.int64) * 5 + 5,
+    }
+    seen_goal_generators: list[torch.Generator] = []
+
+    def sample_validation_goals(
+        store, global_rows, future_end_rows, *, generator, device
+    ):
+        del store, future_end_rows
+        seen_goal_generators.append(generator)
+        draws = torch.rand(len(global_rows), generator=generator)
+        return SimpleNamespace(
+            latents=draws[:, None].expand(-1, 192).to(device=device)
+        )
+
+    monkeypatch.setattr(
+        "tdwm.training.frozen_actor_free_td_v0.sample_reachable_future_latents_v0",
+        sample_validation_goals,
+    )
+    training_state = task_generator.get_state().clone()
+    validation_goal_epoch_state = validation_goal_generator.get_state().clone()
+    validation_task_epoch_state = validation_task_generator.get_state().clone()
+
+    module.on_validation_epoch_start()
+    first_loss = module._forward_loss(batch, "validation").detach()
+    first_goal_end_state = validation_goal_generator.get_state().clone()
+    first_task_end_state = validation_task_generator.get_state().clone()
+
+    # Mimic both validation streams having advanced during a complete epoch,
+    # then require the lifecycle hook to recreate the identical population.
+    torch.rand(7, generator=validation_goal_generator)
+    torch.rand(7, generator=validation_task_generator)
+    module.on_validation_epoch_start()
+    assert torch.equal(
+        validation_goal_generator.get_state(), validation_goal_epoch_state
+    )
+    assert torch.equal(
+        validation_task_generator.get_state(), validation_task_epoch_state
+    )
+    second_loss = module._forward_loss(batch, "validation").detach()
+
+    assert torch.equal(task_generator.get_state(), training_state)
+    assert seen_goal_generators == [validation_goal_generator] * 2
+    assert torch.equal(validation_goal_generator.get_state(), first_goal_end_state)
+    assert torch.equal(validation_task_generator.get_state(), first_task_end_state)
+    torch.testing.assert_allclose(second_loss, first_loss)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_all_variants_train_on_method_loss_but_validate_on_common_base_td(
+    variant: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = _small_protocol(variant)
+    module = _build_v0_training_module(
+        _FrozenWorld(),
+        protocol,
+        total_steps=1,
+        spec=V0_SPECS[variant],
+        data_generator=torch.Generator().manual_seed(40),
+        goal_generator=torch.Generator().manual_seed(41),
+        task_generator=torch.Generator().manual_seed(42),
+        validation_goal_generator=torch.Generator().manual_seed(43),
+        validation_task_generator=torch.Generator().manual_seed(44),
+        neighbor_index=_NeighborIndex() if variant == "g1" else None,
     )
     batch_size = 4
     batch = {
@@ -164,13 +246,56 @@ def test_validation_task_sampling_does_not_consume_training_task_rng() -> None:
         "goal_future_end_row": torch.arange(batch_size, dtype=torch.int64) * 5 + 5,
         "_tdwm_matched_goal": torch.randn(batch_size, 192),
     }
-    training_state = task_generator.get_state().clone()
-    validation_state = validation_task_generator.get_state().clone()
+    observed_base: dict[str, torch.Tensor] = {}
 
-    module._forward_loss(batch, "validation")
+    def method_loss(td_batch, *args, stage, **kwargs):
+        del args, kwargs
+        observed_base[stage] = td_batch.td_loss.detach()
+        return td_batch.td_loss + 17.0, {}
 
-    assert torch.equal(task_generator.get_state(), training_state)
-    assert not torch.equal(validation_task_generator.get_state(), validation_state)
+    monkeypatch.setattr(module, "_method_loss", method_loss)
+    train_loss = module._forward_loss(batch, "train")
+    module.on_validation_epoch_start()
+    validation_loss = module._forward_loss(batch, "validation")
+
+    torch.testing.assert_allclose(train_loss, observed_base["train"] + 17.0)
+    torch.testing.assert_allclose(validation_loss, observed_base["validation"])
+
+
+def test_g1_validation_does_not_query_incomplete_training_anchor_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = _small_protocol("g1")
+    module = _build_v0_training_module(
+        _FrozenWorld(),
+        protocol,
+        total_steps=1,
+        spec=V0_SPECS["g1"],
+        data_generator=torch.Generator().manual_seed(50),
+        goal_generator=torch.Generator().manual_seed(51),
+        task_generator=torch.Generator().manual_seed(52),
+        neighbor_index=_NeighborIndex(),
+    )
+
+    def fail_neighbor_query(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("validation must not query a train-anchor-only index")
+
+    monkeypatch.setattr(module, "_score_neighbors", fail_neighbor_query)
+    per_td = torch.tensor([1.0, 2.0, 4.0])
+    td_batch = SimpleNamespace(td_loss=per_td.mean(), per_transition_td_loss=per_td)
+    loss, metrics = module._method_loss(
+        td_batch,
+        torch.randn(3, 192),
+        torch.randn(3, 25),
+        torch.randn(3, 192),
+        torch.ones(3, dtype=torch.bool),
+        torch.tensor([10, 20, 30]),
+        stage="validation",
+    )
+
+    torch.testing.assert_allclose(loss, td_batch.td_loss)
+    assert metrics["validation/neighbor_objective_available"].item() == 0.0
 
 
 def test_v0_deployment_contains_one_online_and_one_ema_target_predictor() -> None:
@@ -200,6 +325,39 @@ def test_v0_deployment_contains_one_online_and_one_ema_target_predictor() -> Non
     assert "target_predictor_state_dict" in payload
     assert "successor_state_dict" not in payload
     assert "actor_state_dict" not in payload
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_v0_formal_result_uses_the_epoch_10_deployment_export(
+    tmp_path: Path,
+    variant: str,
+) -> None:
+    checkpoint_path = _deployment_checkpoint_path(
+        tmp_path / f"seed_{3072}",
+        spec=V0_SPECS[variant],
+        epoch=10,
+    )
+
+    assert checkpoint_path == (
+        tmp_path
+        / "seed_3072"
+        / "checkpoints"
+        / f"actor_free_td_lewm_v0_{variant}"
+        / variant
+        / "epoch_10.pt"
+    )
+    assert checkpoint_path.name != "last.ckpt"
+
+    result_fields = _checkpoint_result_fields(
+        tmp_path / "seed_3072",
+        spec=V0_SPECS[variant],
+        deployment_epoch=10,
+    )
+    assert result_fields["deployment_checkpoint"] == str(checkpoint_path)
+    assert result_fields["last_checkpoint"].endswith(
+        "checkpoints/lightning/last.ckpt"
+    )
+    assert result_fields["deployment_checkpoint"] != result_fields["last_checkpoint"]
 
 
 def test_v0_protocol_rejects_parallel_heads_and_exact_half_sampling() -> None:
