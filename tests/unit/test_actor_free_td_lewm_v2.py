@@ -208,7 +208,10 @@ def test_hybrid_batch_uses_one_g_twice_and_one_detached_ema_target():
         batch.real_per_transition_td_loss
         + batch.predicted_per_transition_td_loss,
     )
-    assert batch.hybrid_td_loss == batch.real_td_loss + batch.predicted_td_loss
+    torch.testing.assert_close(
+        batch.hybrid_td_loss,
+        batch.real_td_loss + batch.predicted_td_loss,
+    )
     assert not batch.target.requires_grad
 
 
