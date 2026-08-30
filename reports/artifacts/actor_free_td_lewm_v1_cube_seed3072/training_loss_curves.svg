@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Arial,sans-serif;fill:#263238}.title{font-size:24px;font-weight:700}.sub{font-size:14px;fill:#58656f}.panel{font-size:17px;font-weight:700}.legend{font-size:13px}</style>
+<text class="title" x="640" y="36" text-anchor="middle">Actor-Free TD-JEPA V1 loss diagnostics</text>
+<text class="sub" x="640" y="62" text-anchor="middle">Train = method-specific objective; validation = common base TD. Formal O50 F+G is the ranking metric.</text>
+<text class="panel" x="342.0" y="91" text-anchor="middle">Train method objective</text>
+<text class="panel" x="938.0" y="91" text-anchor="middle">Validation common base TD</text>
+<rect x="82" y="108" width="520" height="390" fill="#fafafa" stroke="#b0bec5"/>
+<text x="82.00" y="522" text-anchor="middle" font-size="12">1</text>
+<text x="139.78" y="522" text-anchor="middle" font-size="12">2</text>
+<text x="197.56" y="522" text-anchor="middle" font-size="12">3</text>
+<text x="255.33" y="522" text-anchor="middle" font-size="12">4</text>
+<text x="313.11" y="522" text-anchor="middle" font-size="12">5</text>
+<text x="370.89" y="522" text-anchor="middle" font-size="12">6</text>
+<text x="428.67" y="522" text-anchor="middle" font-size="12">7</text>
+<text x="486.44" y="522" text-anchor="middle" font-size="12">8</text>
+<text x="544.22" y="522" text-anchor="middle" font-size="12">9</text>
+<text x="602.00" y="522" text-anchor="middle" font-size="12">10</text>
+<rect x="678" y="108" width="520" height="390" fill="#fafafa" stroke="#b0bec5"/>
+<text x="678.00" y="522" text-anchor="middle" font-size="12">1</text>
+<text x="735.78" y="522" text-anchor="middle" font-size="12">2</text>
+<text x="793.56" y="522" text-anchor="middle" font-size="12">3</text>
+<text x="851.33" y="522" text-anchor="middle" font-size="12">4</text>
+<text x="909.11" y="522" text-anchor="middle" font-size="12">5</text>
+<text x="966.89" y="522" text-anchor="middle" font-size="12">6</text>
+<text x="1024.67" y="522" text-anchor="middle" font-size="12">7</text>
+<text x="1082.44" y="522" text-anchor="middle" font-size="12">8</text>
+<text x="1140.22" y="522" text-anchor="middle" font-size="12">9</text>
+<text x="1198.00" y="522" text-anchor="middle" font-size="12">10</text>
+<polyline points="82.00,242.33 139.78,108.00 197.56,146.61 255.33,161.10 313.11,170.20 370.89,171.27 428.67,172.09 486.44,176.13 544.22,177.92 602.00,177.64" fill="none" stroke="#0072B2" stroke-width="2.2"/>
+<polyline points="678.00,108.00 735.78,239.39 793.56,342.86 851.33,380.83 909.11,397.15 966.89,407.60 1024.67,412.70 1082.44,415.68 1140.22,417.02 1198.00,417.13" fill="none" stroke="#0072B2" stroke-width="2.2"/>
+<line x1="145" y1="566" x2="171" y2="566" stroke="#0072B2" stroke-width="3"/>
+<text class="legend" x="178" y="571">C</text>
+<polyline points="82.00,498.00 139.78,495.63 197.56,494.76 255.33,494.65 313.11,494.72 370.89,494.86 428.67,494.93 486.44,494.99 544.22,494.95 602.00,494.97" fill="none" stroke="#D55E00" stroke-width="2.2"/>
+<polyline points="678.00,497.15 735.78,445.81 793.56,425.97 851.33,421.42 909.11,421.97 966.89,423.31 1024.67,424.20 1082.44,424.47 1140.22,424.00 1198.00,424.11" fill="none" stroke="#D55E00" stroke-width="2.2"/>
+<line x1="335" y1="566" x2="361" y2="566" stroke="#D55E00" stroke-width="3"/>
+<text class="legend" x="368" y="571">D</text>
+<polyline points="82.00,497.98 139.78,495.64 197.56,494.72 255.33,494.64 313.11,494.69 370.89,494.79 428.67,494.85 486.44,494.95 544.22,494.92 602.00,494.94" fill="none" stroke="#009E73" stroke-width="2.2"/>
+<polyline points="678.00,498.00 735.78,446.08 793.56,424.63 851.33,420.92 909.11,420.61 966.89,422.17 1024.67,423.12 1082.44,423.24 1140.22,422.90 1198.00,422.85" fill="none" stroke="#009E73" stroke-width="2.2"/>
+<line x1="525" y1="566" x2="551" y2="566" stroke="#009E73" stroke-width="3"/>
+<text class="legend" x="558" y="571">F</text>
+<polyline points="82.00,496.61 139.78,493.83 197.56,493.42 255.33,493.53 313.11,493.69 370.89,493.85 428.67,493.99 486.44,494.01 544.22,494.06 602.00,494.06" fill="none" stroke="#CC79A7" stroke-width="2.2"/>
+<polyline points="678.00,464.84 735.78,426.98 793.56,426.43 851.33,424.45 909.11,425.21 966.89,426.80 1024.67,427.03 1082.44,428.39 1140.22,427.03 1198.00,427.52" fill="none" stroke="#CC79A7" stroke-width="2.2"/>
+<line x1="715" y1="566" x2="741" y2="566" stroke="#CC79A7" stroke-width="3"/>
+<text class="legend" x="748" y="571">G1</text>
+<polyline points="82.00,496.13 139.78,494.13 197.56,494.59 255.33,494.85 313.11,494.75 370.89,494.27 428.67,493.85 486.44,493.44 544.22,493.13 602.00,493.00" fill="none" stroke="#E69F00" stroke-width="2.2"/>
+<polyline points="678.00,479.35 735.78,426.64 793.56,427.80 851.33,432.35 909.11,432.22 966.89,431.92 1024.67,430.14 1082.44,430.19 1140.22,429.73 1198.00,429.69" fill="none" stroke="#E69F00" stroke-width="2.2"/>
+<line x1="905" y1="566" x2="931" y2="566" stroke="#E69F00" stroke-width="3"/>
+<text class="legend" x="938" y="571">G2</text>
+<polyline points="82.00,496.05 139.78,494.70 197.56,494.99 255.33,495.25 313.11,495.20 370.89,494.78 428.67,493.90 486.44,493.16 544.22,492.57 602.00,492.58" fill="none" stroke="#56B4E9" stroke-width="2.2"/>
+<polyline points="678.00,467.90 735.78,428.19 793.56,434.13 851.33,434.17 909.11,433.88 966.89,432.59 1024.67,431.45 1082.44,428.75 1140.22,429.18 1198.00,429.03" fill="none" stroke="#56B4E9" stroke-width="2.2"/>
+<line x1="1095" y1="566" x2="1121" y2="566" stroke="#56B4E9" stroke-width="3"/>
+<text class="legend" x="1128" y="571">G3</text>
+<text class="sub" x="640" y="603" text-anchor="middle">Curves diagnose convergence; their heights are not a cross-method performance ranking.</text>
+</svg>

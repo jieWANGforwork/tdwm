@@ -16,8 +16,11 @@ from tdwm.training.frozen_actor_free_td_v1 import (
     V1_SPECS,
     _build_v1_training_module,
     _checkpoint_result_fields,
+    _cuda_runtime_provenance,
     _deployment_checkpoint_path,
     _deployment_payload,
+    _record_peak_cuda_memory,
+    _reset_peak_cuda_memory,
     _validate_v1_resume_manifest,
     load_actor_free_td_lewm_v1_training_protocol,
     validate_actor_free_td_lewm_v1_training_protocol,
@@ -110,11 +113,72 @@ def _training_batch(batch_size: int = 4) -> dict[str, torch.Tensor]:
         "next_action": torch.randn(batch_size, 25),
         "terminal": torch.zeros(batch_size, dtype=torch.bool),
         "global_row": torch.arange(batch_size, dtype=torch.int64) * 5 + 100,
-        "goal_future_end_row": (
-            torch.arange(batch_size, dtype=torch.int64) * 5 + 105
-        ),
+        "goal_future_end_row": (torch.arange(batch_size, dtype=torch.int64) * 5 + 105),
         "_tdwm_matched_goal": torch.randn(batch_size, 192),
     }
+
+
+def test_v1_cuda_provenance_uses_one_explicit_current_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, torch.device] = {}
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 3)
+
+    def get_device_name(device: torch.device) -> str:
+        seen["name"] = device
+        return "Audit GPU"
+
+    def reset_peak_memory_stats(device: torch.device) -> None:
+        seen["reset"] = device
+
+    def max_memory_allocated(device: torch.device) -> int:
+        seen["peak"] = device
+        return 12_345_678
+
+    monkeypatch.setattr(torch.cuda, "get_device_name", get_device_name)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", reset_peak_memory_stats)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", max_memory_allocated)
+
+    device, runtime = _cuda_runtime_provenance()
+    result: dict = {}
+    _reset_peak_cuda_memory(device)
+    _record_peak_cuda_memory(result, device)
+
+    expected_device = torch.device("cuda", 3)
+    assert device == expected_device
+    assert runtime == {"cuda_device": "Audit GPU"}
+    assert result == {"peak_cuda_memory_bytes": 12_345_678}
+    assert seen == {
+        "name": expected_device,
+        "reset": expected_device,
+        "peak": expected_device,
+    }
+
+
+def test_v1_cuda_provenance_omits_gpu_fields_on_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(
+        torch.cuda,
+        "reset_peak_memory_stats",
+        lambda *_args, **_kwargs: pytest.fail("CPU provenance must not reset CUDA"),
+    )
+    monkeypatch.setattr(
+        torch.cuda,
+        "max_memory_allocated",
+        lambda *_args, **_kwargs: pytest.fail("CPU provenance must not query CUDA"),
+    )
+
+    device, runtime = _cuda_runtime_provenance()
+    result: dict = {}
+    _reset_peak_cuda_memory(device)
+    _record_peak_cuda_memory(result, device)
+
+    assert device is None
+    assert runtime == {}
+    assert result == {}
 
 
 def _resume_fixture() -> tuple[dict, dict, dict, dict]:
@@ -252,9 +316,7 @@ def test_v1_variants_train_only_the_single_predictor_from_frozen_inputs(
     assert torch.isfinite(loss)
     assert world.encode_calls == 0
     assert len(world.action_encoder.seen) == (3 if variant in {"g1", "g2", "g3"} else 2)
-    assert torch.equal(
-        world.action_encoder.seen[0], batch["action"].reshape(-1, 1, 25)
-    )
+    assert torch.equal(world.action_encoder.seen[0], batch["action"].reshape(-1, 1, 25))
     assert torch.equal(
         world.action_encoder.seen[1], batch["next_action"].reshape(-1, 1, 25)
     )
@@ -263,7 +325,9 @@ def test_v1_variants_train_only_the_single_predictor_from_frozen_inputs(
     assert all(
         parameter.grad is None for parameter in module.target_predictor.parameters()
     )
-    assert any(parameter.grad is not None for parameter in module.predictor.parameters())
+    assert any(
+        parameter.grad is not None for parameter in module.predictor.parameters()
+    )
     assert not hasattr(module.predictor, "heads")
     assert not hasattr(module.predictor, "num_parallel")
     optimizer.step()
@@ -301,9 +365,7 @@ def test_current_and_dataset_next_actions_share_one_frozen_encoder() -> None:
 
     assert world.action_encoder is module.model.action_encoder
     assert len(world.action_encoder.seen) == 2
-    assert torch.equal(
-        world.action_encoder.seen[0], batch["action"].reshape(-1, 1, 25)
-    )
+    assert torch.equal(world.action_encoder.seen[0], batch["action"].reshape(-1, 1, 25))
     assert torch.equal(
         world.action_encoder.seen[1], batch["next_action"].reshape(-1, 1, 25)
     )
@@ -315,9 +377,9 @@ def test_current_and_dataset_next_actions_share_one_frozen_encoder() -> None:
 
 def test_g1_encodes_retrieved_raw_neighbor_blocks_before_scoring() -> None:
     batch_size, candidates = 3, 2
-    neighbors = torch.arange(
-        batch_size * candidates * 25, dtype=torch.float32
-    ).reshape(batch_size, candidates, 25)
+    neighbors = torch.arange(batch_size * candidates * 25, dtype=torch.float32).reshape(
+        batch_size, candidates, 25
+    )
     index = _NeighborIndex(neighbors)
     world = _FrozenWorld()
     module = _build_v1_training_module(
@@ -369,9 +431,7 @@ def test_prefix_variants_build_raw_zero_suffixes_before_nonlinear_encoding(
     module._forward_loss(batch, "train")
 
     raw_prefixes = build_zero_mean_action_prefixes(batch["action"])
-    assert torch.equal(
-        world.action_encoder.seen[-1], raw_prefixes.reshape(-1, 1, 25)
-    )
+    assert torch.equal(world.action_encoder.seen[-1], raw_prefixes.reshape(-1, 1, 25))
     assert predictor_actions[-1].shape == (2, 5, 192)
     assert torch.equal(
         predictor_actions[-1],
@@ -381,9 +441,7 @@ def test_prefix_variants_build_raw_zero_suffixes_before_nonlinear_encoding(
 
 def test_v1_checkpoint_round_trip_records_training_and_validation_rng_streams() -> None:
     protocol = _small_protocol("c")
-    generators = [
-        torch.Generator().manual_seed(seed) for seed in (21, 22, 23, 24, 25)
-    ]
+    generators = [torch.Generator().manual_seed(seed) for seed in (21, 22, 23, 24, 25)]
     module = _build_v1_training_module(
         _FrozenWorld(),
         protocol,
@@ -447,9 +505,7 @@ def test_validation_goal_and_task_streams_reset_to_one_fixed_epoch_population(
         del store, future_end_rows
         seen_goal_generators.append(generator)
         draws = torch.rand(len(global_rows), generator=generator)
-        return SimpleNamespace(
-            latents=draws[:, None].expand(-1, 192).to(device=device)
-        )
+        return SimpleNamespace(latents=draws[:, None].expand(-1, 192).to(device=device))
 
     monkeypatch.setattr(
         "tdwm.training.frozen_actor_free_td_v1.sample_reachable_future_latents_v1",
@@ -610,15 +666,11 @@ def test_v1_deployment_contains_one_online_and_one_ema_target_predictor() -> Non
     assert "actor_state_dict" not in payload
     assert "action_encoder_state_dict" not in payload
     assert any(
-        key.startswith("action_encoder.")
-        for key in payload["world_model_state_dict"]
+        key.startswith("action_encoder.") for key in payload["world_model_state_dict"]
     )
+    assert all("action_encoder" not in key for key in payload["predictor_state_dict"])
     assert all(
-        "action_encoder" not in key for key in payload["predictor_state_dict"]
-    )
-    assert all(
-        "action_encoder" not in key
-        for key in payload["target_predictor_state_dict"]
+        "action_encoder" not in key for key in payload["target_predictor_state_dict"]
     )
 
 
@@ -649,9 +701,7 @@ def test_v1_formal_result_uses_the_epoch_10_deployment_export(
         deployment_epoch=10,
     )
     assert result_fields["deployment_checkpoint"] == str(checkpoint_path)
-    assert result_fields["last_checkpoint"].endswith(
-        "checkpoints/lightning/last.ckpt"
-    )
+    assert result_fields["last_checkpoint"].endswith("checkpoints/lightning/last.ckpt")
     assert result_fields["deployment_checkpoint"] != result_fields["last_checkpoint"]
 
 
@@ -660,16 +710,12 @@ def test_v1_protocol_rejects_parallel_heads_and_exact_half_sampling() -> None:
     parallel = deepcopy(protocol)
     parallel["predictor"]["num_parallel"] = 2
     with pytest.raises(ValueError, match="num_parallel"):
-        validate_actor_free_td_lewm_v1_training_protocol(
-            parallel, spec=V1_SPECS["c"]
-        )
+        validate_actor_free_td_lewm_v1_training_protocol(parallel, spec=V1_SPECS["c"])
 
     exact_half = deepcopy(protocol)
     exact_half["task_sampling"]["sampling"] = "exact_half"
     with pytest.raises(ValueError, match="sampling"):
-        validate_actor_free_td_lewm_v1_training_protocol(
-            exact_half, spec=V1_SPECS["c"]
-        )
+        validate_actor_free_td_lewm_v1_training_protocol(exact_half, spec=V1_SPECS["c"])
 
 
 def test_v1_protocol_locks_transition_minibatches() -> None:
@@ -689,9 +735,7 @@ def test_v1_protocol_locks_transition_minibatches() -> None:
     clip_batch = deepcopy(protocol)
     clip_batch["loader"]["sampling_unit"] = "sequence_clip"
     with pytest.raises(ValueError, match="sampling_unit"):
-        validate_actor_free_td_lewm_v1_training_protocol(
-            clip_batch, spec=V1_SPECS["f"]
-        )
+        validate_actor_free_td_lewm_v1_training_protocol(clip_batch, spec=V1_SPECS["f"])
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -710,6 +754,4 @@ def test_v1_protocol_locks_default_tdjepa_forward_map_widths() -> None:
     changed = deepcopy(protocol)
     changed["predictor"]["hidden_dim"] = 512
     with pytest.raises(ValueError, match="predictor.hidden_dim"):
-        validate_actor_free_td_lewm_v1_training_protocol(
-            changed, spec=V1_SPECS["c"]
-        )
+        validate_actor_free_td_lewm_v1_training_protocol(changed, spec=V1_SPECS["c"])

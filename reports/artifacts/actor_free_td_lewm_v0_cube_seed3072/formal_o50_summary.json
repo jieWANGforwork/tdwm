@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "study": {
+    "method_family": "actor_free_td_lewm_v0",
+    "source_root": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v0_cg3_79706d3_20260830",
+    "training_commit": "79706d3",
+    "training_seed": 3072,
+    "planning_seed": 42,
+    "episodes_per_evaluation": 50,
+    "goal_offset": 50,
+    "score_modes": [
+      "f_only",
+      "g_only",
+      "f_plus_g"
+    ]
+  },
+  "selection": {
+    "sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7"
+  },
+  "methods": {
+    "c": {
+      "f_only": {
+        "success_count": 23,
+        "success_rate_percent": 46.0,
+        "planning_horizon": 5,
+        "results_sha256": "aafd43fb55022ca8323b5049b8ea2eb4d42cfda243ddac00a1c7c2521f8d53d6"
+      },
+      "g_only": {
+        "success_count": 18,
+        "success_rate_percent": 36.0,
+        "planning_horizon": 1,
+        "results_sha256": "02cc364ce30e5150b57d655190e91444e995e1dd9e28f636ce7ddded7ecc409c"
+      },
+      "f_plus_g": {
+        "success_count": 24,
+        "success_rate_percent": 48.0,
+        "planning_horizon": 5,
+        "results_sha256": "b20bc3acde08dcde9a0a87d9edda16289a721ee80dfd6cc0c86662802264e332"
+      }
+    },
+    "d": {
+      "f_only": {
+        "success_count": 23,
+        "success_rate_percent": 46.0,
+        "planning_horizon": 5,
+        "results_sha256": "750226b565637a6b6e66badeebe92e1160bc6182bd97f5ebf935f1a010cbb17a"
+      },
+      "g_only": {
+        "success_count": 20,
+        "success_rate_percent": 40.0,
+        "planning_horizon": 1,
+        "results_sha256": "07a6ed4fb16a731126ec07c96a10bbbc5b99a29534efa2412bd80d4f862e3faa"
+      },
+      "f_plus_g": {
+        "success_count": 21,
+        "success_rate_percent": 42.0,
+        "planning_horizon": 5,
+        "results_sha256": "586159f4e5d363ec55052a6124dfee2323bea4c160b05c81ee0234a5a4a56482"
+      }
+    },
+    "f": {
+      "f_only": {
+        "success_count": 23,
+        "success_rate_percent": 46.0,
+        "planning_horizon": 5,
+        "results_sha256": "c686e8e96feef4e22bad012dc3f87baab2debaae82892a11ddcfdbcc27918539"
+      },
+      "g_only": {
+        "success_count": 19,
+        "success_rate_percent": 38.0,
+        "planning_horizon": 1,
+        "results_sha256": "6aaa8a0527c76fd90b49666dedcdc29bdd3c99f22b9a74528689d5eda6d66ef7"
+      },
+      "f_plus_g": {
+        "success_count": 20,
+        "success_rate_percent": 40.0,
+        "planning_horizon": 5,
+        "results_sha256": "fe41e887c2376fbd0ce2cf03bfeaca3d34f64d2fb92521762c3b6932413a42c0"
+      }
+    },
+    "g1": {
+      "f_only": {
+        "success_count": 23,
+        "success_rate_percent": 46.0,
+        "planning_horizon": 5,
+        "results_sha256": "a1cec654116258663c316d90df811f1f7667842cc64764d98472cde099e22ebd"
+      },
+      "g_only": {
+        "success_count": 16,
+        "success_rate_percent": 32.0,
+        "planning_horizon": 1,
+        "results_sha256": "6a9e095f3fdf10cc547ea768ef9c633f79ddb3ab5559c30fec47f82401997c4f"
+      },
+      "f_plus_g": {
+        "success_count": 25,
+        "success_rate_percent": 50.0,
+        "planning_horizon": 5,
+        "results_sha256": "8349fd824acc88115becfa10f6568e108734e6f7f8c53cfe5c16715cc06d9dc3"
+      }
+    },
+    "g2": {
+      "f_only": {
+        "success_count": 23,
+        "success_rate_percent": 46.0,
+        "planning_horizon": 5,
+        "results_sha256": "f8240bfeb12a9f8c38705b30dea47a33bff2f5d274a963bbab3a26f56ae86ec3"
+      },
+      "g_only": {
+        "success_count": 16,
+        "success_rate_percent": 32.0,
+        "planning_horizon": 1,
+        "results_sha256": "767429796fe083ea362a9f4579d7f58f2c34368f24adf8d4be57af5b7b9c2c1d"
+      },
+      "f_plus_g": {
+        "success_count": 25,
+        "success_rate_percent": 50.0,
+        "planning_horizon": 5,
+        "results_sha256": "24785eb30b1aa67bacec8b5c744db85a1fcdc0cc24d78f52c056fa42020ba50c"
+      }
+    },
+    "g3": {
+      "f_only": {
+        "success_count": 23,
+        "success_rate_percent": 46.0,
+        "planning_horizon": 5,
+        "results_sha256": "2b4da032a5f1abb133dd9070c6e18ecec1250e6a87819219cd05d6a9b69f7f70"
+      },
+      "g_only": {
+        "success_count": 18,
+        "success_rate_percent": 36.0,
+        "planning_horizon": 1,
+        "results_sha256": "88945109b695e178ecd80a4e0dab05f6a0bfbd2d8310144cab5575d3d44dc34d"
+      },
+      "f_plus_g": {
+        "success_count": 23,
+        "success_rate_percent": 46.0,
+        "planning_horizon": 5,
+        "results_sha256": "bc6a79b80897c3c0f11cec9359a974e5262ddcb394bab26cc062906657b59a4f"
+      }
+    }
+  }
+}

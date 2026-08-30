@@ -1,6 +1,6 @@
 # TDWM 实验结果总览
 
-最后更新：2026-08-29（Asia/Shanghai）
+最后更新：2026-08-31（Asia/Shanghai）
 
 本目录汇总当前仓库报告、趋动云下载结果和本地 3090 服务器下载结果。大型日志、数据、
 视频和 checkpoint 不进入 Git；本地轻量原始文件位于被 Git 忽略的
@@ -11,24 +11,19 @@
 [`artifacts/aligned_acd_o50_seed3072/`](artifacts/aligned_acd_o50_seed3072/README.md)：
 它只含 start/goal 索引、成功布尔值、哈希和 provenance，不含数据、模型或原始日志。
 
-Actor-Free TD-LeWM 的 7 方法 × 3 score-mode 比较采用同样的轻量归档原则，但正式归档
-只允许由完整服务器 bundle 自动生成。收集入口为
-`scripts/archive_actor_free_td_lewm_o50.py`；它要求每个方法提供原始训练 JSON/metrics，
-以及每种 score mode 的 `results.json`、`protocol_manifest.json` 和
-`episode_selection.json`。训练摘要和曲线不是人工文件：归档器直接读取每个方法原始的
-`training_result.json`、`training_manifest.json` 与 Lightning `metrics.csv`，自行计算哈希、
-10-epoch aggregate 和最终/最佳 validation。在 21 个正式 O50 全部通过一致性检查以前，
-不在本 README 手工填写或排名尚未完成的数值。
-七个训练 manifest 的完整 protocol 必须分别匹配对应的锁定 YAML；训练 split 的
-train/validation 样本数及两个索引 SHA-256 必须一致，run-specific 绝对路径不进入指纹。
-完整输入格式见
-[`docs/actor_free_td_lewm_result_bundle.md`](../docs/actor_free_td_lewm_result_bundle.md)。
+Actor-Free TD-LeWM 目前有三组必须分开解释的正式记录：
 
-归档器还锁定固定 seed-42 selection 的规范 SHA-256，并核对 21 个运行的正式协议、关键
-runtime、数据格式/大小/转换来源、action normalization 和参数量指纹；`solver` 与
-`history_len` 也属于 planning 锁。它会生成统一曲线 CSV 和可嵌入文档的 SVG。由于 7 个
-方法的辅助 loss 数量与定义不同，total loss 曲线只用于检查各方法自身的收敛情况，不能
-用曲线高低做跨方法排名。
+| 记录 | 正式范围 | 报告 / 轻量证据 |
+| --- | --- | --- |
+| 较早结构消融 | 7 methods × 3 scores = 21 O50 | [`actor_free_td_lewm_cube_seed3072.md`](actor_free_td_lewm_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_cube_seed3072/`](artifacts/actor_free_td_lewm_cube_seed3072/README.md) |
+| C–G3 raw-action V0 | 6 methods × 3 scores = 18 O50 | [`actor_free_td_lewm_v0_v1_cube_seed3072.md`](actor_free_td_lewm_v0_v1_cube_seed3072.md) / [`formal_o50_summary.json`](artifacts/actor_free_td_lewm_v0_cube_seed3072/formal_o50_summary.json) |
+| C–G3 action-encoder V1 | 6 methods × 3 scores = 18 O50 | [`actor_free_td_lewm_v1_cube_seed3072.md`](actor_free_td_lewm_v1_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_v1_cube_seed3072/`](artifacts/actor_free_td_lewm_v1_cube_seed3072/README.md) |
+
+旧 7-method bundle 由 `scripts/archive_actor_free_td_lewm_o50.py` 审计；V1 bundle 由
+`scripts/archive_actor_free_td_lewm_v1_o50.py` 审计。两者都从原始训练/评测 JSON、metrics
+和逐 episode outcome 生成，不接受人工补齐结果。C–G3 V0 的 compact index 还记录了 18 个
+服务器 raw `results.json` 的 SHA-256。三组都只有一个 training seed；V0/V1 虽使用同一
+selection，但网络 action 表示和参数量不同，不能把单组百分比解释为多 seed 总体优劣。
 
 ## 结论边界
 
@@ -311,16 +306,16 @@ loss `0.16631`、prediction loss `0.03154`、SIGReg `1.34375`；当时验证约�
 | [`e2e_joint_td_gt_lewm_cube_seed3072.md`](e2e_joint_td_gt_lewm_cube_seed3072.md) | E2E 负结果、配对统计和 formulation 偏差审计 |
 | [`aligned_acd_cube_o50_seed3072_planning_seeds42_47.md`](aligned_acd_cube_o50_seed3072_planning_seeds42_47.md) | 六组 planning selections、300-episode A/C/D 消融和机器可读归档 |
 | [`aligned_e2e_mc_gt_lewm_cube_seed3072.md`](aligned_e2e_mc_gt_lewm_cube_seed3072.md) | planning seed 42 的单次 62%/54% 历史结果与复现信息 |
+| [`actor_free_td_lewm_cube_seed3072.md`](actor_free_td_lewm_cube_seed3072.md) | 较早的 7-method × 3-score Actor-Free TD-LeWM 正式消融 |
+| [`actor_free_td_lewm_v0_v1_cube_seed3072.md`](actor_free_td_lewm_v0_v1_cube_seed3072.md) | C–G3 raw-action V0 与 action-encoder V1 的共同 6×3 对照 |
+| [`actor_free_td_lewm_v1_cube_seed3072.md`](actor_free_td_lewm_v1_cube_seed3072.md) | V1 六法训练、18 个 O50、方法/loss/推理定义与审计边界 |
 | [`baseline_tdmpc2_cartpole.md`](baseline_tdmpc2_cartpole.md) | TD-MPC2 CartPole sparse/dense 诊断 |
 | [`baseline_lewm_pusht_training.md`](baseline_lewm_pusht_training.md) | 未完成的 PushT 过渡训练记录 |
 | [`server_experiment_index.md`](server_experiment_index.md) | 趋动云日志和轻量 artifact 索引 |
 | [`server_3090_experiment_index.md`](server_3090_experiment_index.md) | 3090 日志、训练和评测 artifact 索引 |
 | [`world_model_research_review.md`](world_model_research_review.md) | 研究背景和方法边界，不是实验结果 |
 
-完整 7×3 bundle 到齐后，归档器还会生成
-`reports/actor_free_td_lewm_cube_seed3072.md` 与
-`reports/artifacts/actor_free_td_lewm_cube_seed3072/`。这两个路径在当前输入不完整时不会
-由脚本创建，以免把 fixture、旧 combined 单列或运行中快照误写成正式结果。
+7×3 legacy bundle 和 6×3 V1 bundle 均已完成正式归档；版本化报告与 artifact 路径见上表。
 
 ## 当前总体判断
 

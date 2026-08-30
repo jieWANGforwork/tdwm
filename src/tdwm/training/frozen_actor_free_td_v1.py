@@ -118,6 +118,32 @@ def _canonical_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _cuda_runtime_provenance() -> tuple[torch.device | None, dict[str, str]]:
+    """Return the exact CUDA device used by one future V1 training run."""
+
+    if not torch.cuda.is_available():
+        return None, {}
+    device = torch.device("cuda", torch.cuda.current_device())
+    return device, {"cuda_device": torch.cuda.get_device_name(device)}
+
+
+def _reset_peak_cuda_memory(device: torch.device | None) -> None:
+    """Start peak-allocation accounting without affecting CPU runs."""
+
+    if device is not None:
+        torch.cuda.reset_peak_memory_stats(device)
+
+
+def _record_peak_cuda_memory(
+    result: dict[str, Any],
+    device: torch.device | None,
+) -> None:
+    """Attach the observed CUDA allocation peak using the project schema."""
+
+    if device is not None:
+        result["peak_cuda_memory_bytes"] = int(torch.cuda.max_memory_allocated(device))
+
+
 def _validate_v1_resume_manifest(
     previous: dict[str, Any],
     *,
@@ -141,13 +167,11 @@ def _validate_v1_resume_manifest(
         == DEPLOYMENT_CHECKPOINT_VERSION
         and previous.get("protocol_sha256") == protocol_sha256
         and previous.get("seed") == seed
-        and previous.get("dataset", {}).get("split", {}).get(
-            "train_indices_sha256"
-        )
+        and previous.get("dataset", {}).get("split", {}).get("train_indices_sha256")
         == split_manifest.get("train_indices_sha256")
-        and previous.get("dataset", {}).get("split", {}).get(
-            "validation_indices_sha256"
-        )
+        and previous.get("dataset", {})
+        .get("split", {})
+        .get("validation_indices_sha256")
         == split_manifest.get("validation_indices_sha256")
     )
     previous_initialization = previous.get("model", {}).get("initialization", {})
@@ -353,9 +377,7 @@ def validate_actor_free_td_lewm_v1_training_protocol(
         "g1": {
             "objective": "neighbor_action_advantage",
             "score_source": "detached_online_predictor",
-            "candidate_source": (
-                "other_episode_frozen_latent_knn_real_action_blocks"
-            ),
+            "candidate_source": ("other_episode_frozen_latent_knn_real_action_blocks"),
             "goal_subset_weighting": "softmax_mean_one",
         },
         "g2": {
@@ -400,9 +422,7 @@ def validate_actor_free_td_lewm_v1_training_protocol(
     loader_lock = {
         "batch_size": 256,
         "sampling_unit": "transition",
-        "transition_population": (
-            "unique_legal_td_rows_from_exact_clip_split"
-        ),
+        "transition_population": ("unique_legal_td_rows_from_exact_clip_split"),
         "train_sampling": "random_with_replacement",
         "validation_sampling": "sequential_without_replacement",
         "frozen_latent_mmap": True,
@@ -441,7 +461,9 @@ def validate_actor_free_td_lewm_v1_training_protocol(
     try:
         weight_decay = float(optimizer["weight_decay"])
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("optimizer.weight_decay must be finite and non-negative.") from error
+        raise ValueError(
+            "optimizer.weight_decay must be finite and non-negative."
+        ) from error
     if not math.isfinite(weight_decay) or weight_decay < 0.0:
         raise ValueError("optimizer.weight_decay must be finite and non-negative.")
     scheduler = protocol.get("scheduler", {})
@@ -484,7 +506,9 @@ def _build_v1_training_module(
             super().__init__()
             self.model = world_model.requires_grad_(False)
             self.model.eval()
-            if not isinstance(getattr(self.model, "action_encoder", None), torch.nn.Module):
+            if not isinstance(
+                getattr(self.model, "action_encoder", None), torch.nn.Module
+            ):
                 raise ValueError("V1 requires world_model.action_encoder.")
             validate_frozen_lewm_action_encoder_v1(self.model.action_encoder)
             cfg = protocol["predictor"]
@@ -548,12 +572,8 @@ def _build_v1_training_module(
             data_state = checkpoint.get("v1_data_generator_state")
             goal_state = checkpoint.get("v1_goal_generator_state")
             task_state = checkpoint.get("v1_task_generator_state")
-            validation_goal_state = checkpoint.get(
-                "v1_validation_goal_generator_state"
-            )
-            validation_task_state = checkpoint.get(
-                "v1_validation_task_generator_state"
-            )
+            validation_goal_state = checkpoint.get("v1_validation_goal_generator_state")
+            validation_task_state = checkpoint.get("v1_validation_task_generator_state")
             validation_goal_epoch_state = checkpoint.get(
                 "v1_validation_goal_epoch_state"
             )
@@ -677,9 +697,7 @@ def _build_v1_training_module(
                     task,
                     goal_mask,
                     per_td,
-                    projection_coefficient=float(
-                        objective["goal_projection_weight"]
-                    ),
+                    projection_coefficient=float(objective["goal_projection_weight"]),
                 )
                 metrics = {
                     f"{stage}/goal_projection_loss": output.projection_loss.detach(),
@@ -769,9 +787,7 @@ def _build_v1_training_module(
                 )
                 metric_name = "prefix_marginal_advantage_mean"
             return output.loss, {
-                f"{stage}/{metric_name}": _mean_or_zero(
-                    output.advantage, output.loss
-                ),
+                f"{stage}/{metric_name}": _mean_or_zero(output.advantage, output.loss),
                 f"{stage}/weight_mean": output.weights.mean(),
                 f"{stage}/weight_std": output.weights.std(unbiased=False),
             }
@@ -800,7 +816,9 @@ def _build_v1_training_module(
                 if batch_size is None:
                     batch_size = int(value.shape[0])
                 elif value.shape[0] != batch_size:
-                    raise RuntimeError("V1 transition fields have different batch sizes.")
+                    raise RuntimeError(
+                        "V1 transition fields have different batch sizes."
+                    )
                 tensors[name] = value
             assert batch_size is not None
             terminal = batch.get("terminal")
@@ -825,10 +843,9 @@ def _build_v1_training_module(
                     raise RuntimeError(f"V1 {name} must be an integer [B] tensor.")
             if self.latent_store is None:
                 matched_goals = batch.get("_tdwm_matched_goal")
-                if (
-                    not isinstance(matched_goals, torch.Tensor)
-                    or matched_goals.shape != (batch_size, V1_TASK_DIM)
-                ):
+                if not isinstance(
+                    matched_goals, torch.Tensor
+                ) or matched_goals.shape != (batch_size, V1_TASK_DIM):
                     raise RuntimeError(
                         "V1 requires its frozen latent store to sample real goals."
                     )
@@ -1038,9 +1055,7 @@ def _checkpoint_result_fields(
     deployment_epoch: int,
 ) -> dict[str, str]:
     return {
-        "last_checkpoint": str(
-            run_dir / "checkpoints" / "lightning" / "last.ckpt"
-        ),
+        "last_checkpoint": str(run_dir / "checkpoints" / "lightning" / "last.ckpt"),
         "deployment_checkpoint": str(
             _deployment_checkpoint_path(
                 run_dir,
@@ -1109,9 +1124,7 @@ def train_actor_free_td_lewm_v1(
 ) -> dict[str, Any]:
     """Train one V1 method from the same audited frozen LeWM artifacts."""
 
-    protocol = load_actor_free_td_lewm_v1_training_protocol(
-        protocol_path, spec=spec
-    )
+    protocol = load_actor_free_td_lewm_v1_training_protocol(protocol_path, spec=spec)
     if seed not in protocol["seeds"]:
         raise ValueError(f"Seed {seed} is not in {protocol['seeds']}.")
     if resume not in {"auto", "never", "required"}:
@@ -1253,9 +1266,10 @@ def train_actor_free_td_lewm_v1(
             expected_action_block_dim=V1_RAW_ACTION_DIM,
             expected_k=int(protocol["joint_objective"]["neighbors_per_anchor"]),
         )
-        if neighbor_index.manifest.get("training_split_sha256") != split_manifest[
-            "train_indices_sha256"
-        ]:
+        if (
+            neighbor_index.manifest.get("training_split_sha256")
+            != split_manifest["train_indices_sha256"]
+        ):
             raise ValueError("V1 G1 neighbor index uses another training split.")
         neighbor_info = {
             "path": str(Path(neighbor_index_path).expanduser().resolve()),
@@ -1379,6 +1393,7 @@ def train_actor_free_td_lewm_v1(
         )
         checkpoint_path = str(last_checkpoint)
 
+    cuda_device, cuda_runtime = _cuda_runtime_provenance()
     runtime = {
         "stable_worldmodel": version,
         "torch": torch.__version__,
@@ -1386,6 +1401,7 @@ def train_actor_free_td_lewm_v1(
         "platform": platform.platform(),
         "tdwm_git_revision": _git_revision(),
         "compatibility_adapter": compatibility,
+        **cuda_runtime,
     }
     manifest = {
         "method": spec.method,
@@ -1467,6 +1483,7 @@ def train_actor_free_td_lewm_v1(
             callbacks=callbacks,
             log_every_n_steps=1 if smoke else 50,
         )
+    _reset_peak_cuda_memory(cuda_device)
     trainer.fit(
         module,
         train_dataloaders=train_loader,
@@ -1503,6 +1520,7 @@ def train_actor_free_td_lewm_v1(
     }
     if neighbor_info is not None:
         result["neighbor_index_manifest_sha256"] = neighbor_info["manifest_sha256"]
+    _record_peak_cuda_memory(result, cuda_device)
     write_json(run_dir / "training_result.json", result)
     return result
 

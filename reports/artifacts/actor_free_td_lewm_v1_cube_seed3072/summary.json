@@ -1,0 +1,1414 @@
+{
+  "architecture": {
+    "action_embedding_dim": 192,
+    "action_encoder_state_sha256": "2657b55140013b4b071cd8cdea63f1eac5c65c498d55331c7499744ef31a9cd3",
+    "action_processing": "raw25_to_frozen_world_model.action_encoder_to_embedding192",
+    "actor": "none",
+    "lewm_frozen": true,
+    "output_dim": 192,
+    "predictor_parameters": 379072,
+    "pretrained_world_model_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+    "raw_action_dim": 25,
+    "reward": "none",
+    "shared_action_encoder_frozen": true,
+    "state_dim": 192,
+    "task_dim": 192,
+    "trainable_lewm_parameters": 0,
+    "world_model_parameters": 18034628
+  },
+  "methods": {
+    "c": {
+      "combined_minus_f_only_percentage_points": -2.0000000000000018,
+      "display_name": "V1-C Goal-Projected TD",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/c/seed_3072/checkpoints/actor_free_td_lewm_v1_c/c/epoch_10.pt",
+          "checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+          "configured_protocol_canonical_sha256": "e3dc305ebd2e625b15d87f0f7ba68ef40be57225b3500fc33c18d802cc8aa65b",
+          "elapsed_seconds": 1358.809693813324,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "d95a33b26fa9d20fa27fa7713465c21d688112318209ec9e8d57a3818d52a0cd",
+          "planning_horizon": 5,
+          "score_mode": "f_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "63ca2c05148df552b9abceb10726acb8b5e7fa5e3fb52baaac72e11e935c2749",
+            "results.json": "50d3b11229f1986b33eb9a529bda4983a235f8280792b451a1dafa933ee2f97f"
+          },
+          "success_count": 23,
+          "success_rate": 0.46,
+          "successes": 23
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/c/seed_3072/checkpoints/actor_free_td_lewm_v1_c/c/epoch_10.pt",
+          "checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+          "configured_protocol_canonical_sha256": "d95a33b26fa9d20fa27fa7713465c21d688112318209ec9e8d57a3818d52a0cd",
+          "elapsed_seconds": 1383.1768493652344,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "d95a33b26fa9d20fa27fa7713465c21d688112318209ec9e8d57a3818d52a0cd",
+          "planning_horizon": 5,
+          "score_mode": "f_plus_g",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "4af3d5040dee391e641cc6021bd15dcc7728493cbd48afaa04c4e803ccd0ce4f",
+            "results.json": "5d51933851d6b7b5e822b71ac57e1bc612219e37475ee9012cc9a82b8840e456"
+          },
+          "success_count": 22,
+          "success_rate": 0.44,
+          "successes": 22
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/c/seed_3072/checkpoints/actor_free_td_lewm_v1_c/c/epoch_10.pt",
+          "checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+          "configured_protocol_canonical_sha256": "07c9c50e48349e3572a4edf5a8bd117d5ca706b9311c870d68abb5f8e2a70274",
+          "elapsed_seconds": 1271.6671216487885,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "d95a33b26fa9d20fa27fa7713465c21d688112318209ec9e8d57a3818d52a0cd",
+          "planning_horizon": 1,
+          "score_mode": "g_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "e6d1c17559aabdd8fb5eb336dab3bf74f9e8b062a49563ca400ca79384b43f8f",
+            "results.json": "f4fb347cd8daf34db9f886eb93fe9661fb9f546ab24897f9c71cbf1d0ce1160d"
+          },
+          "success_count": 18,
+          "success_rate": 0.36,
+          "successes": 18
+        }
+      },
+      "inference": {
+        "f_only": "LeWM final predicted-latent goal cost, horizon 5",
+        "f_plus_g": "LeWM F prefix plus discounted terminal V1 G tail, horizon 5",
+        "g_only": "Negative goal projection of the V1 predictor, horizon 1"
+      },
+      "method": "actor_free_td_lewm_v1_c",
+      "method_spec": {
+        "inference": "F-only: LeWM horizon 5; G-only: predictor goal projection horizon 1; F+G: LeWM prefix plus predictor tail horizon 5",
+        "loss": "Common feature TD plus goal-projected TD residual on goal-derived tasks",
+        "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+        "special": "Directly constrains the detached TD target and prediction after projection onto the matched goal"
+      },
+      "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+      "special_mechanism": "Directly constrains the detached TD target and prediction after projection onto the matched goal",
+      "training": {
+        "best_validation": {
+          "epoch": 10,
+          "value": 959.2647705078125
+        },
+        "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/c/seed_3072/checkpoints/actor_free_td_lewm_v1_c/c/epoch_10.pt",
+        "epochs": 10,
+        "final_epoch": {
+          "epoch": 10,
+          "train_base_td_loss": 1071.6737060546875,
+          "train_method_loss": 25927.3046875,
+          "validation_base_td_loss": 959.2647705078125
+        },
+        "global_step": 127960,
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_base_td_loss": 2263.787109375,
+            "train_method_loss": 20750.353515625,
+            "train_method_objective": 20750.353515625,
+            "validation_base_td_loss": 2554.42626953125,
+            "validation_common_base_td": 2554.42626953125
+          },
+          {
+            "epoch": 2,
+            "train_base_td_loss": 2537.23974609375,
+            "train_method_loss": 31500.537109375,
+            "train_method_objective": 31500.537109375,
+            "validation_base_td_loss": 1876.44384765625,
+            "validation_common_base_td": 1876.44384765625
+          },
+          {
+            "epoch": 3,
+            "train_base_td_loss": 1736.5322265625,
+            "train_method_loss": 28410.640625,
+            "train_method_objective": 28410.640625,
+            "validation_base_td_loss": 1342.497802734375,
+            "validation_common_base_td": 1342.497802734375
+          },
+          {
+            "epoch": 4,
+            "train_base_td_loss": 1373.3929443359375,
+            "train_method_loss": 27250.5625,
+            "train_method_objective": 27250.5625,
+            "validation_base_td_loss": 1146.6092529296875,
+            "validation_common_base_td": 1146.6092529296875
+          },
+          {
+            "epoch": 5,
+            "train_base_td_loss": 1233.0377197265625,
+            "train_method_loss": 26522.4765625,
+            "train_method_objective": 26522.4765625,
+            "validation_base_td_loss": 1062.3780517578125,
+            "validation_common_base_td": 1062.3780517578125
+          },
+          {
+            "epoch": 6,
+            "train_base_td_loss": 1159.3248291015625,
+            "train_method_loss": 26436.82421875,
+            "train_method_objective": 26436.82421875,
+            "validation_base_td_loss": 1008.4476318359375,
+            "validation_common_base_td": 1008.4476318359375
+          },
+          {
+            "epoch": 7,
+            "train_base_td_loss": 1112.819580078125,
+            "train_method_loss": 26370.998046875,
+            "train_method_objective": 26370.998046875,
+            "validation_base_td_loss": 982.15576171875,
+            "validation_common_base_td": 982.15576171875
+          },
+          {
+            "epoch": 8,
+            "train_base_td_loss": 1087.2117919921875,
+            "train_method_loss": 26048.224609375,
+            "train_method_objective": 26048.224609375,
+            "validation_base_td_loss": 966.7553100585938,
+            "validation_common_base_td": 966.7553100585938
+          },
+          {
+            "epoch": 9,
+            "train_base_td_loss": 1076.0697021484375,
+            "train_method_loss": 25904.455078125,
+            "train_method_objective": 25904.455078125,
+            "validation_base_td_loss": 959.8372192382812,
+            "validation_common_base_td": 959.8372192382812
+          },
+          {
+            "epoch": 10,
+            "train_base_td_loss": 1071.6737060546875,
+            "train_method_loss": 25927.3046875,
+            "train_method_objective": 25927.3046875,
+            "validation_base_td_loss": 959.2647705078125,
+            "validation_common_base_td": 959.2647705078125
+          }
+        ],
+        "protocol_canonical_sha256": "14e9b00346bab0e7b5e527544968a072987fb0bbfb752d3a9f6050c2f4f32b6b",
+        "provenance": {
+          "gpu_identity": {
+            "execution_evidence_sha256": "35ab067e9588c10eb2c4bf47d7f07c5961b35612357168e8c9727ee3c8de5b89",
+            "index": 0,
+            "name": "NVIDIA GeForce RTX 4080 SUPER",
+            "source": "external_execution_evidence",
+            "status": "recorded_by_external_execution_evidence",
+            "uuid": "GPU-77dc5d27-8458-4953-4cd4-70379f0a0a03"
+          },
+          "peak_cuda_memory_bytes": {
+            "execution_evidence_sha256": "35ab067e9588c10eb2c4bf47d7f07c5961b35612357168e8c9727ee3c8de5b89",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          },
+          "runtime.cuda_device": {
+            "execution_evidence_sha256": "35ab067e9588c10eb2c4bf47d7f07c5961b35612357168e8c9727ee3c8de5b89",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          }
+        },
+        "seed": 3072,
+        "source_files_sha256": {
+          "execution_evidence.json": "35ab067e9588c10eb2c4bf47d7f07c5961b35612357168e8c9727ee3c8de5b89",
+          "metrics.csv": "fb02a4a3476467ad89f94c491b38660619249f91e751e94ea381abaed5fe96fc",
+          "training_manifest.json": "60066c6c9e18077d2398a03c62d29e8bf77dc76f5102cd5317763f28fa47e7c3",
+          "training_result.json": "058ca6f57c5e982efe38c52d81396ffa8e4dfaa5aa9e4ae83fd5d7cb6a51233a"
+        },
+        "train_loss_semantics": "method_specific_objective",
+        "training_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+        "validation_loss_semantics": "common_base_td"
+      },
+      "training_loss": "Common feature TD plus goal-projected TD residual on goal-derived tasks"
+    },
+    "d": {
+      "combined_minus_f_only_percentage_points": -4.0000000000000036,
+      "display_name": "V1-D Goal-Value Weighted TD",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/d/seed_3072/checkpoints/actor_free_td_lewm_v1_d/d/epoch_10.pt",
+          "checkpoint_sha256": "3115fffeb83ba6ae7e0c272913fe7a1ba16d42953b2185f6a3f7b168899d819a",
+          "configured_protocol_canonical_sha256": "957410922dced3e7dd3546d96ff9da250ae49a483c42fb4cd1ea244727c65874",
+          "elapsed_seconds": 1382.8868203163147,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "23925a88afd560353b23fac9dffc7392d989899335d8fba169dd43e7ab5c412e",
+          "planning_horizon": 5,
+          "score_mode": "f_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "ec440bbe7f9894046326590c84a0aa84a315e6aef51e6d07b4759210c637ff5f",
+            "results.json": "65b8f850cc67f1ea09be970122c0e121f698ec474eb36609b544b667912a031d"
+          },
+          "success_count": 23,
+          "success_rate": 0.46,
+          "successes": 23
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/d/seed_3072/checkpoints/actor_free_td_lewm_v1_d/d/epoch_10.pt",
+          "checkpoint_sha256": "3115fffeb83ba6ae7e0c272913fe7a1ba16d42953b2185f6a3f7b168899d819a",
+          "configured_protocol_canonical_sha256": "23925a88afd560353b23fac9dffc7392d989899335d8fba169dd43e7ab5c412e",
+          "elapsed_seconds": 1400.23974943161,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "23925a88afd560353b23fac9dffc7392d989899335d8fba169dd43e7ab5c412e",
+          "planning_horizon": 5,
+          "score_mode": "f_plus_g",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "3a4b35362c0bb38bca48b2cc86ff4c3910b46a12cfc9790b553ee0f23f3064ec",
+            "results.json": "3fe4751023079d3c142b018ba8df08dff17081a592f304758723ba118e425e96"
+          },
+          "success_count": 21,
+          "success_rate": 0.42,
+          "successes": 21
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/d/seed_3072/checkpoints/actor_free_td_lewm_v1_d/d/epoch_10.pt",
+          "checkpoint_sha256": "3115fffeb83ba6ae7e0c272913fe7a1ba16d42953b2185f6a3f7b168899d819a",
+          "configured_protocol_canonical_sha256": "82fb1a6420afb55f033a9494d9932d330cf87c1c205bcc81be6448a93cecfc89",
+          "elapsed_seconds": 1058.1070420742035,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "23925a88afd560353b23fac9dffc7392d989899335d8fba169dd43e7ab5c412e",
+          "planning_horizon": 1,
+          "score_mode": "g_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "a018246407d3bba430d98e08a7eb702f511049d86760092347d9ca2ebcc7fbf5",
+            "results.json": "f7eb85a2ffb26105926758e4ebab9250106fe9d49edb3ac4990002926e56f640"
+          },
+          "success_count": 22,
+          "success_rate": 0.44,
+          "successes": 22
+        }
+      },
+      "inference": {
+        "f_only": "LeWM final predicted-latent goal cost, horizon 5",
+        "f_plus_g": "LeWM F prefix plus discounted terminal V1 G tail, horizon 5",
+        "g_only": "Negative goal projection of the V1 predictor, horizon 1"
+      },
+      "method": "actor_free_td_lewm_v1_d",
+      "method_spec": {
+        "inference": "F-only: LeWM horizon 5; G-only: predictor goal projection horizon 1; F+G: LeWM prefix plus predictor tail horizon 5",
+        "loss": "Detached target-goal scores reweight the common real-transition feature TD",
+        "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+        "special": "Goal-subset softmax weights; random-task weight remains one; final weights have mean one"
+      },
+      "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+      "special_mechanism": "Goal-subset softmax weights; random-task weight remains one; final weights have mean one",
+      "training": {
+        "best_validation": {
+          "epoch": 1,
+          "value": 546.3408203125
+        },
+        "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/d/seed_3072/checkpoints/actor_free_td_lewm_v1_d/d/epoch_10.pt",
+        "epochs": 10,
+        "final_epoch": {
+          "epoch": 10,
+          "train_base_td_loss": 906.0906372070312,
+          "train_method_loss": 531.1780395507812,
+          "validation_base_td_loss": 923.2345581054688
+        },
+        "global_step": 127960,
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_base_td_loss": 361.89605712890625,
+            "train_method_loss": 288.5788879394531,
+            "train_method_objective": 288.5788879394531,
+            "validation_base_td_loss": 546.3408203125,
+            "validation_common_base_td": 546.3408203125
+          },
+          {
+            "epoch": 2,
+            "train_base_td_loss": 690.8554077148438,
+            "train_method_loss": 478.09173583984375,
+            "train_method_objective": 478.09173583984375,
+            "validation_base_td_loss": 811.2803344726562,
+            "validation_common_base_td": 811.2803344726562
+          },
+          {
+            "epoch": 3,
+            "train_base_td_loss": 871.1024780273438,
+            "train_method_loss": 547.9647827148438,
+            "train_method_objective": 547.9647827148438,
+            "validation_base_td_loss": 913.6364135742188,
+            "validation_common_base_td": 913.6364135742188
+          },
+          {
+            "epoch": 4,
+            "train_base_td_loss": 912.99072265625,
+            "train_method_loss": 556.8307495117188,
+            "train_method_objective": 556.8307495117188,
+            "validation_base_td_loss": 937.1334838867188,
+            "validation_common_base_td": 937.1334838867188
+          },
+          {
+            "epoch": 5,
+            "train_base_td_loss": 917.7205200195312,
+            "train_method_loss": 551.1639404296875,
+            "train_method_objective": 551.1639404296875,
+            "validation_base_td_loss": 934.3115844726562,
+            "validation_common_base_td": 934.3115844726562
+          },
+          {
+            "epoch": 6,
+            "train_base_td_loss": 913.4129638671875,
+            "train_method_loss": 540.0944213867188,
+            "train_method_objective": 540.0944213867188,
+            "validation_base_td_loss": 927.4063720703125,
+            "validation_common_base_td": 927.4063720703125
+          },
+          {
+            "epoch": 7,
+            "train_base_td_loss": 909.781494140625,
+            "train_method_loss": 533.8951416015625,
+            "train_method_objective": 533.8951416015625,
+            "validation_base_td_loss": 922.7714233398438,
+            "validation_common_base_td": 922.7714233398438
+          },
+          {
+            "epoch": 8,
+            "train_base_td_loss": 908.0866088867188,
+            "train_method_loss": 529.199462890625,
+            "train_method_objective": 529.199462890625,
+            "validation_base_td_loss": 921.4056396484375,
+            "validation_common_base_td": 921.4056396484375
+          },
+          {
+            "epoch": 9,
+            "train_base_td_loss": 906.6395263671875,
+            "train_method_loss": 532.5498046875,
+            "train_method_objective": 532.5498046875,
+            "validation_base_td_loss": 923.8148193359375,
+            "validation_common_base_td": 923.8148193359375
+          },
+          {
+            "epoch": 10,
+            "train_base_td_loss": 906.0906372070312,
+            "train_method_loss": 531.1780395507812,
+            "train_method_objective": 531.1780395507812,
+            "validation_base_td_loss": 923.2345581054688,
+            "validation_common_base_td": 923.2345581054688
+          }
+        ],
+        "protocol_canonical_sha256": "cfd7af7852d8021bb59f30920577506f773ba9321482d715f1f00370e6781752",
+        "provenance": {
+          "gpu_identity": {
+            "execution_evidence_sha256": "d9dbe1a979393218365ab85bf6a934c7546c7a6fa543db79725d18cf50c97e65",
+            "index": 0,
+            "name": "NVIDIA GeForce RTX 4080 SUPER",
+            "source": "external_execution_evidence",
+            "status": "recorded_by_external_execution_evidence",
+            "uuid": "GPU-77dc5d27-8458-4953-4cd4-70379f0a0a03"
+          },
+          "peak_cuda_memory_bytes": {
+            "execution_evidence_sha256": "d9dbe1a979393218365ab85bf6a934c7546c7a6fa543db79725d18cf50c97e65",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          },
+          "runtime.cuda_device": {
+            "execution_evidence_sha256": "d9dbe1a979393218365ab85bf6a934c7546c7a6fa543db79725d18cf50c97e65",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          }
+        },
+        "seed": 3072,
+        "source_files_sha256": {
+          "execution_evidence.json": "d9dbe1a979393218365ab85bf6a934c7546c7a6fa543db79725d18cf50c97e65",
+          "metrics.csv": "01fc928023dc74c452ed2a49732ada0bd1d8e2187531c52739be154c9402c6bb",
+          "training_manifest.json": "5355f02dc8e19bef0a228a818c8a8ef4a6d2ad06933a64acf86974797028c958",
+          "training_result.json": "1f30fbd7ec3a8777a418728951d061da8af16adb36abdd1d66609aaca38e484d"
+        },
+        "train_loss_semantics": "method_specific_objective",
+        "training_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+        "validation_loss_semantics": "common_base_td"
+      },
+      "training_loss": "Detached target-goal scores reweight the common real-transition feature TD"
+    },
+    "f": {
+      "combined_minus_f_only_percentage_points": 1.9999999999999962,
+      "display_name": "V1-F Same-Future / Different-Goal Advantage",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/f/seed_3072/checkpoints/actor_free_td_lewm_v1_f/f/epoch_10.pt",
+          "checkpoint_sha256": "b4de1b511075d763194ad1e332d127cbe390553738162f3a402ef8847bb74fd0",
+          "configured_protocol_canonical_sha256": "3befaec82e227f9723cabaf3456088a6118db2ed1e7a9fa2a079b0af8408fc9f",
+          "elapsed_seconds": 1382.2348580360413,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "ce55d97dd08fa3e83ef5a319530a54f82ef85f8b42348605666a0da78e93c659",
+          "planning_horizon": 5,
+          "score_mode": "f_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "f285d060e0a2f27c2e76799d8f91cda21eb7fb85263d15535678d0402d5cf19a",
+            "results.json": "3fe627ae3c99ff0574b5953a0b923e2653af6f7881c2f36c35be51cf55fe977f"
+          },
+          "success_count": 23,
+          "success_rate": 0.46,
+          "successes": 23
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/f/seed_3072/checkpoints/actor_free_td_lewm_v1_f/f/epoch_10.pt",
+          "checkpoint_sha256": "b4de1b511075d763194ad1e332d127cbe390553738162f3a402ef8847bb74fd0",
+          "configured_protocol_canonical_sha256": "ce55d97dd08fa3e83ef5a319530a54f82ef85f8b42348605666a0da78e93c659",
+          "elapsed_seconds": 1354.6386473178864,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "ce55d97dd08fa3e83ef5a319530a54f82ef85f8b42348605666a0da78e93c659",
+          "planning_horizon": 5,
+          "score_mode": "f_plus_g",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "033f5571174154e6ca5216a45481f11ef4f84af2e3a5b8bf6808e9192b4d1b9e",
+            "results.json": "75cc3d7283f18cf5b66e58ebcffca999cf07f3fe2156a37e6b313589c753c8d0"
+          },
+          "success_count": 24,
+          "success_rate": 0.48,
+          "successes": 24
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/f/seed_3072/checkpoints/actor_free_td_lewm_v1_f/f/epoch_10.pt",
+          "checkpoint_sha256": "b4de1b511075d763194ad1e332d127cbe390553738162f3a402ef8847bb74fd0",
+          "configured_protocol_canonical_sha256": "00b80f1a79fa28045c00ba9771ecfc20b65062e54f0fda0ec20c92d7e91ca0d1",
+          "elapsed_seconds": 1054.013589143753,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "ce55d97dd08fa3e83ef5a319530a54f82ef85f8b42348605666a0da78e93c659",
+          "planning_horizon": 1,
+          "score_mode": "g_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "6d20dfd3f3be9552b61bc8995da931a302157d1d6aa6c21d170ed637b813fe0f",
+            "results.json": "b36f6bddca746c122d29f706336c6e94571d95cf5ea6f31a653ff8225b874dfe"
+          },
+          "success_count": 23,
+          "success_rate": 0.46,
+          "successes": 23
+        }
+      },
+      "inference": {
+        "f_only": "LeWM final predicted-latent goal cost, horizon 5",
+        "f_plus_g": "LeWM F prefix plus discounted terminal V1 G tail, horizon 5",
+        "g_only": "Negative goal projection of the V1 predictor, horizon 1"
+      },
+      "method": "actor_free_td_lewm_v1_f",
+      "method_spec": {
+        "inference": "F-only: LeWM horizon 5; G-only: predictor goal projection horizon 1; F+G: LeWM prefix plus predictor tail horizon 5",
+        "loss": "Same-future/different-goal detached advantage reweights common feature TD",
+        "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+        "special": "Matching task score is contrasted with all goal-derived tasks in the batch"
+      },
+      "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+      "special_mechanism": "Matching task score is contrasted with all goal-derived tasks in the batch",
+      "training": {
+        "best_validation": {
+          "epoch": 1,
+          "value": 541.9741821289062
+        },
+        "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/f/seed_3072/checkpoints/actor_free_td_lewm_v1_f/f/epoch_10.pt",
+        "epochs": 10,
+        "final_epoch": {
+          "epoch": 10,
+          "train_base_td_loss": 913.8411865234375,
+          "train_method_loss": 533.6151123046875,
+          "validation_base_td_loss": 929.770751953125
+        },
+        "global_step": 127960,
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_base_td_loss": 362.0181579589844,
+            "train_method_loss": 290.4134826660156,
+            "train_method_objective": 290.4134826660156,
+            "validation_base_td_loss": 541.9741821289062,
+            "validation_common_base_td": 541.9741821289062
+          },
+          {
+            "epoch": 2,
+            "train_base_td_loss": 690.9498291015625,
+            "train_method_loss": 477.3447570800781,
+            "train_method_objective": 477.3447570800781,
+            "validation_base_td_loss": 809.9017333984375,
+            "validation_common_base_td": 809.9017333984375
+          },
+          {
+            "epoch": 3,
+            "train_base_td_loss": 874.8272094726562,
+            "train_method_loss": 550.908203125,
+            "train_method_objective": 550.908203125,
+            "validation_base_td_loss": 920.5970458984375,
+            "validation_common_base_td": 920.5970458984375
+          },
+          {
+            "epoch": 4,
+            "train_base_td_loss": 917.4088134765625,
+            "train_method_loss": 557.7684326171875,
+            "train_method_objective": 557.7684326171875,
+            "validation_base_td_loss": 939.7207641601562,
+            "validation_common_base_td": 939.7207641601562
+          },
+          {
+            "epoch": 5,
+            "train_base_td_loss": 923.5573120117188,
+            "train_method_loss": 553.11572265625,
+            "train_method_objective": 553.11572265625,
+            "validation_base_td_loss": 941.3355102539062,
+            "validation_common_base_td": 941.3355102539062
+          },
+          {
+            "epoch": 6,
+            "train_base_td_loss": 920.8672485351562,
+            "train_method_loss": 545.2256469726562,
+            "train_method_objective": 545.2256469726562,
+            "validation_base_td_loss": 933.2742919921875,
+            "validation_common_base_td": 933.2742919921875
+          },
+          {
+            "epoch": 7,
+            "train_base_td_loss": 916.6434936523438,
+            "train_method_loss": 540.3115844726562,
+            "train_method_objective": 540.3115844726562,
+            "validation_base_td_loss": 928.3818359375,
+            "validation_common_base_td": 928.3818359375
+          },
+          {
+            "epoch": 8,
+            "train_base_td_loss": 915.2652587890625,
+            "train_method_loss": 532.9148559570312,
+            "train_method_objective": 532.9148559570312,
+            "validation_base_td_loss": 927.7526245117188,
+            "validation_common_base_td": 927.7526245117188
+          },
+          {
+            "epoch": 9,
+            "train_base_td_loss": 913.188720703125,
+            "train_method_loss": 535.4528198242188,
+            "train_method_objective": 535.4528198242188,
+            "validation_base_td_loss": 929.481689453125,
+            "validation_common_base_td": 929.481689453125
+          },
+          {
+            "epoch": 10,
+            "train_base_td_loss": 913.8411865234375,
+            "train_method_loss": 533.6151123046875,
+            "train_method_objective": 533.6151123046875,
+            "validation_base_td_loss": 929.770751953125,
+            "validation_common_base_td": 929.770751953125
+          }
+        ],
+        "protocol_canonical_sha256": "ba4f68cfec17d0a893b94b7d013f118536ee3e32f5aae5a46b6a90301b284750",
+        "provenance": {
+          "gpu_identity": {
+            "execution_evidence_sha256": "74ad93630c86b4f578b177263505dabbf5d40a6ee5eab0cc2429906fb256e429",
+            "index": 1,
+            "name": "NVIDIA GeForce RTX 4080 SUPER",
+            "source": "external_execution_evidence",
+            "status": "recorded_by_external_execution_evidence",
+            "uuid": "GPU-deda87ce-f58c-11ef-a178-e78b891014b6"
+          },
+          "peak_cuda_memory_bytes": {
+            "execution_evidence_sha256": "74ad93630c86b4f578b177263505dabbf5d40a6ee5eab0cc2429906fb256e429",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          },
+          "runtime.cuda_device": {
+            "execution_evidence_sha256": "74ad93630c86b4f578b177263505dabbf5d40a6ee5eab0cc2429906fb256e429",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          }
+        },
+        "seed": 3072,
+        "source_files_sha256": {
+          "execution_evidence.json": "74ad93630c86b4f578b177263505dabbf5d40a6ee5eab0cc2429906fb256e429",
+          "metrics.csv": "ba7f67afadd0ad4cf09a723d23b3838504be5a9780b9b4903505a7e06e41fd37",
+          "training_manifest.json": "208e2025352bfdfd88516b4c5d52a0cfd43c0ded80bda0e2ed71d5bd53a24395",
+          "training_result.json": "e00e0eb3a7ebfc136badf68279a9944b23476e59f029a0f0577d7d9965a5d911"
+        },
+        "train_loss_semantics": "method_specific_objective",
+        "training_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+        "validation_loss_semantics": "common_base_td"
+      },
+      "training_loss": "Same-future/different-goal detached advantage reweights common feature TD"
+    },
+    "g1": {
+      "combined_minus_f_only_percentage_points": 1.9999999999999962,
+      "display_name": "V1-G1 Neighbor Action Advantage",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g1/seed_3072/checkpoints/actor_free_td_lewm_v1_g1/g1/epoch_10.pt",
+          "checkpoint_sha256": "c224d18fcd8390247f115239c4b2db013479a062438cca92003674c739f3e24b",
+          "configured_protocol_canonical_sha256": "3625651ad5b7a6a8475a06926acb4e5d16e5a8bf7e0437d4963f772d8b44d0e8",
+          "elapsed_seconds": 1244.8384897708893,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "e4f96a5159e2419ae610a37f1027698213b3cffdf53ee7e79f0d32701f07b673",
+          "planning_horizon": 5,
+          "score_mode": "f_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "00031a1ad0d5bbc59d7df87d6ae6175fcc0d84f2f8605c51e8696caa7da880a5",
+            "results.json": "9800120f908501026d3454509698f1fe9bab420f135439f86c86a93f9b64eeba"
+          },
+          "success_count": 23,
+          "success_rate": 0.46,
+          "successes": 23
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g1/seed_3072/checkpoints/actor_free_td_lewm_v1_g1/g1/epoch_10.pt",
+          "checkpoint_sha256": "c224d18fcd8390247f115239c4b2db013479a062438cca92003674c739f3e24b",
+          "configured_protocol_canonical_sha256": "e4f96a5159e2419ae610a37f1027698213b3cffdf53ee7e79f0d32701f07b673",
+          "elapsed_seconds": 1218.662164926529,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "e4f96a5159e2419ae610a37f1027698213b3cffdf53ee7e79f0d32701f07b673",
+          "planning_horizon": 5,
+          "score_mode": "f_plus_g",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "cdbe49455846ab1eca161c9f11a6caac855ac1343d230aff7477c817c5147739",
+            "results.json": "290d497c87ccdee30d7eba9f8f14feb0ff59c135a587353171894270bef8abf9"
+          },
+          "success_count": 24,
+          "success_rate": 0.48,
+          "successes": 24
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g1/seed_3072/checkpoints/actor_free_td_lewm_v1_g1/g1/epoch_10.pt",
+          "checkpoint_sha256": "c224d18fcd8390247f115239c4b2db013479a062438cca92003674c739f3e24b",
+          "configured_protocol_canonical_sha256": "f5fc7dc6cca8504a62709ee5e73104c421a4055e3040d7ae5b7427ef8f02892e",
+          "elapsed_seconds": 953.7282454967499,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "e4f96a5159e2419ae610a37f1027698213b3cffdf53ee7e79f0d32701f07b673",
+          "planning_horizon": 1,
+          "score_mode": "g_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "673946af6fefbddf887b9b19fdabf51a35f8aa8dc3a831c593e332f61e157e00",
+            "results.json": "db0ecb49f4b68acbfd84d669b863741f461bb128c6f89a524b92cfc84141d050"
+          },
+          "success_count": 21,
+          "success_rate": 0.42,
+          "successes": 21
+        }
+      },
+      "inference": {
+        "f_only": "LeWM final predicted-latent goal cost, horizon 5",
+        "f_plus_g": "LeWM F prefix plus discounted terminal V1 G tail, horizon 5",
+        "g_only": "Negative goal projection of the V1 predictor, horizon 1"
+      },
+      "method": "actor_free_td_lewm_v1_g1",
+      "method_spec": {
+        "inference": "F-only: LeWM horizon 5; G-only: predictor goal projection horizon 1; F+G: LeWM prefix plus predictor tail horizon 5",
+        "loss": "Neighbor-action detached advantage reweights common real-action feature TD",
+        "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+        "special": "Other-episode KNN actions are comparison-only and never create candidate TD targets"
+      },
+      "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+      "special_mechanism": "Other-episode KNN actions are comparison-only and never create candidate TD targets",
+      "training": {
+        "best_validation": {
+          "epoch": 1,
+          "value": 713.0899658203125
+        },
+        "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g1/seed_3072/checkpoints/actor_free_td_lewm_v1_g1/g1/epoch_10.pt",
+        "epochs": 10,
+        "final_epoch": {
+          "epoch": 10,
+          "train_base_td_loss": 881.1193237304688,
+          "train_method_loss": 604.2667846679688,
+          "validation_base_td_loss": 905.6683349609375
+        },
+        "global_step": 127960,
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_base_td_loss": 485.843505859375,
+            "train_method_loss": 400.08135986328125,
+            "train_method_objective": 400.08135986328125,
+            "validation_base_td_loss": 713.0899658203125,
+            "validation_common_base_td": 713.0899658203125
+          },
+          {
+            "epoch": 2,
+            "train_base_td_loss": 827.9063720703125,
+            "train_method_loss": 622.5123291015625,
+            "train_method_objective": 622.5123291015625,
+            "validation_base_td_loss": 908.4691162109375,
+            "validation_common_base_td": 908.4691162109375
+          },
+          {
+            "epoch": 3,
+            "train_base_td_loss": 899.7369384765625,
+            "train_method_loss": 655.4790649414062,
+            "train_method_objective": 655.4790649414062,
+            "validation_base_td_loss": 911.2969360351562,
+            "validation_common_base_td": 911.2969360351562
+          },
+          {
+            "epoch": 4,
+            "train_base_td_loss": 895.585205078125,
+            "train_method_loss": 645.9285888671875,
+            "train_method_objective": 645.9285888671875,
+            "validation_base_td_loss": 921.5260620117188,
+            "validation_common_base_td": 921.5260620117188
+          },
+          {
+            "epoch": 5,
+            "train_base_td_loss": 891.3675537109375,
+            "train_method_loss": 633.7930908203125,
+            "train_method_objective": 633.7930908203125,
+            "validation_base_td_loss": 917.5941162109375,
+            "validation_common_base_td": 917.5941162109375
+          },
+          {
+            "epoch": 6,
+            "train_base_td_loss": 887.705078125,
+            "train_method_loss": 620.9482421875,
+            "train_method_objective": 620.9482421875,
+            "validation_base_td_loss": 909.3599243164062,
+            "validation_common_base_td": 909.3599243164062
+          },
+          {
+            "epoch": 7,
+            "train_base_td_loss": 882.9384765625,
+            "train_method_loss": 609.86279296875,
+            "train_method_objective": 609.86279296875,
+            "validation_base_td_loss": 908.2109375,
+            "validation_common_base_td": 908.2109375
+          },
+          {
+            "epoch": 8,
+            "train_base_td_loss": 882.556884765625,
+            "train_method_loss": 607.596923828125,
+            "train_method_objective": 607.596923828125,
+            "validation_base_td_loss": 901.18701171875,
+            "validation_common_base_td": 901.18701171875
+          },
+          {
+            "epoch": 9,
+            "train_base_td_loss": 879.5423583984375,
+            "train_method_loss": 603.5697631835938,
+            "train_method_objective": 603.5697631835938,
+            "validation_base_td_loss": 908.212646484375,
+            "validation_common_base_td": 908.212646484375
+          },
+          {
+            "epoch": 10,
+            "train_base_td_loss": 881.1193237304688,
+            "train_method_loss": 604.2667846679688,
+            "train_method_objective": 604.2667846679688,
+            "validation_base_td_loss": 905.6683349609375,
+            "validation_common_base_td": 905.6683349609375
+          }
+        ],
+        "protocol_canonical_sha256": "84b1c5bb9a3098eae7967e72f2b00e4f2c651fe12049532ac8a181153f2a293e",
+        "provenance": {
+          "gpu_identity": {
+            "execution_evidence_sha256": "e22bd3cd792b0f408d6602b32ed37178674c03e3750429c89b2b8c54530873b1",
+            "index": 2,
+            "name": "NVIDIA GeForce RTX 4080 SUPER",
+            "source": "external_execution_evidence",
+            "status": "recorded_by_external_execution_evidence",
+            "uuid": "GPU-77eb7324-dbce-9c23-e897-e44a600459e0"
+          },
+          "peak_cuda_memory_bytes": {
+            "execution_evidence_sha256": "e22bd3cd792b0f408d6602b32ed37178674c03e3750429c89b2b8c54530873b1",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          },
+          "runtime.cuda_device": {
+            "execution_evidence_sha256": "e22bd3cd792b0f408d6602b32ed37178674c03e3750429c89b2b8c54530873b1",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          }
+        },
+        "seed": 3072,
+        "source_files_sha256": {
+          "execution_evidence.json": "e22bd3cd792b0f408d6602b32ed37178674c03e3750429c89b2b8c54530873b1",
+          "metrics.csv": "96320d1333dec95ce234faf5acc4ac3856670554b87b903139070ebaeea30085",
+          "training_manifest.json": "a3ae076f39edc1a9caefede0462f0665238eff0504b4f75313d06f8d8d1827df",
+          "training_result.json": "01078fcfdbb772c13ae56664db304888252b143694d5fa75dcf2087195e08dd6"
+        },
+        "train_loss_semantics": "method_specific_objective",
+        "training_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+        "validation_loss_semantics": "common_base_td"
+      },
+      "training_loss": "Neighbor-action detached advantage reweights common real-action feature TD"
+    },
+    "g2": {
+      "combined_minus_f_only_percentage_points": 3.9999999999999982,
+      "display_name": "V1-G2 Prefix-Mean Advantage",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g2/seed_3072/checkpoints/actor_free_td_lewm_v1_g2/g2/epoch_10.pt",
+          "checkpoint_sha256": "1c290f91772b42fdf6824d92832c6fff4e2d8ca3ea08089ff1a41016ea1c2ebe",
+          "configured_protocol_canonical_sha256": "1dbedf279bfa22b6533d72bb028881d059684fd2f49a49631249ceef90e05d31",
+          "elapsed_seconds": 1306.3869800567627,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "c7264490bc83cb4ad7571e32008640aa6359b12615ac792d431db4b5ce5da8fa",
+          "planning_horizon": 5,
+          "score_mode": "f_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "d76f91a37b22bf137d2fcfe6f1a29ea7f3f806e4abe83a8758897dec905c41fb",
+            "results.json": "a9286fba262a1e527edb713260a02fc95f7221337820e43636081210a322c4f4"
+          },
+          "success_count": 23,
+          "success_rate": 0.46,
+          "successes": 23
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g2/seed_3072/checkpoints/actor_free_td_lewm_v1_g2/g2/epoch_10.pt",
+          "checkpoint_sha256": "1c290f91772b42fdf6824d92832c6fff4e2d8ca3ea08089ff1a41016ea1c2ebe",
+          "configured_protocol_canonical_sha256": "c7264490bc83cb4ad7571e32008640aa6359b12615ac792d431db4b5ce5da8fa",
+          "elapsed_seconds": 1207.8182661533356,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "c7264490bc83cb4ad7571e32008640aa6359b12615ac792d431db4b5ce5da8fa",
+          "planning_horizon": 5,
+          "score_mode": "f_plus_g",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "6be9de325f036f7f95ce6f004dab10c71e50e45d7b0a18b7c1be370949075c9e",
+            "results.json": "475f03d88d855e7cae9cd6d323bbeec8289dc481b8f948c024f5a1a7256436d6"
+          },
+          "success_count": 25,
+          "success_rate": 0.5,
+          "successes": 25
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g2/seed_3072/checkpoints/actor_free_td_lewm_v1_g2/g2/epoch_10.pt",
+          "checkpoint_sha256": "1c290f91772b42fdf6824d92832c6fff4e2d8ca3ea08089ff1a41016ea1c2ebe",
+          "configured_protocol_canonical_sha256": "dc5d73417acba11230667d06d1651d153909dc9bc114b93b3a1ce8c685210026",
+          "elapsed_seconds": 985.1035327911377,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "c7264490bc83cb4ad7571e32008640aa6359b12615ac792d431db4b5ce5da8fa",
+          "planning_horizon": 1,
+          "score_mode": "g_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "04be7aa4fe90ac1a63416cf185e4ccf969096578766cdedc0338b9401b3b229b",
+            "results.json": "3490207dddaf9219007fbaeb2b941e1bf64a59af426bd350198786f938e44be2"
+          },
+          "success_count": 21,
+          "success_rate": 0.42,
+          "successes": 21
+        }
+      },
+      "inference": {
+        "f_only": "LeWM final predicted-latent goal cost, horizon 5",
+        "f_plus_g": "LeWM F prefix plus discounted terminal V1 G tail, horizon 5",
+        "g_only": "Negative goal projection of the V1 predictor, horizon 1"
+      },
+      "method": "actor_free_td_lewm_v1_g2",
+      "method_spec": {
+        "inference": "F-only: LeWM horizon 5; G-only: predictor goal projection horizon 1; F+G: LeWM prefix plus predictor tail horizon 5",
+        "loss": "Full-prefix score minus mean prefix score reweights common feature TD",
+        "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+        "special": "Zero-mean suffix prefixes are comparison-only; the real full action supplies the TD pair"
+      },
+      "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+      "special_mechanism": "Zero-mean suffix prefixes are comparison-only; the real full action supplies the TD pair",
+      "training": {
+        "best_validation": {
+          "epoch": 1,
+          "value": 638.2266235351562
+        },
+        "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g2/seed_3072/checkpoints/actor_free_td_lewm_v1_g2/g2/epoch_10.pt",
+        "epochs": 10,
+        "final_epoch": {
+          "epoch": 10,
+          "train_base_td_loss": 872.8576049804688,
+          "train_method_loss": 688.6725463867188,
+          "validation_base_td_loss": 894.4545288085938
+        },
+        "global_step": 127960,
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_base_td_loss": 409.2607727050781,
+            "train_method_loss": 438.0728759765625,
+            "train_method_objective": 438.0728759765625,
+            "validation_base_td_loss": 638.2266235351562,
+            "validation_common_base_td": 638.2266235351562
+          },
+          {
+            "epoch": 2,
+            "train_base_td_loss": 818.9646606445312,
+            "train_method_loss": 598.3189086914062,
+            "train_method_objective": 598.3189086914062,
+            "validation_base_td_loss": 910.2184448242188,
+            "validation_common_base_td": 910.2184448242188
+          },
+          {
+            "epoch": 3,
+            "train_base_td_loss": 889.8169555664062,
+            "train_method_loss": 561.7359619140625,
+            "train_method_objective": 561.7359619140625,
+            "validation_base_td_loss": 904.2340698242188,
+            "validation_common_base_td": 904.2340698242188
+          },
+          {
+            "epoch": 4,
+            "train_base_td_loss": 865.4891967773438,
+            "train_method_loss": 540.90869140625,
+            "train_method_objective": 540.90869140625,
+            "validation_base_td_loss": 880.7194213867188,
+            "validation_common_base_td": 880.7194213867188
+          },
+          {
+            "epoch": 5,
+            "train_base_td_loss": 856.4567260742188,
+            "train_method_loss": 548.585205078125,
+            "train_method_objective": 548.585205078125,
+            "validation_base_td_loss": 881.39501953125,
+            "validation_common_base_td": 881.39501953125
+          },
+          {
+            "epoch": 6,
+            "train_base_td_loss": 863.0559692382812,
+            "train_method_loss": 587.1251220703125,
+            "train_method_objective": 587.1251220703125,
+            "validation_base_td_loss": 882.9451293945312,
+            "validation_common_base_td": 882.9451293945312
+          },
+          {
+            "epoch": 7,
+            "train_base_td_loss": 866.9274291992188,
+            "train_method_loss": 620.3947143554688,
+            "train_method_objective": 620.3947143554688,
+            "validation_base_td_loss": 892.138427734375,
+            "validation_common_base_td": 892.138427734375
+          },
+          {
+            "epoch": 8,
+            "train_base_td_loss": 871.9735717773438,
+            "train_method_loss": 653.579833984375,
+            "train_method_objective": 653.579833984375,
+            "validation_base_td_loss": 891.890869140625,
+            "validation_common_base_td": 891.890869140625
+          },
+          {
+            "epoch": 9,
+            "train_base_td_loss": 872.255859375,
+            "train_method_loss": 678.5379028320312,
+            "train_method_objective": 678.5379028320312,
+            "validation_base_td_loss": 894.2362670898438,
+            "validation_common_base_td": 894.2362670898438
+          },
+          {
+            "epoch": 10,
+            "train_base_td_loss": 872.8576049804688,
+            "train_method_loss": 688.6725463867188,
+            "train_method_objective": 688.6725463867188,
+            "validation_base_td_loss": 894.4545288085938,
+            "validation_common_base_td": 894.4545288085938
+          }
+        ],
+        "protocol_canonical_sha256": "409d62cfee01e5325e8220e3cfa26b8c16f5659afa314f71212f1d5bf8f844c4",
+        "provenance": {
+          "gpu_identity": {
+            "execution_evidence_sha256": "b8a46521802c2d399aaa35d40f111c2893ba3bbd20c88daa23dcc70dc6f5294e",
+            "index": 3,
+            "name": "NVIDIA GeForce RTX 4080 SUPER",
+            "source": "external_execution_evidence",
+            "status": "recorded_by_external_execution_evidence",
+            "uuid": "GPU-4bf35a24-9d7f-9e14-8ffa-a17c9f261f03"
+          },
+          "peak_cuda_memory_bytes": {
+            "execution_evidence_sha256": "b8a46521802c2d399aaa35d40f111c2893ba3bbd20c88daa23dcc70dc6f5294e",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          },
+          "runtime.cuda_device": {
+            "execution_evidence_sha256": "b8a46521802c2d399aaa35d40f111c2893ba3bbd20c88daa23dcc70dc6f5294e",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          }
+        },
+        "seed": 3072,
+        "source_files_sha256": {
+          "execution_evidence.json": "b8a46521802c2d399aaa35d40f111c2893ba3bbd20c88daa23dcc70dc6f5294e",
+          "metrics.csv": "060e2cdf68b8ff13b753eb94934a4e5fcdbbd6ddf754090939c0b37798759278",
+          "training_manifest.json": "b2199c89530c8b33a722c736db84604ef72f5834f813f2556c1ebacf0d0bee43",
+          "training_result.json": "dda1472f9bc635296fa73b0ee44e519fa3852238ac86146b8c1f7f1a8d72f01d"
+        },
+        "train_loss_semantics": "method_specific_objective",
+        "training_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+        "validation_loss_semantics": "common_base_td"
+      },
+      "training_loss": "Full-prefix score minus mean prefix score reweights common feature TD"
+    },
+    "g3": {
+      "combined_minus_f_only_percentage_points": 8.000000000000002,
+      "display_name": "V1-G3 Prefix-Marginal Advantage",
+      "evaluations": {
+        "f_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g3/seed_3072/checkpoints/actor_free_td_lewm_v1_g3/g3/epoch_10.pt",
+          "checkpoint_sha256": "b279a85b1dd0816bd5fb9724da490810d470755880639297aa13699c86c2d8fb",
+          "configured_protocol_canonical_sha256": "6204d6ac9cb92381557c8c68cb780000681d4fc37d78c535e6c33204d375baa2",
+          "elapsed_seconds": 1277.0645563602448,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "93c5b5aee1560960d762f8a0de0421a949b318140eefaa1c5c0ddcf28e065828",
+          "planning_horizon": 5,
+          "score_mode": "f_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "b9a4640bffc3d3974df1d8188226d59883401fdfd0ca6e0baa986679658be01e",
+            "results.json": "a8ed8e8738fffdf46e104ea1fdc118e651da2e1ed1fd5680f0df32feb462cdd3"
+          },
+          "success_count": 23,
+          "success_rate": 0.46,
+          "successes": 23
+        },
+        "f_plus_g": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g3/seed_3072/checkpoints/actor_free_td_lewm_v1_g3/g3/epoch_10.pt",
+          "checkpoint_sha256": "b279a85b1dd0816bd5fb9724da490810d470755880639297aa13699c86c2d8fb",
+          "configured_protocol_canonical_sha256": "93c5b5aee1560960d762f8a0de0421a949b318140eefaa1c5c0ddcf28e065828",
+          "elapsed_seconds": 1141.2722399234772,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "93c5b5aee1560960d762f8a0de0421a949b318140eefaa1c5c0ddcf28e065828",
+          "planning_horizon": 5,
+          "score_mode": "f_plus_g",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "72088281e0f97289c3b5783c057692d16855855a88157145fc6ada902a221494",
+            "results.json": "b9411a95ad4f96fe242039d8f94ea3bad9fb77b65873fca0e32e4c7147e56333"
+          },
+          "success_count": 27,
+          "success_rate": 0.54,
+          "successes": 27
+        },
+        "g_only": {
+          "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g3/seed_3072/checkpoints/actor_free_td_lewm_v1_g3/g3/epoch_10.pt",
+          "checkpoint_sha256": "b279a85b1dd0816bd5fb9724da490810d470755880639297aa13699c86c2d8fb",
+          "configured_protocol_canonical_sha256": "312c1969696dd34d92b3e3400383cf1f2975f8cd2efde20d244e17046d9bed6f",
+          "elapsed_seconds": 1063.6155049800873,
+          "evaluation_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+          "formal_protocol_canonical_sha256": "93c5b5aee1560960d762f8a0de0421a949b318140eefaa1c5c0ddcf28e065828",
+          "planning_horizon": 1,
+          "score_mode": "g_only",
+          "source_files_sha256": {
+            "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+            "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+            "protocol_manifest.json": "3d0075e8201eb807fc53f5fe73b2491d0de60ce473760ec2fc190adcaabf07e3",
+            "results.json": "16468805e7a3b48b45a4dc8c4620436862e7067ca96244a4839e3096a4bd9ec8"
+          },
+          "success_count": 19,
+          "success_rate": 0.38,
+          "successes": 19
+        }
+      },
+      "inference": {
+        "f_only": "LeWM final predicted-latent goal cost, horizon 5",
+        "f_plus_g": "LeWM F prefix plus discounted terminal V1 G tail, horizon 5",
+        "g_only": "Negative goal projection of the V1 predictor, horizon 1"
+      },
+      "method": "actor_free_td_lewm_v1_g3",
+      "method_spec": {
+        "inference": "F-only: LeWM horizon 5; G-only: predictor goal projection horizon 1; F+G: LeWM prefix plus predictor tail horizon 5",
+        "loss": "Mean adjacent prefix-score improvement reweights common feature TD",
+        "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+        "special": "Prefix marginal gains are detached comparison signals, not extra TD targets"
+      },
+      "network": "Frozen LeWM + frozen shared action encoder + one 379,072-parameter TD-JEPA predictor",
+      "special_mechanism": "Prefix marginal gains are detached comparison signals, not extra TD targets",
+      "training": {
+        "best_validation": {
+          "epoch": 1,
+          "value": 697.31494140625
+        },
+        "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/g3/seed_3072/checkpoints/actor_free_td_lewm_v1_g3/g3/epoch_10.pt",
+        "epochs": 10,
+        "final_epoch": {
+          "epoch": 10,
+          "train_base_td_loss": 874.6746826171875,
+          "train_method_loss": 722.4933471679688,
+          "validation_base_td_loss": 897.8621215820312
+        },
+        "global_step": 127960,
+        "loss_curve": [
+          {
+            "epoch": 1,
+            "train_base_td_loss": 436.9691162109375,
+            "train_method_loss": 444.4295349121094,
+            "train_method_objective": 444.4295349121094,
+            "validation_base_td_loss": 697.31494140625,
+            "validation_common_base_td": 697.31494140625
+          },
+          {
+            "epoch": 2,
+            "train_base_td_loss": 852.0875854492188,
+            "train_method_loss": 552.7879638671875,
+            "train_method_objective": 552.7879638671875,
+            "validation_base_td_loss": 902.2074584960938,
+            "validation_common_base_td": 902.2074584960938
+          },
+          {
+            "epoch": 3,
+            "train_base_td_loss": 868.1204833984375,
+            "train_method_loss": 529.0867919921875,
+            "train_method_objective": 529.0867919921875,
+            "validation_base_td_loss": 871.5540161132812,
+            "validation_common_base_td": 871.5540161132812
+          },
+          {
+            "epoch": 4,
+            "train_base_td_loss": 844.8831176757812,
+            "train_method_loss": 508.6348876953125,
+            "train_method_objective": 508.6348876953125,
+            "validation_base_td_loss": 871.3463745117188,
+            "validation_common_base_td": 871.3463745117188
+          },
+          {
+            "epoch": 5,
+            "train_base_td_loss": 848.24462890625,
+            "train_method_loss": 512.6828002929688,
+            "train_method_objective": 512.6828002929688,
+            "validation_base_td_loss": 872.8311767578125,
+            "validation_common_base_td": 872.8311767578125
+          },
+          {
+            "epoch": 6,
+            "train_base_td_loss": 856.5933837890625,
+            "train_method_loss": 546.172607421875,
+            "train_method_objective": 546.172607421875,
+            "validation_base_td_loss": 879.4918823242188,
+            "validation_common_base_td": 879.4918823242188
+          },
+          {
+            "epoch": 7,
+            "train_base_td_loss": 861.6508178710938,
+            "train_method_loss": 616.6212768554688,
+            "train_method_objective": 616.6212768554688,
+            "validation_base_td_loss": 885.388427734375,
+            "validation_common_base_td": 885.388427734375
+          },
+          {
+            "epoch": 8,
+            "train_base_td_loss": 870.220703125,
+            "train_method_loss": 676.2951049804688,
+            "train_method_objective": 676.2951049804688,
+            "validation_base_td_loss": 899.312744140625,
+            "validation_common_base_td": 899.312744140625
+          },
+          {
+            "epoch": 9,
+            "train_base_td_loss": 872.6154174804688,
+            "train_method_loss": 723.3749389648438,
+            "train_method_objective": 723.3749389648438,
+            "validation_base_td_loss": 897.070068359375,
+            "validation_common_base_td": 897.070068359375
+          },
+          {
+            "epoch": 10,
+            "train_base_td_loss": 874.6746826171875,
+            "train_method_loss": 722.4933471679688,
+            "train_method_objective": 722.4933471679688,
+            "validation_base_td_loss": 897.8621215820312,
+            "validation_common_base_td": 897.8621215820312
+          }
+        ],
+        "protocol_canonical_sha256": "56dc578a7a0148d50f23bfd53bde311913b9598f3c241212f392d4417134fea1",
+        "provenance": {
+          "gpu_identity": {
+            "execution_evidence_sha256": "9a3b0c67259a1b408428edbecb73bafc37bfb9ed5371afa040c797abdcafbc9e",
+            "index": 4,
+            "name": "NVIDIA GeForce RTX 4080 SUPER",
+            "source": "external_execution_evidence",
+            "status": "recorded_by_external_execution_evidence",
+            "uuid": "GPU-350d0916-4738-5e02-abd1-1399a3ac92cc"
+          },
+          "peak_cuda_memory_bytes": {
+            "execution_evidence_sha256": "9a3b0c67259a1b408428edbecb73bafc37bfb9ed5371afa040c797abdcafbc9e",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          },
+          "runtime.cuda_device": {
+            "execution_evidence_sha256": "9a3b0c67259a1b408428edbecb73bafc37bfb9ed5371afa040c797abdcafbc9e",
+            "source": "external_execution_evidence",
+            "status": "not_recorded_by_v1_trainer",
+            "value": null
+          }
+        },
+        "seed": 3072,
+        "source_files_sha256": {
+          "execution_evidence.json": "9a3b0c67259a1b408428edbecb73bafc37bfb9ed5371afa040c797abdcafbc9e",
+          "metrics.csv": "3bbadacde3ec0355e8ebaf824371be3a58361e8cadfcbc7bbeba2e6e1e1a716d",
+          "training_manifest.json": "f7f52a3d5980019faaeaf8ec62a1cf907aa49df9835ba709202d905de20c369b",
+          "training_result.json": "285aac4f33d86e64d2c233845f54b867d8c1e42ed093d7f90871498a1924b672"
+        },
+        "train_loss_semantics": "method_specific_objective",
+        "training_commit": "3c4e62ef2ab72387536433f27ef11bce75477e7e",
+        "validation_loss_semantics": "common_base_td"
+      },
+      "training_loss": "Mean adjacent prefix-score improvement reweights common feature TD"
+    }
+  },
+  "ranking_by_combined": [
+    {
+      "display_name": "V1-G3 Prefix-Marginal Advantage",
+      "rank": 1,
+      "success_count": 27,
+      "success_rate": 0.54,
+      "variant": "g3"
+    },
+    {
+      "display_name": "V1-G2 Prefix-Mean Advantage",
+      "rank": 2,
+      "success_count": 25,
+      "success_rate": 0.5,
+      "variant": "g2"
+    },
+    {
+      "display_name": "V1-F Same-Future / Different-Goal Advantage",
+      "rank": 3,
+      "success_count": 24,
+      "success_rate": 0.48,
+      "variant": "f"
+    },
+    {
+      "display_name": "V1-G1 Neighbor Action Advantage",
+      "rank": 3,
+      "success_count": 24,
+      "success_rate": 0.48,
+      "variant": "g1"
+    },
+    {
+      "display_name": "V1-C Goal-Projected TD",
+      "rank": 5,
+      "success_count": 22,
+      "success_rate": 0.44,
+      "variant": "c"
+    },
+    {
+      "display_name": "V1-D Goal-Value Weighted TD",
+      "rank": 6,
+      "success_count": 21,
+      "success_rate": 0.42,
+      "variant": "d"
+    }
+  ],
+  "ranking_by_f_plus_g": [
+    {
+      "display_name": "V1-G3 Prefix-Marginal Advantage",
+      "rank": 1,
+      "success_count": 27,
+      "success_rate": 0.54,
+      "variant": "g3"
+    },
+    {
+      "display_name": "V1-G2 Prefix-Mean Advantage",
+      "rank": 2,
+      "success_count": 25,
+      "success_rate": 0.5,
+      "variant": "g2"
+    },
+    {
+      "display_name": "V1-F Same-Future / Different-Goal Advantage",
+      "rank": 3,
+      "success_count": 24,
+      "success_rate": 0.48,
+      "variant": "f"
+    },
+    {
+      "display_name": "V1-G1 Neighbor Action Advantage",
+      "rank": 3,
+      "success_count": 24,
+      "success_rate": 0.48,
+      "variant": "g1"
+    },
+    {
+      "display_name": "V1-C Goal-Projected TD",
+      "rank": 5,
+      "success_count": 22,
+      "success_rate": 0.44,
+      "variant": "c"
+    },
+    {
+      "display_name": "V1-D Goal-Value Weighted TD",
+      "rank": 6,
+      "success_count": 21,
+      "success_rate": 0.42,
+      "variant": "d"
+    }
+  ],
+  "schema_version": 1,
+  "selection": {
+    "episode_count": 50,
+    "episode_selection_json_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7"
+  },
+  "study": {
+    "environment": "cube",
+    "episodes_per_evaluation": 50,
+    "evaluation_count": 18,
+    "formal_horizon_by_score_mode": {
+      "f_only": 5,
+      "f_plus_g": 5,
+      "g_only": 1
+    },
+    "goal_offset": 50,
+    "id": "actor_free_td_lewm_v1_cube_seed3072_o50_6x3",
+    "method_family": "actor_free_td_lewm_v1",
+    "planning_seed": 42,
+    "ranking_metric": "f_plus_g_success_count_only",
+    "score_modes": [
+      "f_only",
+      "g_only",
+      "f_plus_g"
+    ],
+    "single_planning_selection": true,
+    "single_training_seed": true,
+    "training_count": 6,
+    "training_seed": 3072
+  },
+  "training_acceptance": {
+    "expected_action_encoder_sha256": "2657b55140013b4b071cd8cdea63f1eac5c65c498d55331c7499744ef31a9cd3",
+    "sha256": "6c2189f7f87b74f19179b4ccbfb2f9713dea14c5510bc28ce6d01ce255ea5e50",
+    "status": "PASS_WITH_WARNINGS",
+    "warnings": [
+      "c.process: PID 122116 was reaped without an exit marker",
+      "d.process: PID 122117 was reaped without an exit marker",
+      "f.process: PID 122118 was reaped without an exit marker",
+      "g1.process: PID 122119 was reaped without an exit marker",
+      "g2.process: PID 122120 was reaped without an exit marker",
+      "g3.process: PID 122121 was reaped without an exit marker"
+    ]
+  },
+  "validation": {
+    "common_selection_across_18_runs": true,
+    "complete_6x3_bundle": true,
+    "external_training_acceptance_bound": true,
+    "formal_o50_only": true,
+    "frozen_lewm_and_action_encoder": true,
+    "locked_seed42_selection_sha256": true,
+    "missing_trainer_provenance_not_fabricated": true,
+    "mode_specific_horizon_5_1_5": true,
+    "no_lewm_training_loss": true,
+    "same_checkpoint_within_each_method": true,
+    "smoke_or_pilot_runs": 0,
+    "success_rates_match_episode_outcomes": true,
+    "training_metrics_derived_from_raw_lightning_csv": true
+  }
+}

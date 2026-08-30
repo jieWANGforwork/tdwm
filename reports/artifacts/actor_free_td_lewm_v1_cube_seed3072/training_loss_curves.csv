@@ -1,0 +1,61 @@
+variant,method,display_name,epoch,train_method_loss,train_base_td_loss,validation_base_td_loss,train_metric_semantics,validation_metric_semantics,cross_method_ranking_metric
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,1,20750.3535156,2263.78710938,2554.42626953,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,2,31500.5371094,2537.23974609,1876.44384766,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,3,28410.640625,1736.53222656,1342.49780273,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,4,27250.5625,1373.39294434,1146.60925293,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,5,26522.4765625,1233.03771973,1062.37805176,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,6,26436.8242188,1159.3248291,1008.44763184,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,7,26370.9980469,1112.81958008,982.155761719,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,8,26048.2246094,1087.21179199,966.755310059,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,9,25904.4550781,1076.06970215,959.837219238,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+c,actor_free_td_lewm_v1_c,V1-C Goal-Projected TD,10,25927.3046875,1071.67370605,959.264770508,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,1,288.578887939,361.896057129,546.340820312,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,2,478.09173584,690.855407715,811.280334473,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,3,547.964782715,871.102478027,913.636413574,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,4,556.830749512,912.990722656,937.133483887,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,5,551.16394043,917.72052002,934.311584473,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,6,540.094421387,913.412963867,927.40637207,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,7,533.895141602,909.781494141,922.77142334,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,8,529.199462891,908.086608887,921.405639648,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,9,532.549804688,906.639526367,923.814819336,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+d,actor_free_td_lewm_v1_d,V1-D Goal-Value Weighted TD,10,531.178039551,906.090637207,923.234558105,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,1,290.413482666,362.018157959,541.974182129,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,2,477.34475708,690.949829102,809.901733398,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,3,550.908203125,874.827209473,920.597045898,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,4,557.768432617,917.408813477,939.72076416,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,5,553.115722656,923.557312012,941.335510254,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,6,545.225646973,920.867248535,933.274291992,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,7,540.311584473,916.643493652,928.381835938,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,8,532.914855957,915.265258789,927.752624512,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,9,535.452819824,913.188720703,929.481689453,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+f,actor_free_td_lewm_v1_f,V1-F Same-Future / Different-Goal Advantage,10,533.615112305,913.841186523,929.770751953,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,1,400.081359863,485.843505859,713.08996582,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,2,622.512329102,827.90637207,908.469116211,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,3,655.479064941,899.736938477,911.296936035,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,4,645.928588867,895.585205078,921.526062012,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,5,633.79309082,891.367553711,917.594116211,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,6,620.948242188,887.705078125,909.359924316,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,7,609.862792969,882.938476562,908.2109375,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,8,607.596923828,882.556884766,901.187011719,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,9,603.569763184,879.542358398,908.212646484,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g1,actor_free_td_lewm_v1_g1,V1-G1 Neighbor Action Advantage,10,604.266784668,881.11932373,905.668334961,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,1,438.072875977,409.260772705,638.226623535,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,2,598.318908691,818.964660645,910.218444824,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,3,561.735961914,889.816955566,904.234069824,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,4,540.908691406,865.489196777,880.719421387,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,5,548.585205078,856.456726074,881.395019531,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,6,587.12512207,863.055969238,882.945129395,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,7,620.394714355,866.927429199,892.138427734,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,8,653.579833984,871.973571777,891.890869141,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,9,678.537902832,872.255859375,894.23626709,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g2,actor_free_td_lewm_v1_g2,V1-G2 Prefix-Mean Advantage,10,688.672546387,872.85760498,894.454528809,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,1,444.429534912,436.969116211,697.314941406,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,2,552.787963867,852.087585449,902.207458496,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,3,529.086791992,868.120483398,871.554016113,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,4,508.634887695,844.883117676,871.346374512,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,5,512.682800293,848.244628906,872.831176758,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,6,546.172607422,856.593383789,879.491882324,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,7,616.621276855,861.650817871,885.388427734,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,8,676.29510498,870.220703125,899.312744141,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,9,723.374938965,872.61541748,897.070068359,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g
+g3,actor_free_td_lewm_v1_g3,V1-G3 Prefix-Marginal Advantage,10,722.493347168,874.674682617,897.862121582,method_specific_objective,common_base_td,false_use_formal_o50_f_plus_g

@@ -1,8 +1,8 @@
 # 服务器实验产物索引
 
-首次记录：2026-08-26；最后更新：2026-08-29（Asia/Shanghai）
+首次记录：2026-08-26；最后更新：2026-08-31（Asia/Shanghai）
 
-## AutoDL：Actor-Free TD-LeWM 7×3 结果包收集协议
+## AutoDL：较早 Actor-Free TD-LeWM 7×3 正式归档
 
 Actor-Free TD-LeWM 当前比较范围固定为 7 个方法：`serial_decoupled`、
 `serial_coupled`、`hybrid`、`parallel_real`、`goal_hybrid`、`imaginary_hybrid` 和
@@ -42,9 +42,32 @@ action normalization 和 world 参数量指纹。每个训练 protocol 必须完
 `f_plus_g/f_plus_c`；formal protocol 的 mode 也只能缺失或为 combined，不能把它解释为
 F-only 或 G/C-only。
 
-完整结果尚未导入仓库时，本索引只记录收集协议，不手工复制运行中 loss、fixture 或不完整
-排名。最终轻量归档将位于 `reports/artifacts/actor_free_td_lewm_cube_seed3072/`；checkpoint、
-数据、视频和原始日志继续只保存在外部服务器 artifact 目录。
+21 个正式 O50 已完成并归档到
+[`actor_free_td_lewm_cube_seed3072.md`](actor_free_td_lewm_cube_seed3072.md) 与
+[`artifacts/actor_free_td_lewm_cube_seed3072/`](artifacts/actor_free_td_lewm_cube_seed3072/README.md)。
+checkpoint、数据、视频和原始日志继续只保存在外部服务器 artifact 目录。
+
+## AutoDL：C–G3 raw-action V0 / action-encoder V1
+
+后来单独实现的 controlled study 固定为 `c,d,f,g1,g2,g3` 六种方法；它不是上面
+7-method 结构消融的改名。V0 将 normalized raw 25D action block 直接送入 G；V1 先通过
+预训练 LeWM 的共享冻结 Action Encoder 得到 192D embedding。两版均无 Actor。
+
+- V0 output root：`/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v0_cg3_79706d3_20260830`
+- V1 repo root：`/root/autodl-tmp/tdwm-v1-3c4e62e`
+- V1 output root：`/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830`
+- V1 训练提交：`3c4e62ef2ab72387536433f27ef11bce75477e7e`
+- V1 训练验收：`training_acceptance.json` 为 `PASS_WITH_WARNINGS`；六个 warning 仅说明
+  原 launcher exit code 在进程被回收后不可恢复，checkpoint、10 epochs、127,960 steps、
+  metrics 和有限值检查均通过。
+
+两版各完成 18 个正式 O50，使用同一 50-pair selection SHA-256
+`e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7`。V0 F+G 最好为
+G1/G2 的 50%；V1 F+G 最好为 G3 的 54%。完整共同表见
+[`actor_free_td_lewm_v0_v1_cube_seed3072.md`](actor_free_td_lewm_v0_v1_cube_seed3072.md)，
+V1 完整训练/评测归档见
+[`actor_free_td_lewm_v1_cube_seed3072.md`](actor_free_td_lewm_v1_cube_seed3072.md) 与
+[`artifacts/actor_free_td_lewm_v1_cube_seed3072/`](artifacts/actor_free_td_lewm_v1_cube_seed3072/README.md)。
 
 ## AutoDL 云端 RTX 4080：Aligned A/C/D 补充评测
 
