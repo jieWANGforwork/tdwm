@@ -415,18 +415,48 @@ def validate_actor_free_td_lewm_v1_training_protocol(
     if int(loader.get("workers", -1)) < 0:
         raise ValueError("loader batch_size/workers are invalid.")
     training = protocol.get("training", {})
-    epochs = int(training.get("epochs", 0))
-    steps = int(training.get("optimizer_steps_per_epoch", 0))
-    if epochs != int(training.get("scheduler_epochs", -1)):
-        raise ValueError("Scheduler and trainer epochs must match.")
-    if epochs * steps != FORMAL_OPTIMIZER_UPDATES:
+    training_lock = {
+        "epochs": 10,
+        "scheduler_epochs": 10,
+        "optimizer_steps_per_epoch": 12_796,
+        "precision": "bf16-mixed",
+        "model_compile": False,
+        "gradient_clip_norm": 1.0,
+        "checkpoint_every_epochs": 1,
+        "resume": True,
+    }
+    for key, expected in training_lock.items():
+        if training.get(key) != expected:
+            raise ValueError(f"training.{key} must be {expected!r}.")
+    if training["epochs"] * training["optimizer_steps_per_epoch"] != (
+        FORMAL_OPTIMIZER_UPDATES
+    ):
         raise ValueError("V1 formal runs require exactly 127960 optimizer updates.")
-    if training.get("model_compile") is not False:
-        raise ValueError("V1 comparison keeps model compilation disabled.")
     optimizer = protocol.get("optimizer", {})
+    if optimizer.get("type") != "AdamW":
+        raise ValueError("optimizer.type must be 'AdamW'.")
     if float(optimizer.get("world_model_learning_rate", -1.0)) != 0.0:
         raise ValueError("The V1 LeWM world model is frozen.")
     _positive_float(optimizer, "predictor_learning_rate", section="optimizer")
+    try:
+        weight_decay = float(optimizer["weight_decay"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("optimizer.weight_decay must be finite and non-negative.") from error
+    if not math.isfinite(weight_decay) or weight_decay < 0.0:
+        raise ValueError("optimizer.weight_decay must be finite and non-negative.")
+    scheduler = protocol.get("scheduler", {})
+    for key, expected in {
+        "type": "linear_warmup_cosine_annealing",
+        "interval": "optimizer_step",
+    }.items():
+        if scheduler.get(key) != expected:
+            raise ValueError(f"scheduler.{key} must be {expected!r}.")
+    try:
+        warmup_fraction = float(scheduler["warmup_fraction"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("scheduler.warmup_fraction must lie in [0,1).") from error
+    if not math.isfinite(warmup_fraction) or not 0.0 <= warmup_fraction < 1.0:
+        raise ValueError("scheduler.warmup_fraction must lie in [0,1).")
 
 
 def _mean_or_zero(value: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:

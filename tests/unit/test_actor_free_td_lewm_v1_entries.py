@@ -115,3 +115,52 @@ def test_v1_training_protocol_rejects_non_task_conditioned_predictor() -> None:
 
     with pytest.raises(ValueError, match="predictor.goal_conditioning"):
         module.validate_actor_free_td_lewm_v1_c_training_protocol(protocol)
+
+
+def test_v1_training_protocol_rejects_alternate_epoch_factorization() -> None:
+    module = importlib.import_module("tdwm.training.actor_free_td_lewm_v1_c")
+    path = (
+        ROOT
+        / "configs"
+        / "experiment"
+        / "actor_free_td_lewm_v1_c_cube_train.yaml"
+    )
+    protocol = deepcopy(yaml.safe_load(path.read_text()))
+    protocol["training"].update(
+        epochs=20,
+        scheduler_epochs=20,
+        optimizer_steps_per_epoch=6_398,
+    )
+
+    with pytest.raises(ValueError, match="training.epochs"):
+        module.validate_actor_free_td_lewm_v1_c_training_protocol(protocol)
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    (
+        ("training", "precision", "32-true"),
+        ("training", "gradient_clip_norm", 0.5),
+        ("training", "checkpoint_every_epochs", 2),
+        ("optimizer", "type", "SGD"),
+        ("scheduler", "type", "constant"),
+        ("scheduler", "interval", "epoch"),
+    ),
+)
+def test_v1_training_protocol_rejects_runtime_contract_drift(
+    section: str,
+    key: str,
+    value,
+) -> None:
+    module = importlib.import_module("tdwm.training.actor_free_td_lewm_v1_c")
+    path = (
+        ROOT
+        / "configs"
+        / "experiment"
+        / "actor_free_td_lewm_v1_c_cube_train.yaml"
+    )
+    protocol = deepcopy(yaml.safe_load(path.read_text()))
+    protocol[section][key] = value
+
+    with pytest.raises(ValueError, match=rf"{section}\.{key}"):
+        module.validate_actor_free_td_lewm_v1_c_training_protocol(protocol)
