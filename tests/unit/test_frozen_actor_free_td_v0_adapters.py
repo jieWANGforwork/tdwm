@@ -109,6 +109,45 @@ def test_g_only_is_direct_one_block_scoring_without_lewm_rollout():
     assert world.rollout_calls == 0
 
 
+def test_g_only_visual_state_encoding_excludes_live_primitive_action():
+    class StateOnlyEncodingWorld(RecordingWorld):
+        def encode(self, info):
+            if "action" in info:
+                raise AssertionError(
+                    "V0 state encoding must not invoke LeWM's 25D action encoder."
+                )
+            return super().encode(info)
+
+    world = StateOnlyEncodingWorld()
+    predictor = ActionScorePredictor()
+    adapter = ActorFreeTDLeWMV0(
+        world,
+        predictor,  # type: ignore[arg-type]
+        gamma=0.95,
+        score_mode="g_only",
+    )
+    actions = torch.zeros(1, 2, 1, 25)
+    actions[0, :, 0, 0] = torch.tensor([2.0, -3.0])
+    info = {
+        "pixels": torch.zeros(1, 2, 1, 3, 2, 2),
+        # Stable World Model exposes the latest primitive Cube action here.
+        # It is 5D and must not be confused with G's 25D candidate block.
+        "action": torch.zeros(1, 2, 1, 5),
+        "goal_emb": _one_axis_goal(),
+    }
+
+    cost = adapter.get_cost(info, actions)
+
+    assert world.encode_calls == 1
+    assert world.rollout_calls == 0
+    assert torch.allclose(
+        cost,
+        -math.sqrt(192.0) * torch.tensor([[2.0, -3.0]]),
+    )
+    assert predictor.last_action is not None
+    assert torch.equal(predictor.last_action, actions[..., 0, :])
+
+
 def test_f_only_rolls_full_horizon_but_scores_only_final_state_sum():
     predicted = torch.zeros(1, 1, 4, 192)
     predicted[..., 1:3, :] = 1000.0

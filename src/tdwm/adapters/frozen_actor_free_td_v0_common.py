@@ -512,8 +512,14 @@ class ActorFreeTDLeWMV0(nn.Module):
                 key: value[:, 0]
                 for key, value in info.items()
                 if torch.is_tensor(value)
-                and key not in {"goal", "goal_emb", "predicted_emb"}
+                and key not in {"action", "goal", "goal_emb", "predicted_emb"}
             }
+            # Only the visual encoder output is the V0 state.  The live World
+            # info carries the most recent primitive 5D environment action,
+            # whereas frozen LeWM's action encoder accepts normalized 25D
+            # action blocks.  Passing that primitive action to LeWM.encode is
+            # both unnecessary for ``emb`` and dimensionally invalid.  The
+            # candidate 25D block is supplied separately to G below.
             encoded = self.world_model.encode(initial)
             embedding = encoded.get("emb")
             if not torch.is_tensor(embedding):
