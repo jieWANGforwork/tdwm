@@ -525,6 +525,7 @@ def evaluate_actor_free_td_predictor_runtime(
     smoke: bool = False,
     pilot: bool = False,
     score_mode: str | None = None,
+    checkpoint_epoch: int | None = None,
 ) -> dict[str, Any]:
     """Run the shared online-world/online-G Cube evaluation runtime."""
 
@@ -560,12 +561,22 @@ def evaluate_actor_free_td_predictor_runtime(
         checkpoint_file,
         map_location=device,
     )
+    if checkpoint_epoch is not None and (smoke or pilot):
+        raise ValueError(
+            "checkpoint_epoch is only supported for full O50 evaluation."
+        )
+    require_formal_completion = not (smoke or pilot) and checkpoint_epoch is None
+    checkpoint_validation = {
+        "payload": payload,
+        "predictor_config": predictor_config,
+        "protocol": formal_protocol,
+        "spec": spec,
+        "require_formal_completion": require_formal_completion,
+    }
+    if checkpoint_epoch is not None:
+        checkpoint_validation["expected_checkpoint_epoch"] = checkpoint_epoch
     checkpoint_validator(
-        payload=payload,
-        predictor_config=predictor_config,
-        protocol=formal_protocol,
-        spec=spec,
-        require_formal_completion=not (smoke or pilot),
+        **checkpoint_validation,
     )
 
     dataset_cfg = protocol["dataset"]
@@ -658,9 +669,12 @@ def evaluate_actor_free_td_predictor_runtime(
         "objective_version": payload["objective_version"],
         "epoch": payload["epoch"],
         "global_step": payload["global_step"],
-        "formal_completion_required": not (smoke or pilot),
+        "formal_completion_required": require_formal_completion,
         "predictor_config": predictor_config,
     }
+    if checkpoint_epoch is not None:
+        checkpoint_manifest["requested_checkpoint_epoch"] = checkpoint_epoch
+        checkpoint_manifest["checkpoint_role"] = "intermediate_epoch_o50"
     for key in checkpoint_provenance_keys:
         provenance = payload.get(key)
         if not isinstance(provenance, Mapping):
@@ -741,6 +755,10 @@ def evaluate_actor_free_td_predictor_runtime(
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
     }
+    if checkpoint_epoch is not None:
+        result["checkpoint_epoch"] = payload["epoch"]
+        result["checkpoint_role"] = "intermediate_epoch_o50"
+        result["formal_completion_required"] = False
     _write_json(output_dir / "results.json", result)
     return _jsonable(result)
 

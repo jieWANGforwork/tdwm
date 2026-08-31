@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--score-mode", choices=("f_only", "g_only", "f_plus_g"), default=None
     )
+    parser.add_argument("--checkpoint-epoch", type=int, choices=range(3, 10))
     parser.add_argument("--video", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--smoke", action="store_true")
@@ -57,6 +58,7 @@ def main() -> None:
         smoke=args.smoke,
         pilot=args.pilot,
         score_mode=args.score_mode,
+        checkpoint_epoch=args.checkpoint_epoch,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 
