@@ -26,6 +26,12 @@ DEPLOYMENT_CHECKPOINT_VERSION = 1
 LOCAL_PREDICTION = "ema_target_lewm_one_step_mse"
 LOCAL_PREDICTION_TARGET = "ema_world_model_next_latent"
 LOCAL_PREDICTION_TARGET_GRADIENT = "stop_gradient"
+INITIALIZATION_CONTRACT = {
+    "required_checkpoint_family": "actor_free_td_lewm_v1",
+    "required_checkpoint_epoch": 10,
+    "v2_checkpoint_as_initialization": "prohibited",
+    "optimizer_state": "fresh",
+}
 VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
 
 V2_EMA_SG_SPECS = {
@@ -41,6 +47,7 @@ V2_EMA_SG_SPECS = {
         local_prediction=LOCAL_PREDICTION,
         local_prediction_target=LOCAL_PREDICTION_TARGET,
         local_prediction_target_gradient=LOCAL_PREDICTION_TARGET_GRADIENT,
+        initialization_contract=INITIALIZATION_CONTRACT,
     )
     for variant in VARIANTS
 }
@@ -80,6 +87,7 @@ __all__ = [
     "DEPLOYMENT_CHECKPOINT_VERSION",
     "IMPLEMENTATION_VERSION",
     "INITIALIZATION",
+    "INITIALIZATION_CONTRACT",
     "LOCAL_PREDICTION",
     "LOCAL_PREDICTION_TARGET",
     "LOCAL_PREDICTION_TARGET_GRADIENT",

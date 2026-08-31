@@ -196,6 +196,15 @@ def validate_actor_free_td_v2_evaluation_protocol(
         },
         label="protocol",
     )
+    if spec.initialization_contract is not None:
+        initialization_contract = protocol.get("initialization_contract")
+        if not isinstance(initialization_contract, Mapping) or dict(
+            initialization_contract
+        ) != dict(spec.initialization_contract):
+            raise ValueError(
+                "protocol.initialization_contract must exactly match the "
+                "EMA-SG V1-fresh initialization contract."
+            )
     if protocol.get("runtime", {}).get("stable_worldmodel_version") != "0.1.1":
         raise ValueError("V2 evaluation requires stable-worldmodel 0.1.1.")
     pretrained = protocol.get("pretrained_world_model")
@@ -418,22 +427,39 @@ def validate_actor_free_td_v2_checkpoint_protocol(
         raise ValueError(
             "Formal completion and an intermediate checkpoint epoch are mutually exclusive."
         )
+    checkpoint_identity: dict[str, Any] = {
+        "method": spec.method,
+        "method_family": spec.method_family,
+        "variant": spec.variant,
+        "implementation_version": spec.implementation_version,
+        "objective_version": OBJECTIVE_VERSION,
+        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+    }
+    if spec.training_stage is not None:
+        checkpoint_identity.update(
+            {
+                "stage": spec.training_stage,
+                "initialization": spec.initialization,
+            }
+        )
     for values, label in (
         (payload, "checkpoint"),
         (predictor_config, "predictor_config"),
     ):
         require_exact_values(
             values,
-            {
-                "method": spec.method,
-                "method_family": spec.method_family,
-                "variant": spec.variant,
-                "implementation_version": spec.implementation_version,
-                "objective_version": OBJECTIVE_VERSION,
-                "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
-            },
+            checkpoint_identity,
             label=label,
         )
+        if spec.initialization_contract is not None:
+            initialization_contract = values.get("initialization_contract")
+            if not isinstance(initialization_contract, Mapping) or dict(
+                initialization_contract
+            ) != dict(spec.initialization_contract):
+                raise ValueError(
+                    f"{label}.initialization_contract must exactly match the "
+                    "EMA-SG V1-fresh initialization contract."
+                )
     for key, expected in protocol["predictor"].items():
         actual = predictor_config.get(key)
         if key in {"gamma", "target_ema_decay", "target_world_ema_decay"}:
@@ -452,6 +478,26 @@ def validate_actor_free_td_v2_checkpoint_protocol(
     ):
         if predictor_config.get(key) != protocol[key]:
             raise ValueError(f"V2 predictor checkpoint {key} differs from protocol.")
+    predictor_objective = predictor_config.get("joint_objective")
+    if not isinstance(predictor_objective, Mapping):
+        raise ValueError("predictor_config.joint_objective must be a mapping.")
+    local_prediction_contract: dict[str, Any] = {
+        "local_prediction": spec.local_prediction,
+    }
+    if spec.local_prediction_target is not None:
+        local_prediction_contract.update(
+            {
+                "local_prediction_target": spec.local_prediction_target,
+                "local_prediction_target_gradient": (
+                    spec.local_prediction_target_gradient
+                ),
+            }
+        )
+    require_exact_values(
+        predictor_objective,
+        local_prediction_contract,
+        label="predictor_config.joint_objective",
+    )
     provenance = payload.get("source_v1_provenance")
     if not isinstance(provenance, Mapping):
         raise ValueError("V2 checkpoint is missing source_v1_provenance.")
@@ -501,6 +547,7 @@ def evaluate_actor_free_td_v2(
     spec: ActorFreeTDV2MethodSpec,
     checkpoint_loader,
     policy_factory,
+    checkpoint_protocol_validator=validate_actor_free_td_v2_checkpoint_protocol,
     **kwargs,
 ) -> dict[str, Any]:
     return evaluate_actor_free_td_predictor_runtime(
@@ -509,7 +556,7 @@ def evaluate_actor_free_td_v2(
         policy_factory=policy_factory,
         protocol_loader=load_actor_free_td_v2_evaluation_protocol,
         protocol_configurer=configure_actor_free_td_v2_evaluation_mode,
-        checkpoint_validator=validate_actor_free_td_v2_checkpoint_protocol,
+        checkpoint_validator=checkpoint_protocol_validator,
         raw_action_validator=validate_v2_raw_action_compatibility,
         checkpoint_provenance_keys=("source_v1_provenance",),
         **kwargs,

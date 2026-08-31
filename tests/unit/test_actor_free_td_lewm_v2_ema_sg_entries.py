@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from tdwm.training.actor_free_td_lewm_v2_ema_sg import (
     DEPLOYMENT_CHECKPOINT_VERSION,
     IMPLEMENTATION_VERSION,
     INITIALIZATION,
+    INITIALIZATION_CONTRACT,
     LOCAL_PREDICTION,
     LOCAL_PREDICTION_TARGET,
     LOCAL_PREDICTION_TARGET_GRADIENT,
@@ -56,9 +58,7 @@ def test_ema_sg_entry_resolves_separate_strict_protocol(variant: str) -> None:
     assert module.SPEC.implementation_version == IMPLEMENTATION_VERSION
     assert module.SPEC.stage == STAGE
     assert module.SPEC.initialization == INITIALIZATION
-    assert module.SPEC.deployment_checkpoint_version == (
-        DEPLOYMENT_CHECKPOINT_VERSION
-    )
+    assert module.SPEC.deployment_checkpoint_version == (DEPLOYMENT_CHECKPOINT_VERSION)
     assert module.SPEC.requires_neighbor_index is (variant == "g1")
     assert module.SPEC.local_prediction == LOCAL_PREDICTION
     assert module.SPEC.local_prediction_target == LOCAL_PREDICTION_TARGET
@@ -72,9 +72,7 @@ def test_ema_sg_entry_resolves_separate_strict_protocol(variant: str) -> None:
     assert protocol["initialization"] == INITIALIZATION
     assert protocol["seeds"] == [3072]
     assert protocol["source_v1"]["method"] == f"actor_free_td_lewm_v1_{variant}"
-    assert protocol["source_v1"]["checkpoint_sha256"] == (
-        V1_CHECKPOINT_SHA256[variant]
-    )
+    assert protocol["source_v1"]["checkpoint_sha256"] == (V1_CHECKPOINT_SHA256[variant])
     assert protocol["source_v1"]["source_code_revision"] == V1_REVISION
     assert protocol["source_v1"]["optimizer_state"] == "reset"
 
@@ -104,12 +102,8 @@ def test_ema_sg_entry_resolves_separate_strict_protocol(variant: str) -> None:
     assert protocol["split"]["implementation"] == "prebuilt_exact_indices"
 
     initialization_contract = protocol["initialization_contract"]
-    assert initialization_contract == {
-        "required_checkpoint_family": "actor_free_td_lewm_v1",
-        "required_checkpoint_epoch": 10,
-        "v2_checkpoint_as_initialization": "prohibited",
-        "optimizer_state": "fresh",
-    }
+    assert initialization_contract == INITIALIZATION_CONTRACT
+    assert module.SPEC.initialization_contract == INITIALIZATION_CONTRACT
 
 
 def test_ema_sg_overlays_preserve_all_six_v1_method_objectives() -> None:
@@ -130,13 +124,27 @@ def test_ema_sg_overlays_preserve_all_six_v1_method_objectives() -> None:
         )
         overlay = yaml.safe_load(path.read_text())
         assert (
-            overlay["extends"]
-            == "actor_free_td_lewm_v2_ema_sg_common_cube_train.yaml"
+            overlay["extends"] == "actor_free_td_lewm_v2_ema_sg_common_cube_train.yaml"
         )
         assert overlay["joint_objective"]["objective"] == objective
-        assert overlay["source_v1"]["checkpoint_sha256"] == (
-            V1_CHECKPOINT_SHA256[variant]
+        assert (
+            overlay["source_v1"]["checkpoint_sha256"] == (V1_CHECKPOINT_SHA256[variant])
         )
+
+
+def test_ema_sg_training_protocol_rejects_initialization_contract_drift() -> None:
+    module = importlib.import_module("tdwm.training.actor_free_td_lewm_v2_ema_sg_c")
+    protocol = module.load_actor_free_td_lewm_v2_ema_sg_c_training_protocol(
+        ROOT
+        / "configs"
+        / "experiment"
+        / "actor_free_td_lewm_v2_ema_sg_c_cube_train.yaml"
+    )
+    changed = deepcopy(protocol)
+    changed["initialization_contract"]["optimizer_state"] = "resume"
+
+    with pytest.raises(ValueError, match="initialization_contract"):
+        module.validate_actor_free_td_lewm_v2_ema_sg_c_training_protocol(changed)
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -209,18 +217,12 @@ def test_ema_sg_cli_only_accepts_matching_v1_initial_checkpoint(
 
 def test_original_v2_protocol_keeps_its_online_target_identity() -> None:
     module = importlib.import_module("tdwm.training.actor_free_td_lewm_v2_c")
-    path = (
-        ROOT
-        / "configs"
-        / "experiment"
-        / "actor_free_td_lewm_v2_c_cube_train.yaml"
-    )
+    path = ROOT / "configs" / "experiment" / "actor_free_td_lewm_v2_c_cube_train.yaml"
     protocol = module.load_actor_free_td_lewm_v2_c_training_protocol(path)
 
     assert protocol["method_family"] == "actor_free_td_lewm_v2"
     assert protocol["implementation_version"] == "v2"
     assert protocol["stage"] == "coupled_hybrid_finetuning"
     assert (
-        protocol["joint_objective"]["local_prediction"]
-        == "original_lewm_one_step_mse"
+        protocol["joint_objective"]["local_prediction"] == "original_lewm_one_step_mse"
     )

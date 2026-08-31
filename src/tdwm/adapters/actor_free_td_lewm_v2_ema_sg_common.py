@@ -28,6 +28,12 @@ INITIALIZATION = "corresponding_v1_deployment_finetune"
 LOCAL_PREDICTION = "ema_target_lewm_one_step_mse"
 LOCAL_PREDICTION_TARGET = "ema_world_model_next_latent"
 LOCAL_PREDICTION_TARGET_GRADIENT = "stop_gradient"
+INITIALIZATION_CONTRACT = {
+    "required_checkpoint_family": "actor_free_td_lewm_v1",
+    "required_checkpoint_epoch": 10,
+    "v2_checkpoint_as_initialization": "prohibited",
+    "optimizer_state": "fresh",
+}
 
 
 class ActorFreeTDLeWMV2EMASG(ActorFreeTDLeWMV2):
@@ -55,11 +61,11 @@ def make_actor_free_td_v2_ema_sg_spec(
         local_prediction=LOCAL_PREDICTION,
         local_prediction_target=LOCAL_PREDICTION_TARGET,
         local_prediction_target_gradient=LOCAL_PREDICTION_TARGET_GRADIENT,
-        inference_g_score=(
-            "negative_goal_projection_of_v2_ema_sg_online_predictor"
-        ),
+        inference_g_score=("negative_goal_projection_of_v2_ema_sg_online_predictor"),
         deployed_world_model="online_v2_ema_sg_world_model",
         deployed_predictor="online_v2_ema_sg_predictor",
+        training_stage=TRAINING_STAGE,
+        initialization_contract=INITIALIZATION_CONTRACT,
     )
 
 
@@ -93,6 +99,7 @@ __all__ = [
     "EVALUATION_STAGE",
     "IMPLEMENTATION_VERSION",
     "INITIALIZATION",
+    "INITIALIZATION_CONTRACT",
     "LOCAL_PREDICTION",
     "LOCAL_PREDICTION_TARGET",
     "LOCAL_PREDICTION_TARGET_GRADIENT",

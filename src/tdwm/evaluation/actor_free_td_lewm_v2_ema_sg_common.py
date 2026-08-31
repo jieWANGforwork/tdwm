@@ -74,6 +74,7 @@ def validate_actor_free_td_v2_ema_sg_checkpoint_protocol(
     protocol: Mapping[str, Any],
     spec: ActorFreeTDV2MethodSpec,
     require_formal_completion: bool = True,
+    expected_checkpoint_epoch: int | None = None,
 ) -> None:
     validate_actor_free_td_v2_checkpoint_protocol(
         payload=payload,
@@ -81,6 +82,7 @@ def validate_actor_free_td_v2_ema_sg_checkpoint_protocol(
         protocol=protocol,
         spec=spec,
         require_formal_completion=require_formal_completion,
+        expected_checkpoint_epoch=expected_checkpoint_epoch,
     )
 
 
@@ -95,6 +97,9 @@ def evaluate_actor_free_td_v2_ema_sg(
         spec=spec,
         checkpoint_loader=checkpoint_loader,
         policy_factory=policy_factory,
+        checkpoint_protocol_validator=(
+            validate_actor_free_td_v2_ema_sg_checkpoint_protocol
+        ),
         **kwargs,
     )
 

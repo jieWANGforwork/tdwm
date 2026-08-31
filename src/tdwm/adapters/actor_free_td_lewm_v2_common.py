@@ -99,6 +99,8 @@ class ActorFreeTDV2MethodSpec:
     inference_g_score: str = "negative_goal_projection_of_v2_online_predictor"
     deployed_world_model: str = "online_v2_world_model"
     deployed_predictor: str = "online_v2_predictor"
+    training_stage: str | None = None
+    initialization_contract: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.variant not in SOURCE_V1_SHA256:
@@ -129,6 +131,12 @@ class ActorFreeTDV2MethodSpec:
             )
         if any(value is not None and not value for value in optional_target):
             raise ValueError("V2 local prediction target fields must be non-empty.")
+        if self.training_stage is not None and not self.training_stage:
+            raise ValueError("V2 training_stage must be non-empty when specified.")
+        if self.initialization_contract is not None and not isinstance(
+            self.initialization_contract, Mapping
+        ):
+            raise ValueError("V2 initialization_contract must be a mapping.")
 
 
 def _positive_integer(config: Mapping[str, Any], key: str) -> int:
@@ -176,18 +184,35 @@ def validate_actor_free_td_v2_payload(
 ) -> dict[str, Any]:
     """Validate a V2 deployment payload without constructing its modules."""
 
+    checkpoint_identity: dict[str, Any] = {
+        "method": spec.method,
+        "method_family": spec.method_family,
+        "variant": spec.variant,
+        "implementation_version": spec.implementation_version,
+        "objective_version": OBJECTIVE_VERSION,
+        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+    }
+    if spec.training_stage is not None:
+        checkpoint_identity.update(
+            {
+                "stage": spec.training_stage,
+                "initialization": spec.initialization,
+            }
+        )
     require_exact_values(
         payload,
-        {
-            "method": spec.method,
-            "method_family": spec.method_family,
-            "variant": spec.variant,
-            "implementation_version": spec.implementation_version,
-            "objective_version": OBJECTIVE_VERSION,
-            "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
-        },
+        checkpoint_identity,
         label="checkpoint",
     )
+    if spec.initialization_contract is not None:
+        initialization_contract = payload.get("initialization_contract")
+        if not isinstance(initialization_contract, Mapping) or dict(
+            initialization_contract
+        ) != dict(spec.initialization_contract):
+            raise ValueError(
+                "checkpoint.initialization_contract must exactly match the "
+                "EMA-SG V1-fresh initialization contract."
+            )
     required = {
         "world_model_state_dict",
         "target_world_model_state_dict",
@@ -199,7 +224,9 @@ def validate_actor_free_td_v2_payload(
     }
     missing = required - payload.keys()
     if missing:
-        raise ValueError(f"{spec.display_name} checkpoint is missing {sorted(missing)}.")
+        raise ValueError(
+            f"{spec.display_name} checkpoint is missing {sorted(missing)}."
+        )
     for forbidden, explanation in (
         ("actor_state_dict", "V2 is actor-free."),
         ("successor_state_dict", "V2 stores G as predictor_state_dict."),
@@ -240,42 +267,59 @@ def validate_actor_free_td_v2_payload(
     missing_config = required_config - config.keys()
     if missing_config:
         raise ValueError(f"predictor_config is missing {sorted(missing_config)}.")
+    predictor_identity: dict[str, Any] = {
+        "method": spec.method,
+        "method_family": spec.method_family,
+        "variant": spec.variant,
+        "implementation_version": spec.implementation_version,
+        "objective_version": OBJECTIVE_VERSION,
+        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+        "architecture": "td_jepa_forward_map_v1",
+        "state_dim": V2_STATE_DIM,
+        "raw_action_dim": V2_RAW_ACTION_DIM,
+        "action_dim": V2_ACTION_DIM,
+        "action_embedding_dim": V2_ACTION_EMBEDDING_DIM,
+        "task_dim": V2_TASK_DIM,
+        "output_dim": V2_OUTPUT_DIM,
+        "hidden_dim": 256,
+        "hidden_layers": 1,
+        "embedding_layers": 2,
+        "num_parallel": 1,
+        "action_processing": "online_shared_lewm_action_encoder",
+        "shared_lewm_action_encoder": True,
+        "action_encoder_trainable": True,
+        "action_encoder_source": "world_model.action_encoder",
+        "state_parameterization": "coupled_online_lewm_latent",
+        "goal_conditioning": "task_input",
+        "bootstrap_action": "ema_dataset_next_action_embedding",
+        "actor": "none",
+        "reward": "none",
+        "gamma": 0.95,
+        "target_ema_decay": 0.995,
+        "target_world_ema_decay": 0.995,
+        "loss_warmup_fraction": 0.05,
+    }
+    if spec.training_stage is not None:
+        predictor_identity.update(
+            {
+                "stage": spec.training_stage,
+                "initialization": spec.initialization,
+            }
+        )
     require_exact_values(
         config,
-        {
-            "method": spec.method,
-            "method_family": spec.method_family,
-            "variant": spec.variant,
-            "implementation_version": spec.implementation_version,
-            "objective_version": OBJECTIVE_VERSION,
-            "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
-            "architecture": "td_jepa_forward_map_v1",
-            "state_dim": V2_STATE_DIM,
-            "raw_action_dim": V2_RAW_ACTION_DIM,
-            "action_dim": V2_ACTION_DIM,
-            "action_embedding_dim": V2_ACTION_EMBEDDING_DIM,
-            "task_dim": V2_TASK_DIM,
-            "output_dim": V2_OUTPUT_DIM,
-            "hidden_dim": 256,
-            "hidden_layers": 1,
-            "embedding_layers": 2,
-            "num_parallel": 1,
-            "action_processing": "online_shared_lewm_action_encoder",
-            "shared_lewm_action_encoder": True,
-            "action_encoder_trainable": True,
-            "action_encoder_source": "world_model.action_encoder",
-            "state_parameterization": "coupled_online_lewm_latent",
-            "goal_conditioning": "task_input",
-            "bootstrap_action": "ema_dataset_next_action_embedding",
-            "actor": "none",
-            "reward": "none",
-            "gamma": 0.95,
-            "target_ema_decay": 0.995,
-            "target_world_ema_decay": 0.995,
-            "loss_warmup_fraction": 0.05,
-        },
+        predictor_identity,
         label="predictor_config",
     )
+    if spec.initialization_contract is not None:
+        initialization_contract = config.get("initialization_contract")
+        if not isinstance(initialization_contract, Mapping) or dict(
+            initialization_contract
+        ) != dict(spec.initialization_contract):
+            raise ValueError(
+                "predictor_config.initialization_contract must exactly match "
+                "the EMA-SG V1-fresh initialization contract."
+            )
     for key in (
         "state_dim",
         "raw_action_dim",
@@ -400,9 +444,10 @@ def validate_actor_free_td_v2_payload(
         },
         label="source_v1_provenance",
     )
-    if not isinstance(provenance.get("checkpoint_path"), str) or not provenance[
-        "checkpoint_path"
-    ]:
+    if (
+        not isinstance(provenance.get("checkpoint_path"), str)
+        or not provenance["checkpoint_path"]
+    ):
         raise ValueError("source_v1_provenance.checkpoint_path must be non-empty.")
     return config
 
@@ -434,10 +479,7 @@ def load_actor_free_td_v2_checkpoint(
         raise ValueError("V2 predictor_state_dict must not duplicate action_encoder.")
     predictor.load_state_dict(payload["predictor_state_dict"], strict=True)
     target_predictor = predictor.make_target()
-    if any(
-        "action_encoder" in key
-        for key in payload["target_predictor_state_dict"]
-    ):
+    if any("action_encoder" in key for key in payload["target_predictor_state_dict"]):
         raise ValueError(
             "V2 target_predictor_state_dict must not duplicate action_encoder."
         )
@@ -459,9 +501,7 @@ def load_actor_free_td_v2_checkpoint(
         module.eval().requires_grad_(False)
     action_encoder = getattr(world_model, "action_encoder", None)
     validate_lewm_action_encoder_v2(action_encoder)
-    validate_lewm_action_encoder_v2(
-        getattr(target_world_model, "action_encoder", None)
-    )
+    validate_lewm_action_encoder_v2(getattr(target_world_model, "action_encoder", None))
     return world_model, predictor, config, payload
 
 

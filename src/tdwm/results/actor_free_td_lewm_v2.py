@@ -36,6 +36,20 @@ METHOD_FAMILY = "actor_free_td_lewm_v2"
 IMPLEMENTATION_VERSION = "v2"
 OBJECTIVE_VERSION = 0
 DEPLOYMENT_CHECKPOINT_VERSION = 1
+TRAINING_STAGE = "coupled_hybrid_finetuning"
+TRAINING_INITIALIZATION = "corresponding_v1_deployment_finetune"
+INITIALIZATION_CONTRACT: Mapping[str, Any] | None = None
+TRAINING_EVIDENCE_SOURCE = "v2_formal_training_launcher"
+TRAIN_SCRIPT_TEMPLATE = "train_actor_free_td_lewm_v2_{variant}.py"
+LOCAL_PREDICTION = "original_lewm_one_step_mse"
+LOCAL_PREDICTION_TARGET: str | None = None
+LOCAL_PREDICTION_TARGET_GRADIENT: str | None = None
+EVALUATION_G_SCORE = "negative_goal_projection_of_v2_online_predictor"
+DEPLOYED_WORLD_MODEL = "online_v2_world_model"
+DEPLOYED_PREDICTOR = "online_v2_predictor"
+STRICT_RESUME_IDENTITY = False
+EXTENDED_IDENTITY_FIELDS = False
+STRICT_METRIC_ACCEPTANCE = False
 SOURCE_V1_COMMIT = "3c4e62ef2ab72387536433f27ef11bce75477e7e"
 TRAINING_SEED = 3072
 TRAINING_EPOCHS = 10
@@ -169,6 +183,19 @@ METHOD_SPECS = {
         "loss": "Coupled real-state and predicted-state feature TD with prefix-marginal advantage weights",
         "special": "Mean adjacent prefix-score gains provide detached weights",
     },
+}
+
+METRIC_ALIASES: Mapping[str, tuple[str, ...]] = {
+    "train_loss": ("train/loss_epoch", "train/loss"),
+    "train_base_hybrid_td": (
+        "train/base_hybrid_td_loss_epoch",
+        "train/base_hybrid_td_loss",
+    ),
+    "validation_loss": ("validation/loss", "validation/loss_epoch"),
+    "validation_base_hybrid_td": (
+        "validation/base_hybrid_td_loss",
+        "validation/base_hybrid_td_loss_epoch",
+    ),
 }
 
 
@@ -454,28 +481,11 @@ def _audit_metrics(run_dir: Path, *, audit: _Audit, variant: str) -> dict[str, A
     paths = sorted(run_dir.glob("metrics/version_*/metrics.csv"))
     audit.require(bool(paths), f"{variant}.metrics: no metrics/version_*/metrics.csv")
     by_epoch: dict[int, dict[str, list[float]]] = {
-        epoch: {
-            "train_loss": [],
-            "train_base_hybrid_td": [],
-            "validation_loss": [],
-            "validation_base_hybrid_td": [],
-        }
+        epoch: {name: [] for name in METRIC_ALIASES}
         for epoch in range(TRAINING_EPOCHS)
     }
     steps: list[int] = []
     files: list[dict[str, Any]] = []
-    aliases = {
-        "train_loss": ("train/loss_epoch", "train/loss"),
-        "train_base_hybrid_td": (
-            "train/base_hybrid_td_loss_epoch",
-            "train/base_hybrid_td_loss",
-        ),
-        "validation_loss": ("validation/loss", "validation/loss_epoch"),
-        "validation_base_hybrid_td": (
-            "validation/base_hybrid_td_loss",
-            "validation/base_hybrid_td_loss_epoch",
-        ),
-    }
     for path in paths:
         try:
             with path.open(newline="", encoding="utf-8") as stream:
@@ -501,7 +511,7 @@ def _audit_metrics(run_dir: Path, *, audit: _Audit, variant: str) -> dict[str, A
                 continue
             if epoch not in by_epoch:
                 continue
-            for name, candidates in aliases.items():
+            for name, candidates in METRIC_ALIASES.items():
                 number = _metric_number(row, candidates)
                 if number is not None:
                     by_epoch[epoch][name].append(number)
@@ -556,6 +566,26 @@ def _execution_evidence_path(
     return candidates[-1]
 
 
+def _expected_resume_identity(
+    *, variant: str, method: str, training_revision: str | None
+) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "method": method,
+        "method_family": METHOD_FAMILY,
+        "variant": variant,
+        "implementation_version": IMPLEMENTATION_VERSION,
+        "objective_version": OBJECTIVE_VERSION,
+        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+        "protocol_sha256": TRAINING_PROTOCOL_SHA256[variant],
+        "source_v1_sha256": SOURCE_V1_SHA256[variant],
+        "v2_start_revision": training_revision,
+        "neighbor_index_manifest_sha256": (
+            G1_NEIGHBOR_MANIFEST_SHA256 if variant == "g1" else None
+        ),
+    }
+
+
 def _audit_execution_evidence(
     path: Path,
     *,
@@ -577,7 +607,7 @@ def _audit_execution_evidence(
         evidence,
         {
             "schema_version": 1,
-            "source": "v2_formal_training_launcher",
+            "source": TRAINING_EVIDENCE_SOURCE,
             "method": method,
             "variant": variant,
         },
@@ -617,7 +647,7 @@ def _audit_execution_evidence(
     if isinstance(argv, list) and all(isinstance(argument, str) for argument in argv):
         audit.require(
             any(
-                f"train_actor_free_td_lewm_v2_{variant}.py" in argument
+                TRAIN_SCRIPT_TEMPLATE.format(variant=variant) in argument
                 for argument in argv
             ),
             f"{variant}.execution_evidence.process.argv identifies the wrong method",
@@ -881,6 +911,16 @@ def _audit_execution_evidence(
         audit=audit,
         context=f"{variant}.last.v2_resume_identity",
     )
+    if STRICT_RESUME_IDENTITY:
+        audit.require(
+            actual_resume_identity
+            == _expected_resume_identity(
+                variant=variant,
+                method=method,
+                training_revision=training_revision,
+            ),
+            f"{variant}.last.v2_resume_identity differs from the formal identity",
+        )
     audit.require(
         lightning_output.get("resume_identity") == actual_resume_identity,
         f"{variant}.execution_evidence Lightning resume identity differs from last.ckpt",
@@ -979,6 +1019,22 @@ def audit_training(
         "stable_worldmodel_version": STABLE_WORLDMODEL_VERSION,
         "variants": {},
     }
+    if EXTENDED_IDENTITY_FIELDS:
+        acceptance.update(
+            {
+                "method_family": METHOD_FAMILY,
+                "implementation_version": IMPLEMENTATION_VERSION,
+                "objective_version": OBJECTIVE_VERSION,
+                "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+                "stage": TRAINING_STAGE,
+                "initialization": TRAINING_INITIALIZATION,
+                "local_prediction": LOCAL_PREDICTION,
+                "local_prediction_target": LOCAL_PREDICTION_TARGET,
+                "local_prediction_target_gradient": (
+                    LOCAL_PREDICTION_TARGET_GRADIENT
+                ),
+            }
+        )
     world_config_hashes: dict[str, str] = {}
     split_fingerprints: dict[str, str] = {}
     dataset_fingerprints: dict[str, str] = {}
@@ -1003,9 +1059,7 @@ def audit_training(
         manifest = _read_json_audit(
             manifest_path, audit=audit, context=f"{variant}.training_manifest"
         )
-        _exact_audit(
-            result,
-            {
+        expected_result_identity = {
                 "method": method,
                 "method_family": METHOD_FAMILY,
                 "variant": variant,
@@ -1014,7 +1068,21 @@ def audit_training(
                 "final_epoch": TRAINING_EPOCHS,
                 "global_step": TRAINING_STEPS,
                 "source_v1_checkpoint_sha256": SOURCE_V1_SHA256[variant],
-            },
+        }
+        if EXTENDED_IDENTITY_FIELDS:
+            expected_result_identity.update(
+                {
+                    "objective_version": OBJECTIVE_VERSION,
+                    "deployment_checkpoint_version": (
+                        DEPLOYMENT_CHECKPOINT_VERSION
+                    ),
+                    "stage": TRAINING_STAGE,
+                    "initialization": TRAINING_INITIALIZATION,
+                }
+            )
+        _exact_audit(
+            result,
+            expected_result_identity,
             audit=audit,
             context=f"{variant}.training_result",
         )
@@ -1030,9 +1098,7 @@ def audit_training(
             _same_path(result.get("last_checkpoint"), last_path),
             f"{variant}.training_result.last_checkpoint is wrong",
         )
-        _exact_audit(
-            manifest,
-            {
+        expected_manifest_identity = {
                 "method": method,
                 "method_family": METHOD_FAMILY,
                 "variant": variant,
@@ -1040,7 +1106,17 @@ def audit_training(
                 "objective_version": OBJECTIVE_VERSION,
                 "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
                 "seed": TRAINING_SEED,
-            },
+        }
+        if EXTENDED_IDENTITY_FIELDS:
+            expected_manifest_identity.update(
+                {
+                    "stage": TRAINING_STAGE,
+                    "initialization": TRAINING_INITIALIZATION,
+                }
+            )
+        _exact_audit(
+            manifest,
+            expected_manifest_identity,
             audit=audit,
             context=f"{variant}.training_manifest",
         )
@@ -1063,12 +1139,32 @@ def audit_training(
                 "method_family": METHOD_FAMILY,
                 "variant": variant,
                 "implementation_version": IMPLEMENTATION_VERSION,
-                "stage": "coupled_hybrid_finetuning",
-                "initialization": "corresponding_v1_deployment_finetune",
+                "stage": TRAINING_STAGE,
+                "initialization": TRAINING_INITIALIZATION,
                 "seeds": [TRAINING_SEED],
             },
             audit=audit,
             context=f"{variant}.protocol",
+        )
+        joint_objective = _mapping_audit(
+            protocol.get("joint_objective"),
+            audit=audit,
+            context=f"{variant}.protocol.joint_objective",
+        )
+        expected_local_objective = {"local_prediction": LOCAL_PREDICTION}
+        if LOCAL_PREDICTION_TARGET is not None:
+            expected_local_objective["local_prediction_target"] = (
+                LOCAL_PREDICTION_TARGET
+            )
+        if LOCAL_PREDICTION_TARGET_GRADIENT is not None:
+            expected_local_objective["local_prediction_target_gradient"] = (
+                LOCAL_PREDICTION_TARGET_GRADIENT
+            )
+        _exact_audit(
+            joint_objective,
+            expected_local_objective,
+            audit=audit,
+            context=f"{variant}.protocol.joint_objective",
         )
         runtime = _mapping_audit(
             manifest.get("runtime"), audit=audit, context=f"{variant}.runtime"
@@ -1256,13 +1352,15 @@ def audit_training(
             "predictor_config",
             "source_v1_provenance",
         }
+        if EXTENDED_IDENTITY_FIELDS:
+            expected_schema.update(("stage", "initialization"))
+            if INITIALIZATION_CONTRACT is not None:
+                expected_schema.add("initialization_contract")
         audit.require(
             set(deployment) == expected_schema,
             f"{variant}.epoch10: deployment checkpoint schema differs",
         )
-        _exact_audit(
-            deployment,
-            {
+        expected_deployment_identity = {
                 "method": method,
                 "method_family": METHOD_FAMILY,
                 "variant": variant,
@@ -1271,10 +1369,66 @@ def audit_training(
                 "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
                 "epoch": TRAINING_EPOCHS,
                 "global_step": TRAINING_STEPS,
-            },
+        }
+        if EXTENDED_IDENTITY_FIELDS:
+            expected_deployment_identity.update(
+                {
+                    "stage": TRAINING_STAGE,
+                    "initialization": TRAINING_INITIALIZATION,
+                }
+            )
+        _exact_audit(
+            deployment,
+            expected_deployment_identity,
             audit=audit,
             context=f"{variant}.epoch10",
         )
+        if EXTENDED_IDENTITY_FIELDS and INITIALIZATION_CONTRACT is not None:
+            audit.require(
+                deployment.get("initialization_contract")
+                == dict(INITIALIZATION_CONTRACT),
+                f"{variant}.epoch10.initialization_contract differs",
+            )
+        if EXTENDED_IDENTITY_FIELDS:
+            predictor_config = _mapping_audit(
+                deployment.get("predictor_config"),
+                audit=audit,
+                context=f"{variant}.epoch10.predictor_config",
+            )
+            _exact_audit(
+                predictor_config,
+                {
+                    "method": method,
+                    "method_family": METHOD_FAMILY,
+                    "variant": variant,
+                    "implementation_version": IMPLEMENTATION_VERSION,
+                    "objective_version": OBJECTIVE_VERSION,
+                    "deployment_checkpoint_version": (
+                        DEPLOYMENT_CHECKPOINT_VERSION
+                    ),
+                    "stage": TRAINING_STAGE,
+                    "initialization": TRAINING_INITIALIZATION,
+                },
+                audit=audit,
+                context=f"{variant}.epoch10.predictor_config",
+            )
+            if INITIALIZATION_CONTRACT is not None:
+                audit.require(
+                    predictor_config.get("initialization_contract")
+                    == dict(INITIALIZATION_CONTRACT),
+                    f"{variant}.epoch10.predictor_config."
+                    "initialization_contract differs",
+                )
+            for key in (
+                "task_sampling",
+                "joint_objective",
+                "source_v1",
+                "source_artifacts",
+            ):
+                audit.require(
+                    predictor_config.get(key) == protocol.get(key),
+                    f"{variant}.epoch10.predictor_config.{key} differs from protocol",
+                )
         world_state = _tensor_mapping(
             deployment.get("world_model_state_dict"),
             audit=audit,
@@ -1416,6 +1570,20 @@ def audit_training(
             audit=audit,
             context=f"{variant}.last.v2_resume_identity",
         )
+        if STRICT_RESUME_IDENTITY:
+            audit.require(
+                resume_identity
+                == _expected_resume_identity(
+                    variant=variant,
+                    method=method,
+                    training_revision=(
+                        runtime_revision
+                        if isinstance(runtime_revision, str)
+                        else None
+                    ),
+                ),
+                f"{variant}.last.v2_resume_identity differs from the formal identity",
+            )
         required_rng = {
             "v2_data_generator_state",
             "v2_goal_generator_state",
@@ -1642,6 +1810,24 @@ def _validate_training_acceptance(
         },
         context="training_acceptance",
     )
+    if EXTENDED_IDENTITY_FIELDS:
+        _exact(
+            acceptance,
+            {
+                "method_family": METHOD_FAMILY,
+                "implementation_version": IMPLEMENTATION_VERSION,
+                "objective_version": OBJECTIVE_VERSION,
+                "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+                "stage": TRAINING_STAGE,
+                "initialization": TRAINING_INITIALIZATION,
+                "local_prediction": LOCAL_PREDICTION,
+                "local_prediction_target": LOCAL_PREDICTION_TARGET,
+                "local_prediction_target_gradient": (
+                    LOCAL_PREDICTION_TARGET_GRADIENT
+                ),
+            },
+            context="training_acceptance",
+        )
     training_revision = acceptance.get("training_revision")
     if not _is_git_revision(training_revision):
         raise V2ResultValidationError(
@@ -1734,10 +1920,58 @@ def _validate_training_acceptance(
                 raise V2ResultValidationError(
                     f"training_acceptance.{variant}: {path_key} is missing or changed"
                 )
+        if EXTENDED_IDENTITY_FIELDS:
+            training_result, _ = _read_json(
+                Path(str(item["training_result_path"])),
+                context=f"training_acceptance.{variant}.training_result",
+            )
+            _exact(
+                training_result,
+                {
+                    "method": method,
+                    "method_family": METHOD_FAMILY,
+                    "variant": variant,
+                    "implementation_version": IMPLEMENTATION_VERSION,
+                    "objective_version": OBJECTIVE_VERSION,
+                    "deployment_checkpoint_version": (
+                        DEPLOYMENT_CHECKPOINT_VERSION
+                    ),
+                    "stage": TRAINING_STAGE,
+                    "initialization": TRAINING_INITIALIZATION,
+                },
+                context=f"training_acceptance.{variant}.training_result",
+            )
         training_manifest, _ = _read_json(
             Path(str(item["training_manifest_path"])),
             context=f"training_acceptance.{variant}.training_manifest",
         )
+        if EXTENDED_IDENTITY_FIELDS:
+            _exact(
+                training_manifest,
+                {
+                    "method": method,
+                    "method_family": METHOD_FAMILY,
+                    "variant": variant,
+                    "implementation_version": IMPLEMENTATION_VERSION,
+                    "objective_version": OBJECTIVE_VERSION,
+                    "deployment_checkpoint_version": (
+                        DEPLOYMENT_CHECKPOINT_VERSION
+                    ),
+                    "stage": TRAINING_STAGE,
+                    "initialization": TRAINING_INITIALIZATION,
+                },
+                context=f"training_acceptance.{variant}.training_manifest",
+            )
+            accepted_protocol = _mapping(
+                training_manifest.get("protocol"),
+                context=f"training_acceptance.{variant}.protocol",
+            )
+            if canonical_sha256(accepted_protocol) != TRAINING_PROTOCOL_SHA256[
+                variant
+            ]:
+                raise V2ResultValidationError(
+                    f"training_acceptance.{variant}: protocol identity differs"
+                )
         manifest_runtime = _mapping(
             training_manifest.get("runtime"),
             context=f"training_acceptance.{variant}.runtime",
@@ -1750,6 +1984,17 @@ def _validate_training_acceptance(
             Path(str(item["execution_evidence_path"])),
             context=f"training_acceptance.{variant}.execution_evidence",
         )
+        if EXTENDED_IDENTITY_FIELDS:
+            _exact(
+                execution,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "source": TRAINING_EVIDENCE_SOURCE,
+                    "method": method,
+                    "variant": variant,
+                },
+                context=f"training_acceptance.{variant}.execution_evidence",
+            )
         process = _mapping(
             execution.get("process"),
             context=f"training_acceptance.{variant}.execution_evidence.process",
@@ -1776,6 +2021,16 @@ def _validate_training_acceptance(
             raise V2ResultValidationError(
                 f"training_acceptance.{variant}: resume revision differs"
             )
+        if STRICT_RESUME_IDENTITY and resume_identity != _expected_resume_identity(
+            variant=variant,
+            method=method,
+            training_revision=(
+                training_revision if isinstance(training_revision, str) else None
+            ),
+        ):
+            raise V2ResultValidationError(
+                f"training_acceptance.{variant}: resume identity differs"
+            )
         source_v1 = _mapping(
             item.get("source_v1"), context=f"training_acceptance.{variant}.source_v1"
         )
@@ -1796,6 +2051,27 @@ def _validate_training_acceptance(
             raise V2ResultValidationError(
                 f"training_acceptance.{variant}: metrics must cover ten epochs"
             )
+        for expected_epoch, epoch_metrics in enumerate(epochs, start=1):
+            if not STRICT_METRIC_ACCEPTANCE:
+                break
+            epoch_mapping = _mapping(
+                epoch_metrics,
+                context=(
+                    f"training_acceptance.{variant}.metrics.epoch_{expected_epoch}"
+                ),
+            )
+            if epoch_mapping.get("epoch") != expected_epoch:
+                raise V2ResultValidationError(
+                    f"training_acceptance.{variant}: metrics epoch order is wrong"
+                )
+            for metric_name in METRIC_ALIASES:
+                _finite(
+                    epoch_mapping.get(metric_name),
+                    context=(
+                        f"training_acceptance.{variant}.metrics."
+                        f"epoch_{expected_epoch}.{metric_name}"
+                    ),
+                )
         if metrics.get("final_step") != TRAINING_STEPS - 1:
             raise V2ResultValidationError(
                 f"training_acceptance.{variant}: metrics final step is wrong"
@@ -1954,14 +2230,14 @@ def _validate_evaluation(
             "score_mode": score_mode,
             "f_score": "lewm_rollout_goal_distance",
             "f_score_reducer": "final_predicted_latent_summed_mse",
-            "g_score": "negative_goal_projection_of_v2_online_predictor",
+            "g_score": EVALUATION_G_SCORE,
             "f_plus_g_split": "first_h_minus_one_blocks_with_f_last_block_with_g",
             "f_plus_g_combination": "prefix_final_f_cost_minus_gamma_power_tail_g_score",
             "g_only_horizon": 1,
             "goal_enters_predictor": True,
             "learned_actor": False,
-            "deployed_world_model": "online_v2_world_model",
-            "deployed_predictor": "online_v2_predictor",
+            "deployed_world_model": DEPLOYED_WORLD_MODEL,
+            "deployed_predictor": DEPLOYED_PREDICTOR,
             "target_modules_used_at_evaluation": False,
             "deployed_modules_frozen": True,
             "training_only_auxiliary_used_at_evaluation": False,

@@ -13,6 +13,8 @@ from tdwm.adapters.actor_free_td_lewm_v2_ema_sg_c import (
     METHOD_SPEC as EMA_SG_C_SPEC,
 )
 from tdwm.adapters.actor_free_td_lewm_v2_ema_sg_common import (
+    INITIALIZATION_CONTRACT,
+    TRAINING_STAGE,
     ActorFreeTDLeWMV2EMASG,
 )
 from tdwm.evaluation.actor_free_td_lewm_v2_ema_sg_c import (
@@ -25,8 +27,7 @@ from tdwm.methods.actor_free_td_lewm_v1 import ActorFreeTDJEPAPredictorV1
 def _payload() -> dict:
     protocol = load_actor_free_td_lewm_v2_ema_sg_c_evaluation_protocol(
         Path(
-            "configs/experiment/"
-            "actor_free_td_lewm_v2_ema_sg_c_cube_checkpoint_o50.yaml"
+            "configs/experiment/actor_free_td_lewm_v2_ema_sg_c_cube_checkpoint_o50.yaml"
         )
     )
     predictor = ActorFreeTDJEPAPredictorV1()
@@ -37,6 +38,9 @@ def _payload() -> dict:
         "implementation_version": EMA_SG_C_SPEC.implementation_version,
         "objective_version": 0,
         "deployment_checkpoint_version": 1,
+        "stage": TRAINING_STAGE,
+        "initialization": EMA_SG_C_SPEC.initialization,
+        "initialization_contract": deepcopy(INITIALIZATION_CONTRACT),
         "epoch": 10,
         "global_step": 127_960,
         "world_model_state_dict": {},
@@ -53,6 +57,9 @@ def _payload() -> dict:
             "implementation_version": EMA_SG_C_SPEC.implementation_version,
             "objective_version": 0,
             "deployment_checkpoint_version": 1,
+            "stage": TRAINING_STAGE,
+            "initialization": EMA_SG_C_SPEC.initialization,
+            "initialization_contract": deepcopy(INITIALIZATION_CONTRACT),
             **deepcopy(protocol["predictor"]),
             "task_sampling": deepcopy(protocol["task_sampling"]),
             "joint_objective": deepcopy(protocol["joint_objective"]),
@@ -76,6 +83,9 @@ def test_ema_sg_payload_strictly_locks_its_identity_and_local_target() -> None:
 
     assert config["method_family"] == "actor_free_td_lewm_v2_ema_sg"
     assert config["implementation_version"] == "v2_ema_sg"
+    assert config["stage"] == TRAINING_STAGE
+    assert config["initialization"] == EMA_SG_C_SPEC.initialization
+    assert config["initialization_contract"] == INITIALIZATION_CONTRACT
     assert config["joint_objective"]["local_prediction"] == (
         "ema_target_lewm_one_step_mse"
     )
@@ -107,8 +117,77 @@ def test_ema_sg_payload_strictly_locks_its_identity_and_local_target() -> None:
         validate_actor_free_td_v2_payload(payload, spec=V2_C_SPEC)
 
 
-def test_ema_sg_has_an_explicit_deployment_wrapper_identity() -> None:
-    assert ActorFreeTDLeWMV2EMASG.method_family == (
-        "actor_free_td_lewm_v2_ema_sg"
+@pytest.mark.parametrize(
+    ("location", "key", "replacement"),
+    (
+        ("payload", "stage", "coupled_hybrid_finetuning"),
+        ("payload", "initialization", "resume_v2"),
+        ("payload", "initialization_contract", {}),
+        ("predictor_config", "stage", "coupled_hybrid_finetuning"),
+        ("predictor_config", "initialization", "resume_v2"),
+        ("predictor_config", "initialization_contract", {}),
+    ),
+)
+def test_ema_sg_payload_rejects_identity_or_initialization_drift(
+    location: str,
+    key: str,
+    replacement,
+) -> None:
+    payload = _payload()
+    target = payload if location == "payload" else payload["predictor_config"]
+    target[key] = replacement
+
+    with pytest.raises(ValueError, match=key):
+        validate_actor_free_td_v2_payload(payload, spec=EMA_SG_C_SPEC)
+
+
+@pytest.mark.parametrize(
+    "key",
+    (
+        "local_prediction",
+        "local_prediction_target",
+        "local_prediction_target_gradient",
+    ),
+)
+def test_ema_sg_payload_rejects_each_local_prediction_contract_drift(
+    key: str,
+) -> None:
+    payload = _payload()
+    payload["predictor_config"]["joint_objective"][key] = "wrong"
+
+    with pytest.raises(ValueError, match=key):
+        validate_actor_free_td_v2_payload(payload, spec=EMA_SG_C_SPEC)
+
+
+def test_ema_sg_intermediate_o50_checkpoint_is_strictly_epoch_bound() -> None:
+    payload = _payload()
+    payload["epoch"] = 3
+    payload["global_step"] = 38_388
+    protocol = load_actor_free_td_lewm_v2_ema_sg_c_evaluation_protocol(
+        Path(
+            "configs/experiment/actor_free_td_lewm_v2_ema_sg_c_cube_checkpoint_o50.yaml"
+        )
     )
+
+    validate_actor_free_td_lewm_v2_ema_sg_c_checkpoint_protocol(
+        payload=payload,
+        predictor_config=payload["predictor_config"],
+        protocol=protocol,
+        require_formal_completion=False,
+        expected_checkpoint_epoch=3,
+    )
+
+    payload["global_step"] += 1
+    with pytest.raises(ValueError, match="global_step"):
+        validate_actor_free_td_lewm_v2_ema_sg_c_checkpoint_protocol(
+            payload=payload,
+            predictor_config=payload["predictor_config"],
+            protocol=protocol,
+            require_formal_completion=False,
+            expected_checkpoint_epoch=3,
+        )
+
+
+def test_ema_sg_has_an_explicit_deployment_wrapper_identity() -> None:
+    assert ActorFreeTDLeWMV2EMASG.method_family == ("actor_free_td_lewm_v2_ema_sg")
     assert ActorFreeTDLeWMV2EMASG.implementation_version == "v2_ema_sg"

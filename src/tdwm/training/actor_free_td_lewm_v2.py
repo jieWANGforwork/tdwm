@@ -137,9 +137,8 @@ class ActorFreeTDLeWMV2Spec:
     deployment_checkpoint_version: int = DEPLOYMENT_CHECKPOINT_VERSION
     local_prediction: str = ONLINE_LOCAL_PREDICTION
     local_prediction_target: str = ONLINE_LOCAL_PREDICTION_TARGET
-    local_prediction_target_gradient: str = (
-        ONLINE_LOCAL_PREDICTION_TARGET_GRADIENT
-    )
+    local_prediction_target_gradient: str = ONLINE_LOCAL_PREDICTION_TARGET_GRADIENT
+    initialization_contract: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.variant not in SUPPORTED_VARIANTS:
@@ -176,6 +175,10 @@ class ActorFreeTDLeWMV2Spec:
             ),
         }:
             raise ValueError("Unsupported V2 local prediction target contract.")
+        if self.initialization_contract is not None and not isinstance(
+            self.initialization_contract, Mapping
+        ):
+            raise ValueError("V2 initialization_contract must be a mapping.")
 
 
 V2_SPECS = {
@@ -339,6 +342,15 @@ def validate_actor_free_td_lewm_v2_training_protocol(
         },
         label="protocol",
     )
+    if spec.initialization_contract is not None:
+        initialization_contract = protocol.get("initialization_contract")
+        if not isinstance(initialization_contract, Mapping) or dict(
+            initialization_contract
+        ) != dict(spec.initialization_contract):
+            raise ValueError(
+                "protocol.initialization_contract must exactly match the "
+                "EMA-SG V1-fresh initialization contract."
+            )
     if protocol.get("seeds") != [3072]:
         raise ValueError("V2 is locked to the only archived matching V1 seed, 3072.")
     if protocol.get("runtime", {}).get("stable_worldmodel_version") != "0.1.1":
@@ -514,9 +526,7 @@ def validate_actor_free_td_lewm_v2_training_protocol(
     )
     local_target_contract = {
         "local_prediction_target": spec.local_prediction_target,
-        "local_prediction_target_gradient": (
-            spec.local_prediction_target_gradient
-        ),
+        "local_prediction_target_gradient": (spec.local_prediction_target_gradient),
     }
     if spec.local_prediction == EMA_LOCAL_PREDICTION:
         # EMA-SG is a separately identified experiment family. Its protocol
@@ -531,9 +541,7 @@ def validate_actor_free_td_lewm_v2_training_protocol(
         # target fields are accepted only when they match the legacy behavior.
         for key, expected_value in local_target_contract.items():
             if key in objective and objective[key] != expected_value:
-                raise ValueError(
-                    f"joint_objective.{key} must be {expected_value!r}."
-                )
+                raise ValueError(f"joint_objective.{key} must be {expected_value!r}.")
     variant_objective_locks = {
         "c": {
             "objective": "goal_projected_td",
@@ -806,9 +814,7 @@ def _local_prediction_objective_v2(
     spec: ActorFreeTDLeWMV2Spec,
 ) -> LocalPredictionObjectiveV2:
     if not (
-        local_prediction.shape
-        == online_local_targets.shape
-        == ema_local_targets.shape
+        local_prediction.shape == online_local_targets.shape == ema_local_targets.shape
     ):
         raise RuntimeError("V2 LeWM local prediction is misaligned.")
     if spec.local_prediction == ONLINE_LOCAL_PREDICTION:
@@ -825,11 +831,11 @@ def _local_prediction_objective_v2(
     prediction_loss = (local_prediction - local_targets).square().mean()
     with torch.no_grad():
         online_reference_mse = (
-            local_prediction.detach() - online_local_targets.detach()
-        ).square().mean()
+            (local_prediction.detach() - online_local_targets.detach()).square().mean()
+        )
         online_ema_latent_drift = (
-            online_local_targets.detach() - ema_local_targets.detach()
-        ).square().mean()
+            (online_local_targets.detach() - ema_local_targets.detach()).square().mean()
+        )
     return LocalPredictionObjectiveV2(
         loss=prediction_loss,
         online_reference_mse=online_reference_mse,
@@ -1320,9 +1326,7 @@ def _build_v2_training_module(
             )
             ema_local_targets = torch.cat(
                 [
-                    target_embeddings[
-                        :, start + 1 : start + self.history_size + 1
-                    ]
+                    target_embeddings[:, start + 1 : start + self.history_size + 1]
                     for start in range(local_count)
                 ],
                 dim=0,
@@ -1566,6 +1570,15 @@ def _predictor_config(
         "deployment_checkpoint_version": spec.deployment_checkpoint_version,
         "stage": spec.stage,
         "initialization": spec.initialization,
+        **(
+            {
+                "initialization_contract": copy.deepcopy(
+                    dict(spec.initialization_contract)
+                )
+            }
+            if spec.initialization_contract is not None
+            else {}
+        ),
         **copy.deepcopy(protocol["predictor"]),
         "task_sampling": copy.deepcopy(protocol["task_sampling"]),
         "joint_objective": copy.deepcopy(protocol["joint_objective"]),
@@ -1593,6 +1606,15 @@ def _deployment_payload(
         "deployment_checkpoint_version": spec.deployment_checkpoint_version,
         "stage": spec.stage,
         "initialization": spec.initialization,
+        **(
+            {
+                "initialization_contract": copy.deepcopy(
+                    dict(spec.initialization_contract)
+                )
+            }
+            if spec.initialization_contract is not None
+            else {}
+        ),
         "epoch": int(epoch),
         "global_step": int(global_step),
         "world_model_state_dict": module.model.state_dict(),
@@ -1676,8 +1698,7 @@ def _validate_v2_resume_manifest(
         manifest.get("method") == spec.method
         and manifest.get("method_family") == spec.method_family
         and manifest.get("variant") == spec.variant
-        and manifest.get("implementation_version")
-        == spec.implementation_version
+        and manifest.get("implementation_version") == spec.implementation_version
         and manifest.get("objective_version") == spec.objective_version
         and manifest.get("deployment_checkpoint_version")
         == spec.deployment_checkpoint_version
