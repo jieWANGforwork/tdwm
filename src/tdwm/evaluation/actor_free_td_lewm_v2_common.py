@@ -12,8 +12,6 @@ import yaml
 
 from tdwm.adapters.actor_free_td_lewm_v2_common import (
     DEPLOYMENT_CHECKPOINT_VERSION,
-    IMPLEMENTATION_VERSION,
-    METHOD_FAMILY,
     OBJECTIVE_VERSION,
     SOURCE_ARTIFACTS,
     ActorFreeTDV2MethodSpec,
@@ -189,12 +187,12 @@ def validate_actor_free_td_v2_evaluation_protocol(
         {
             "schema_version": 1,
             "method": spec.method,
-            "method_family": METHOD_FAMILY,
+            "method_family": spec.method_family,
             "variant": spec.variant,
-            "implementation_version": IMPLEMENTATION_VERSION,
+            "implementation_version": spec.implementation_version,
             "environment": "cube",
-            "stage": "planner_evaluation",
-            "initialization": "corresponding_v1_deployment_finetune",
+            "stage": spec.evaluation_stage,
+            "initialization": spec.initialization,
         },
         label="protocol",
     )
@@ -274,10 +272,22 @@ def validate_actor_free_td_v2_evaluation_protocol(
     missing = set(spec.objective_keys) - objective.keys()
     if missing:
         raise ValueError(f"joint_objective is missing {sorted(missing)}.")
+    local_prediction_contract: dict[str, Any] = {
+        "local_prediction": spec.local_prediction,
+    }
+    if spec.local_prediction_target is not None:
+        local_prediction_contract.update(
+            {
+                "local_prediction_target": spec.local_prediction_target,
+                "local_prediction_target_gradient": (
+                    spec.local_prediction_target_gradient
+                ),
+            }
+        )
     require_exact_values(
         objective,
         {
-            "local_prediction": "original_lewm_one_step_mse",
+            **local_prediction_contract,
             "local_prediction_weight": 1.0,
             "regularization": "original_lewm_sigreg",
             "target_encoder": "ema_world_model",
@@ -310,7 +320,7 @@ def validate_actor_free_td_v2_evaluation_protocol(
         {
             "f_score": "lewm_rollout_goal_distance",
             "f_score_reducer": "final_predicted_latent_summed_mse",
-            "g_score": "negative_goal_projection_of_v2_online_predictor",
+            "g_score": spec.inference_g_score,
             "f_plus_g_split": "first_h_minus_one_blocks_with_f_last_block_with_g",
             "f_plus_g_combination": (
                 "prefix_final_f_cost_minus_gamma_power_tail_g_score"
@@ -318,8 +328,8 @@ def validate_actor_free_td_v2_evaluation_protocol(
             "g_only_horizon": 1,
             "goal_enters_predictor": True,
             "learned_actor": False,
-            "deployed_world_model": "online_v2_world_model",
-            "deployed_predictor": "online_v2_predictor",
+            "deployed_world_model": spec.deployed_world_model,
+            "deployed_predictor": spec.deployed_predictor,
             "target_modules_used_at_evaluation": False,
             "deployed_modules_frozen": True,
             "training_only_auxiliary_used_at_evaluation": False,
@@ -411,9 +421,9 @@ def validate_actor_free_td_v2_checkpoint_protocol(
             values,
             {
                 "method": spec.method,
-                "method_family": METHOD_FAMILY,
+                "method_family": spec.method_family,
                 "variant": spec.variant,
-                "implementation_version": IMPLEMENTATION_VERSION,
+                "implementation_version": spec.implementation_version,
                 "objective_version": OBJECTIVE_VERSION,
                 "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
             },

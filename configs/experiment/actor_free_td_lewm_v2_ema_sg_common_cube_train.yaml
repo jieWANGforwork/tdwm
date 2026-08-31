@@ -1,0 +1,26 @@
+extends: actor_free_td_lewm_v2_common_cube_train.yaml
+schema_version: 1
+method_family: actor_free_td_lewm_v2_ema_sg
+implementation_version: v2_ema_sg
+environment: cube
+stage: coupled_hybrid_ema_target_finetuning
+initialization: corresponding_v1_deployment_finetune
+
+# This is a clean comparison against V2: initialize from the same matching V1
+# deployment, never from a V2 checkpoint, and create fresh optimizer state.
+initialization_contract:
+  required_checkpoint_family: actor_free_td_lewm_v1
+  required_checkpoint_epoch: 10
+  v2_checkpoint_as_initialization: prohibited
+  optimizer_state: fresh
+
+joint_objective:
+  local_prediction: ema_target_lewm_one_step_mse
+  local_prediction_target: ema_world_model_next_latent
+  local_prediction_target_gradient: stop_gradient
+
+provenance:
+  base_protocol: configs/experiment/actor_free_td_lewm_v2_common_cube_train.yaml
+  comparison_family: actor_free_td_lewm_v2
+  status: implementation_ready_untrained
+  note: V2-EMA-SG differs from V2 only by using the stop-gradient EMA world-model next latent as the one-step LeWM MSE target; it starts again from the corresponding V1 deployment with fresh optimizer state.

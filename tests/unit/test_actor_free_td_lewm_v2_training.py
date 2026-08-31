@@ -9,11 +9,19 @@ from torch import nn
 
 from tdwm.methods.actor_free_td_lewm_v1 import ActorFreeTDJEPAPredictorV1
 from tdwm.training.actor_free_td_lewm_v2 import (
+    EMA_LOCAL_PREDICTION,
+    EMA_LOCAL_PREDICTION_TARGET,
+    EMA_LOCAL_PREDICTION_TARGET_GRADIENT,
     V1_SOURCE_GLOBAL_STEP,
     V1_SOURCE_SHA256,
     V2_SPECS,
+    ActorFreeTDLeWMV2Spec,
     V2Initialization,
     _build_v2_training_module,
+    _deployment_payload,
+    _local_prediction_objective_v2,
+    _predictor_config,
+    _validate_v2_resume_manifest,
     load_actor_free_td_lewm_v2_training_protocol,
     load_v2_initialization,
     sample_matched_future_goals_v2,
@@ -31,6 +39,23 @@ ROOT = Path(__file__).resolve().parents[2]
 VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
 
 
+def _ema_sg_spec(variant: str = "c") -> ActorFreeTDLeWMV2Spec:
+    family = "actor_free_td_lewm_v2_ema_sg"
+    return ActorFreeTDLeWMV2Spec(
+        method=f"{family}_{variant}",
+        variant=variant,
+        requires_neighbor_index=variant == "g1",
+        method_family=family,
+        implementation_version="v2_ema_sg",
+        stage="coupled_hybrid_ema_target_finetuning",
+        local_prediction=EMA_LOCAL_PREDICTION,
+        local_prediction_target=EMA_LOCAL_PREDICTION_TARGET,
+        local_prediction_target_gradient=(
+            EMA_LOCAL_PREDICTION_TARGET_GRADIENT
+        ),
+    )
+
+
 def _v2_protocol(variant: str = "c") -> dict:
     return load_actor_free_td_lewm_v2_training_protocol(
         ROOT
@@ -39,6 +64,30 @@ def _v2_protocol(variant: str = "c") -> dict:
         / f"actor_free_td_lewm_v2_{variant}_cube_train.yaml",
         spec=V2_SPECS[variant],
     )
+
+
+def _ema_sg_protocol(variant: str = "c") -> dict:
+    spec = _ema_sg_spec(variant)
+    protocol = _v2_protocol(variant)
+    protocol.update(
+        {
+            "method": spec.method,
+            "method_family": spec.method_family,
+            "implementation_version": spec.implementation_version,
+            "stage": spec.stage,
+            "initialization": spec.initialization,
+        }
+    )
+    protocol["joint_objective"].update(
+        {
+            "local_prediction": spec.local_prediction,
+            "local_prediction_target": spec.local_prediction_target,
+            "local_prediction_target_gradient": (
+                spec.local_prediction_target_gradient
+            ),
+        }
+    )
+    return protocol
 
 
 def _v1_payload(variant: str = "c") -> dict:
@@ -143,6 +192,35 @@ def test_v2_protocol_validation_fails_closed_on_stage_drift(
             protocol,
             spec=V2_SPECS["c"],
         )
+
+
+def test_v2_ema_sg_protocol_locks_all_three_local_target_fields() -> None:
+    spec = _ema_sg_spec()
+    protocol = _ema_sg_protocol()
+
+    validate_actor_free_td_lewm_v2_training_protocol(protocol, spec=spec)
+    for key in (
+        "local_prediction_target",
+        "local_prediction_target_gradient",
+    ):
+        drifted = deepcopy(protocol)
+        drifted["joint_objective"].pop(key)
+        with pytest.raises(ValueError, match=key):
+            validate_actor_free_td_lewm_v2_training_protocol(
+                drifted,
+                spec=spec,
+            )
+
+
+def test_original_v2_protocol_keeps_its_legacy_online_target_contract() -> None:
+    protocol = _v2_protocol("c")
+
+    assert "local_prediction_target" not in protocol["joint_objective"]
+    assert "local_prediction_target_gradient" not in protocol["joint_objective"]
+    validate_actor_free_td_lewm_v2_training_protocol(
+        protocol,
+        spec=V2_SPECS["c"],
+    )
 
 
 def test_v2_protocol_inheritance_rejects_cycles(tmp_path: Path) -> None:
@@ -255,6 +333,66 @@ def test_matched_future_goals_are_ema_detached_and_transition_aligned() -> None:
     assert not offsets.requires_grad
 
 
+def test_original_v2_local_mse_keeps_online_target_gradient_and_diagnostics() -> None:
+    prediction = torch.tensor([1.0, 4.0], requires_grad=True)
+    online_target = torch.tensor([3.0, 2.0], requires_grad=True)
+    ema_target = torch.tensor([2.0, 8.0], requires_grad=True)
+
+    objective = _local_prediction_objective_v2(
+        prediction,
+        online_target,
+        ema_target,
+        spec=V2_SPECS["c"],
+    )
+
+    torch.testing.assert_close(objective.loss, torch.tensor(4.0))
+    torch.testing.assert_close(
+        objective.online_reference_mse,
+        torch.tensor(4.0),
+    )
+    torch.testing.assert_close(
+        objective.online_ema_latent_drift,
+        torch.tensor(18.5),
+    )
+    assert not objective.online_reference_mse.requires_grad
+    assert not objective.online_ema_latent_drift.requires_grad
+
+    objective.loss.backward()
+    torch.testing.assert_close(prediction.grad, torch.tensor([-2.0, 2.0]))
+    torch.testing.assert_close(online_target.grad, torch.tensor([2.0, -2.0]))
+    assert ema_target.grad is None
+
+
+def test_ema_sg_local_mse_uses_detached_ema_target_with_exact_diagnostics() -> None:
+    prediction = torch.tensor([1.0, 4.0], requires_grad=True)
+    online_target = torch.tensor([3.0, 2.0], requires_grad=True)
+    ema_target = torch.tensor([2.0, 8.0], requires_grad=True)
+
+    objective = _local_prediction_objective_v2(
+        prediction,
+        online_target,
+        ema_target,
+        spec=_ema_sg_spec(),
+    )
+
+    torch.testing.assert_close(objective.loss, torch.tensor(8.5))
+    torch.testing.assert_close(
+        objective.online_reference_mse,
+        torch.tensor(4.0),
+    )
+    torch.testing.assert_close(
+        objective.online_ema_latent_drift,
+        torch.tensor(18.5),
+    )
+    assert not objective.online_reference_mse.requires_grad
+    assert not objective.online_ema_latent_drift.requires_grad
+
+    objective.loss.backward()
+    torch.testing.assert_close(prediction.grad, torch.tensor([-1.0, -4.0]))
+    assert online_target.grad is None
+    assert ema_target.grad is None
+
+
 class _ActionEncoder(nn.Module):
     input_dim = 25
     emb_dim = 192
@@ -301,10 +439,17 @@ class _DifferentiableSIGReg(nn.Module):
         return value.square().mean()
 
 
-def _v2_module(monkeypatch: pytest.MonkeyPatch):
+def _v2_module(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    spec: ActorFreeTDLeWMV2Spec | None = None,
+    protocol: dict | None = None,
+):
     import stable_worldmodel as swm
 
     monkeypatch.setattr(swm.wm, "SIGReg", _DifferentiableSIGReg)
+    spec = V2_SPECS["c"] if spec is None else spec
+    protocol = _v2_protocol("c") if protocol is None else protocol
     payload = _v1_payload("c")
     initialization = V2Initialization(
         payload=payload,
@@ -315,9 +460,9 @@ def _v2_module(monkeypatch: pytest.MonkeyPatch):
     return _build_v2_training_module(
         _TrainableWorld(),
         initialization,
-        _v2_protocol("c"),
+        protocol,
         total_steps=20,
-        spec=V2_SPECS["c"],
+        spec=spec,
         data_generator=torch.Generator().manual_seed(1),
         goal_generator=torch.Generator().manual_seed(2),
         task_generator=torch.Generator().manual_seed(3),
@@ -326,6 +471,81 @@ def _v2_module(monkeypatch: pytest.MonkeyPatch):
         neighbor_index=None,
         device_image_preprocessing=False,
     )
+
+
+def test_ema_sg_payload_and_resume_identity_come_from_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = _ema_sg_spec()
+    protocol = _ema_sg_protocol()
+    module = _v2_module(monkeypatch)
+    source = _v1_payload("c")
+    initialization = V2Initialization(
+        payload=source,
+        checkpoint_path="/locked/v1-c.pt",
+        checkpoint_sha256=V1_SOURCE_SHA256["c"],
+        predictor_config=source["predictor_config"],
+    )
+
+    predictor_config = _predictor_config(protocol, spec=spec)
+    payload = _deployment_payload(
+        module,
+        protocol=protocol,
+        spec=spec,
+        world_model_config=source["world_model_config"],
+        initialization=initialization,
+        epoch=1,
+        global_step=10,
+    )
+    for value in (predictor_config, payload):
+        assert value["method"] == spec.method
+        assert value["method_family"] == spec.method_family
+        assert value["implementation_version"] == spec.implementation_version
+        assert value["stage"] == spec.stage
+        assert value["initialization"] == spec.initialization
+    assert predictor_config["joint_objective"]["local_prediction"] == (
+        EMA_LOCAL_PREDICTION
+    )
+
+    split = {
+        "train_indices_sha256": "train",
+        "validation_indices_sha256": "validation",
+    }
+    manifest = {
+        "method": spec.method,
+        "method_family": spec.method_family,
+        "variant": spec.variant,
+        "implementation_version": spec.implementation_version,
+        "objective_version": spec.objective_version,
+        "deployment_checkpoint_version": spec.deployment_checkpoint_version,
+        "stage": spec.stage,
+        "initialization": spec.initialization,
+        "protocol_sha256": "protocol",
+        "seed": 3072,
+        "source_v1": {"checkpoint_sha256": V1_SOURCE_SHA256["c"]},
+        "dataset": {"split": split},
+        "neighbor_index": None,
+    }
+    _validate_v2_resume_manifest(
+        manifest,
+        spec=spec,
+        protocol_sha256="protocol",
+        seed=3072,
+        split_manifest=split,
+        initialization=initialization,
+        neighbor_info=None,
+    )
+    manifest["method_family"] = "actor_free_td_lewm_v2"
+    with pytest.raises(RuntimeError, match="incompatible V2 run"):
+        _validate_v2_resume_manifest(
+            manifest,
+            spec=spec,
+            protocol_sha256="protocol",
+            seed=3072,
+            split_manifest=split,
+            initialization=initialization,
+            neighbor_info=None,
+        )
 
 
 def test_v2_module_restores_both_v1_gs_but_starts_a_fresh_joint_optimizer(
@@ -374,6 +594,79 @@ def test_v2_module_restores_both_v1_gs_but_starts_a_fresh_joint_optimizer(
     assert module.predictor.training
     assert not module.target_model.training
     assert not module.target_predictor.training
+
+
+def test_ema_sg_module_uses_shifted_ema_latents_but_keeps_online_prediction_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch.manual_seed(83)
+    protocol = _ema_sg_protocol()
+    protocol["loss"]["sigreg"]["weight"] = 0.0
+    module = _v2_module(
+        monkeypatch,
+        spec=_ema_sg_spec(),
+        protocol=protocol,
+    )
+    module.train()
+    with torch.no_grad():
+        module.target_model.visual_encoder.bias.add_(0.75)
+    monkeypatch.setattr(module, "_auxiliary_scale", lambda: 0.0)
+    captured: dict[str, torch.Tensor] = {}
+
+    def capture_metrics(metrics: dict[str, torch.Tensor], **_kwargs: object) -> None:
+        captured.update(metrics)
+
+    monkeypatch.setattr(module, "log_dict", capture_metrics)
+    batch = {
+        "pixels": torch.randn(2, 19, 3, 2, 2),
+        "action": torch.randn(2, 19, 25),
+        "_tdwm_global_start": torch.tensor([100, 500], dtype=torch.int64),
+    }
+    with torch.no_grad():
+        online = module.model.encode(batch)
+        ema = module.target_model.encode(batch)
+        histories = torch.cat(
+            [online["emb"][:, start : start + 3] for start in range(16)],
+            dim=0,
+        )
+        actions = torch.cat(
+            [online["act_emb"][:, start : start + 3] for start in range(16)],
+            dim=0,
+        )
+        prediction = module.model.predict(histories, actions)
+        online_targets = torch.cat(
+            [online["emb"][:, start + 1 : start + 4] for start in range(16)],
+            dim=0,
+        )
+        ema_targets = torch.cat(
+            [ema["emb"][:, start + 1 : start + 4] for start in range(16)],
+            dim=0,
+        )
+        expected_loss = (prediction - ema_targets).square().mean()
+        expected_online_reference = (
+            prediction - online_targets
+        ).square().mean()
+        expected_drift = (online_targets - ema_targets).square().mean()
+
+    loss = module._forward_loss(batch, "train")
+
+    torch.testing.assert_close(loss.detach(), expected_loss)
+    torch.testing.assert_close(
+        captured["train/prediction_online_reference_mse"],
+        expected_online_reference,
+    )
+    torch.testing.assert_close(
+        captured["train/online_ema_latent_drift"],
+        expected_drift,
+    )
+    assert not captured["train/prediction_online_reference_mse"].requires_grad
+    assert not captured["train/online_ema_latent_drift"].requires_grad
+
+    loss.backward()
+    assert torch.count_nonzero(module.model.visual_encoder.weight.grad) > 0
+    assert torch.count_nonzero(module.model.action_encoder.projection.weight.grad) > 0
+    assert torch.count_nonzero(module.model.forward_model.weight.grad) > 0
+    assert all(parameter.grad is None for parameter in module.target_model.parameters())
 
 
 def test_v2_full_loss_backpropagates_through_online_lewm_f_ea_and_shared_g_only(

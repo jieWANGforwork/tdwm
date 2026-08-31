@@ -97,6 +97,14 @@ from tdwm.training.state_neighbor_index import StateNeighborActionIndex
 METHOD_FAMILY = "actor_free_td_lewm_v2"
 IMPLEMENTATION_VERSION = "v2"
 DEPLOYMENT_CHECKPOINT_VERSION = 1
+STAGE = "coupled_hybrid_finetuning"
+INITIALIZATION = "corresponding_v1_deployment_finetune"
+ONLINE_LOCAL_PREDICTION = "original_lewm_one_step_mse"
+ONLINE_LOCAL_PREDICTION_TARGET = "online_world_model_next_latent"
+ONLINE_LOCAL_PREDICTION_TARGET_GRADIENT = "online_gradient"
+EMA_LOCAL_PREDICTION = "ema_target_lewm_one_step_mse"
+EMA_LOCAL_PREDICTION_TARGET = "ema_world_model_next_latent"
+EMA_LOCAL_PREDICTION_TARGET_GRADIENT = "stop_gradient"
 SUPPORTED_VARIANTS = frozenset({"c", "d", "f", "g1", "g2", "g3"})
 V1_SOURCE_FAMILY = "actor_free_td_lewm_v1"
 V1_SOURCE_IMPLEMENTATION = "v1"
@@ -115,19 +123,58 @@ V1_SOURCE_SHA256 = {
 
 @dataclass(frozen=True)
 class ActorFreeTDLeWMV2Spec:
-    """Identity of one independently trained V2 coupled method."""
+    """Identity and local-target contract of one coupled V2 method."""
 
     method: str
     variant: str
     requires_neighbor_index: bool = False
+    method_family: str = METHOD_FAMILY
+    implementation_version: str = IMPLEMENTATION_VERSION
+    stage: str = STAGE
+    initialization: str = INITIALIZATION
+    objective_version: int = OBJECTIVE_VERSION
+    deployment_checkpoint_version: int = DEPLOYMENT_CHECKPOINT_VERSION
+    local_prediction: str = ONLINE_LOCAL_PREDICTION
+    local_prediction_target: str = ONLINE_LOCAL_PREDICTION_TARGET
+    local_prediction_target_gradient: str = (
+        ONLINE_LOCAL_PREDICTION_TARGET_GRADIENT
+    )
 
     def __post_init__(self) -> None:
         if self.variant not in SUPPORTED_VARIANTS:
             raise ValueError(f"Unsupported V2 variant: {self.variant!r}.")
-        if self.method != f"{METHOD_FAMILY}_{self.variant}":
+        if self.method != f"{self.method_family}_{self.variant}":
             raise ValueError("V2 method names must end in their exact variant.")
         if self.requires_neighbor_index != (self.variant == "g1"):
             raise ValueError("Only V2 G1 requires a neighbor index.")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                self.method_family,
+                self.implementation_version,
+                self.stage,
+                self.initialization,
+            )
+        ):
+            raise ValueError("V2 identity fields must be non-empty strings.")
+        local_target_contract = (
+            self.local_prediction,
+            self.local_prediction_target,
+            self.local_prediction_target_gradient,
+        )
+        if local_target_contract not in {
+            (
+                ONLINE_LOCAL_PREDICTION,
+                ONLINE_LOCAL_PREDICTION_TARGET,
+                ONLINE_LOCAL_PREDICTION_TARGET_GRADIENT,
+            ),
+            (
+                EMA_LOCAL_PREDICTION,
+                EMA_LOCAL_PREDICTION_TARGET,
+                EMA_LOCAL_PREDICTION_TARGET_GRADIENT,
+            ),
+        }:
+            raise ValueError("Unsupported V2 local prediction target contract.")
 
 
 V2_SPECS = {
@@ -220,12 +267,12 @@ def validate_actor_free_td_lewm_v2_training_protocol(
         {
             "schema_version": 1,
             "method": spec.method,
-            "method_family": METHOD_FAMILY,
+            "method_family": spec.method_family,
             "variant": spec.variant,
-            "implementation_version": IMPLEMENTATION_VERSION,
+            "implementation_version": spec.implementation_version,
             "environment": "cube",
-            "stage": "coupled_hybrid_finetuning",
-            "initialization": "corresponding_v1_deployment_finetune",
+            "stage": spec.stage,
+            "initialization": spec.initialization,
         },
         label="protocol",
     )
@@ -324,7 +371,7 @@ def validate_actor_free_td_lewm_v2_training_protocol(
     _require_exact(
         predictor,
         {
-            "objective_version": OBJECTIVE_VERSION,
+            "objective_version": spec.objective_version,
             "architecture": "td_jepa_forward_map_v1",
             "state_dim": V1_STATE_DIM,
             "raw_action_dim": V1_RAW_ACTION_DIM,
@@ -379,7 +426,7 @@ def validate_actor_free_td_lewm_v2_training_protocol(
     _require_exact(
         objective,
         {
-            "local_prediction": "original_lewm_one_step_mse",
+            "local_prediction": spec.local_prediction,
             "regularization": "original_lewm_sigreg",
             "target_encoder": "ema_world_model",
             "td_target": "ema_next_latent_plus_ema_predictor_dataset_next_action",
@@ -402,6 +449,28 @@ def validate_actor_free_td_lewm_v2_training_protocol(
         },
         label="joint_objective",
     )
+    local_target_contract = {
+        "local_prediction_target": spec.local_prediction_target,
+        "local_prediction_target_gradient": (
+            spec.local_prediction_target_gradient
+        ),
+    }
+    if spec.local_prediction == EMA_LOCAL_PREDICTION:
+        # EMA-SG is a separately identified experiment family. Its protocol
+        # must state both the target source and its gradient boundary.
+        _require_exact(
+            objective,
+            local_target_contract,
+            label="joint_objective",
+        )
+    else:
+        # Preserve the original V2 YAML contract. Optional explicit online
+        # target fields are accepted only when they match the legacy behavior.
+        for key, expected_value in local_target_contract.items():
+            if key in objective and objective[key] != expected_value:
+                raise ValueError(
+                    f"joint_objective.{key} must be {expected_value!r}."
+                )
     variant_objective_locks = {
         "c": {
             "objective": "goal_projected_td",
@@ -655,6 +724,54 @@ def sample_matched_future_goals_v2(
 
 def _mean_or_zero(value: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
     return value.mean() if value.numel() else reference.new_zeros(())
+
+
+@dataclass(frozen=True)
+class LocalPredictionObjectiveV2:
+    """Training MSE plus detached online/EMA target diagnostics."""
+
+    loss: torch.Tensor
+    online_reference_mse: torch.Tensor
+    online_ema_latent_drift: torch.Tensor
+
+
+def _local_prediction_objective_v2(
+    local_prediction: torch.Tensor,
+    online_local_targets: torch.Tensor,
+    ema_local_targets: torch.Tensor,
+    *,
+    spec: ActorFreeTDLeWMV2Spec,
+) -> LocalPredictionObjectiveV2:
+    if not (
+        local_prediction.shape
+        == online_local_targets.shape
+        == ema_local_targets.shape
+    ):
+        raise RuntimeError("V2 LeWM local prediction is misaligned.")
+    if spec.local_prediction == ONLINE_LOCAL_PREDICTION:
+        # This is exactly the original V2 objective: the online target branch
+        # remains differentiable, including its State Encoder path.
+        local_targets = online_local_targets
+    elif spec.local_prediction == EMA_LOCAL_PREDICTION:
+        # The EMA copy is already evaluated under no_grad, and the explicit
+        # detach makes the target-side gradient boundary local and auditable.
+        local_targets = ema_local_targets.detach()
+    else:  # ActorFreeTDLeWMV2Spec rejects this, but fail closed if bypassed.
+        raise RuntimeError("Unsupported V2 local prediction target contract.")
+
+    prediction_loss = (local_prediction - local_targets).square().mean()
+    with torch.no_grad():
+        online_reference_mse = (
+            local_prediction.detach() - online_local_targets.detach()
+        ).square().mean()
+        online_ema_latent_drift = (
+            online_local_targets.detach() - ema_local_targets.detach()
+        ).square().mean()
+    return LocalPredictionObjectiveV2(
+        loss=prediction_loss,
+        online_reference_mse=online_reference_mse,
+        online_ema_latent_drift=online_ema_latent_drift,
+    )
 
 
 def _build_v2_training_module(
@@ -1124,17 +1241,30 @@ def _build_v2_training_module(
                 ],
                 dim=0,
             )
-            local_targets = torch.cat(
+            online_local_targets = torch.cat(
                 [
                     embeddings[:, start + 1 : start + self.history_size + 1]
                     for start in range(local_count)
                 ],
                 dim=0,
             )
+            ema_local_targets = torch.cat(
+                [
+                    target_embeddings[
+                        :, start + 1 : start + self.history_size + 1
+                    ]
+                    for start in range(local_count)
+                ],
+                dim=0,
+            ).detach()
             local_prediction = self.model.predict(local_histories, local_actions)
-            if local_prediction.shape != local_targets.shape:
-                raise RuntimeError("V2 LeWM local prediction is misaligned.")
-            prediction_loss = (local_prediction - local_targets).square().mean()
+            local_objective = _local_prediction_objective_v2(
+                local_prediction,
+                online_local_targets,
+                ema_local_targets,
+                spec=spec,
+            )
+            prediction_loss = local_objective.loss
             sigreg_sequences = torch.cat(
                 [
                     embeddings[:, start : start + self.history_size + 1]
@@ -1241,6 +1371,12 @@ def _build_v2_training_module(
             metrics: dict[str, torch.Tensor] = {
                 f"{stage}/loss": loss.detach(),
                 f"{stage}/prediction_loss": prediction_loss.detach(),
+                f"{stage}/prediction_online_reference_mse": (
+                    local_objective.online_reference_mse
+                ),
+                f"{stage}/online_ema_latent_drift": (
+                    local_objective.online_ema_latent_drift
+                ),
                 f"{stage}/sigreg_loss": sigreg_loss.detach(),
                 f"{stage}/base_hybrid_td_loss": base_hybrid_td.detach(),
                 f"{stage}/method_hybrid_td_loss": method_loss.detach(),
@@ -1350,11 +1486,13 @@ def _predictor_config(
 ) -> dict[str, Any]:
     return {
         "method": spec.method,
-        "method_family": METHOD_FAMILY,
+        "method_family": spec.method_family,
         "variant": spec.variant,
-        "implementation_version": IMPLEMENTATION_VERSION,
-        "objective_version": OBJECTIVE_VERSION,
-        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+        "implementation_version": spec.implementation_version,
+        "objective_version": spec.objective_version,
+        "deployment_checkpoint_version": spec.deployment_checkpoint_version,
+        "stage": spec.stage,
+        "initialization": spec.initialization,
         **copy.deepcopy(protocol["predictor"]),
         "task_sampling": copy.deepcopy(protocol["task_sampling"]),
         "joint_objective": copy.deepcopy(protocol["joint_objective"]),
@@ -1375,11 +1513,13 @@ def _deployment_payload(
 ) -> dict[str, Any]:
     return {
         "method": spec.method,
-        "method_family": METHOD_FAMILY,
+        "method_family": spec.method_family,
         "variant": spec.variant,
-        "implementation_version": IMPLEMENTATION_VERSION,
-        "objective_version": OBJECTIVE_VERSION,
-        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+        "implementation_version": spec.implementation_version,
+        "objective_version": spec.objective_version,
+        "deployment_checkpoint_version": spec.deployment_checkpoint_version,
+        "stage": spec.stage,
+        "initialization": spec.initialization,
         "epoch": int(epoch),
         "global_step": int(global_step),
         "world_model_state_dict": module.model.state_dict(),
@@ -1460,12 +1600,15 @@ def _validate_v2_resume_manifest(
 ) -> None:
     compatible = (
         manifest.get("method") == spec.method
-        and manifest.get("method_family") == METHOD_FAMILY
+        and manifest.get("method_family") == spec.method_family
         and manifest.get("variant") == spec.variant
-        and manifest.get("implementation_version") == IMPLEMENTATION_VERSION
-        and manifest.get("objective_version") == OBJECTIVE_VERSION
+        and manifest.get("implementation_version")
+        == spec.implementation_version
+        and manifest.get("objective_version") == spec.objective_version
         and manifest.get("deployment_checkpoint_version")
-        == DEPLOYMENT_CHECKPOINT_VERSION
+        == spec.deployment_checkpoint_version
+        and manifest.get("stage") == spec.stage
+        and manifest.get("initialization") == spec.initialization
         and manifest.get("protocol_sha256") == protocol_sha256
         and manifest.get("seed") == seed
         and manifest.get("source_v1", {}).get("checkpoint_sha256")
@@ -1872,11 +2015,13 @@ def train_actor_free_td_lewm_v2(
         dataset_manifest["decoded_frame_store"] = decoded_frame_store_metadata
     training_manifest = {
         "method": spec.method,
-        "method_family": METHOD_FAMILY,
+        "method_family": spec.method_family,
         "variant": spec.variant,
-        "implementation_version": IMPLEMENTATION_VERSION,
-        "objective_version": OBJECTIVE_VERSION,
-        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+        "implementation_version": spec.implementation_version,
+        "objective_version": spec.objective_version,
+        "deployment_checkpoint_version": spec.deployment_checkpoint_version,
+        "stage": spec.stage,
+        "initialization": spec.initialization,
         "protocol": protocol,
         "protocol_path": str(Path(protocol_path).expanduser().resolve()),
         "protocol_sha256": protocol_hash,
@@ -1959,9 +2104,13 @@ def train_actor_free_td_lewm_v2(
         )
     result = {
         "method": spec.method,
-        "method_family": METHOD_FAMILY,
+        "method_family": spec.method_family,
         "variant": spec.variant,
-        "implementation_version": IMPLEMENTATION_VERSION,
+        "implementation_version": spec.implementation_version,
+        "objective_version": spec.objective_version,
+        "deployment_checkpoint_version": spec.deployment_checkpoint_version,
+        "stage": spec.stage,
+        "initialization": spec.initialization,
         "run_dir": str(run_dir),
         "seed": seed,
         "last_checkpoint": str(last_checkpoint),

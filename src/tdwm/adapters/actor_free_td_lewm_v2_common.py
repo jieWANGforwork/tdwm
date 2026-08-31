@@ -82,19 +82,53 @@ SOURCE_ARTIFACTS = {
 
 @dataclass(frozen=True)
 class ActorFreeTDV2MethodSpec:
-    """Deployment identity and objective validation for one V2 method."""
+    """Deployment identity and objective validation for one V2-family method."""
 
     method: str
     variant: str
     display_name: str
     objective_keys: tuple[str, ...]
     validate_method_config: Callable[[Mapping[str, Any]], None]
+    method_family: str = METHOD_FAMILY
+    implementation_version: str = IMPLEMENTATION_VERSION
+    evaluation_stage: str = "planner_evaluation"
+    initialization: str = "corresponding_v1_deployment_finetune"
+    local_prediction: str = "original_lewm_one_step_mse"
+    local_prediction_target: str | None = None
+    local_prediction_target_gradient: str | None = None
+    inference_g_score: str = "negative_goal_projection_of_v2_online_predictor"
+    deployed_world_model: str = "online_v2_world_model"
+    deployed_predictor: str = "online_v2_predictor"
 
     def __post_init__(self) -> None:
         if self.variant not in SOURCE_V1_SHA256:
             raise ValueError(f"Unsupported V2 variant {self.variant!r}.")
-        if self.method != f"{METHOD_FAMILY}_{self.variant}":
+        if self.method != f"{self.method_family}_{self.variant}":
             raise ValueError("V2 method names must end in their exact variant.")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                self.method_family,
+                self.implementation_version,
+                self.evaluation_stage,
+                self.initialization,
+                self.local_prediction,
+                self.inference_g_score,
+                self.deployed_world_model,
+                self.deployed_predictor,
+            )
+        ):
+            raise ValueError("V2 deployment identity fields must be non-empty.")
+        optional_target = (
+            self.local_prediction_target,
+            self.local_prediction_target_gradient,
+        )
+        if (optional_target[0] is None) != (optional_target[1] is None):
+            raise ValueError(
+                "V2 local prediction target and gradient must be specified together."
+            )
+        if any(value is not None and not value for value in optional_target):
+            raise ValueError("V2 local prediction target fields must be non-empty.")
 
 
 def _positive_integer(config: Mapping[str, Any], key: str) -> int:
@@ -146,9 +180,9 @@ def validate_actor_free_td_v2_payload(
         payload,
         {
             "method": spec.method,
-            "method_family": METHOD_FAMILY,
+            "method_family": spec.method_family,
             "variant": spec.variant,
-            "implementation_version": IMPLEMENTATION_VERSION,
+            "implementation_version": spec.implementation_version,
             "objective_version": OBJECTIVE_VERSION,
             "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
         },
@@ -210,9 +244,9 @@ def validate_actor_free_td_v2_payload(
         config,
         {
             "method": spec.method,
-            "method_family": METHOD_FAMILY,
+            "method_family": spec.method_family,
             "variant": spec.variant,
-            "implementation_version": IMPLEMENTATION_VERSION,
+            "implementation_version": spec.implementation_version,
             "objective_version": OBJECTIVE_VERSION,
             "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
             "architecture": "td_jepa_forward_map_v1",
@@ -284,10 +318,22 @@ def validate_actor_free_td_v2_payload(
     objective = config["joint_objective"]
     if not isinstance(objective, Mapping):
         raise ValueError("predictor_config.joint_objective must be a mapping.")
+    local_prediction_contract: dict[str, Any] = {
+        "local_prediction": spec.local_prediction,
+    }
+    if spec.local_prediction_target is not None:
+        local_prediction_contract.update(
+            {
+                "local_prediction_target": spec.local_prediction_target,
+                "local_prediction_target_gradient": (
+                    spec.local_prediction_target_gradient
+                ),
+            }
+        )
     require_exact_values(
         objective,
         {
-            "local_prediction": "original_lewm_one_step_mse",
+            **local_prediction_contract,
             "local_prediction_weight": 1.0,
             "regularization": "original_lewm_sigreg",
             "target_encoder": "ema_world_model",
@@ -436,10 +482,11 @@ def make_actor_free_td_v2_policy(
     transform: dict[str, Any] | None = None,
     device: str | torch.device = "cpu",
     score_mode: str | None = None,
+    wrapper_class: type[ActorFreeTDLeWMV1] = ActorFreeTDLeWMV2,
 ):
     """Build the public Stable World Model CEM policy around V2 online modules."""
 
-    resolved_mode = score_mode or ActorFreeTDLeWMV2.default_score_mode
+    resolved_mode = score_mode or wrapper_class.default_score_mode
     if resolved_mode not in SCORE_MODES:
         raise ValueError(f"Unsupported V2 score mode {resolved_mode!r}.")
     if int(planning["action_block"]) != ACTION_BLOCK_STEPS:
@@ -449,7 +496,7 @@ def make_actor_free_td_v2_policy(
 
     import stable_worldmodel as swm
 
-    wrapped = ActorFreeTDLeWMV2(
+    wrapped = wrapper_class(
         world_model,
         predictor,
         gamma=gamma,

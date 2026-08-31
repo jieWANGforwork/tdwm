@@ -1,0 +1,26 @@
+extends: actor_free_td_lewm_v2_ema_sg_common_cube_train.yaml
+id: actor_free_td_lewm_v2_ema_sg_d_cube_v2_ema_sg
+method: actor_free_td_lewm_v2_ema_sg_d
+variant: d
+display_name: Actor-Free TD-JEPA V2-EMA-SG Coupled Hybrid Goal-Value Weighted TD
+
+source_v1:
+  method: actor_free_td_lewm_v1_d
+  method_family: actor_free_td_lewm_v1
+  variant: d
+  implementation_version: v1
+  objective_version: 0
+  deployment_checkpoint_version: 1
+  source_seed: 3072
+  source_epoch: 10
+  source_global_step: 127960
+  checkpoint_sha256: 3115fffeb83ba6ae7e0c272913fe7a1ba16d42953b2185f6a3f7b168899d819a
+  source_code_revision: 3c4e62ef2ab72387536433f27ef11bce75477e7e
+  optimizer_state: reset
+
+joint_objective:
+  objective: goal_value_weighted_td
+  score_source: detached_td_target
+  weight_temperature: 0.5
+  weight_clip: null
+  goal_subset_weighting: softmax_mean_one

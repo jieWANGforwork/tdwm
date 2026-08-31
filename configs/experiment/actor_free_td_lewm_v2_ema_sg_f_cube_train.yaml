@@ -1,0 +1,28 @@
+extends: actor_free_td_lewm_v2_ema_sg_common_cube_train.yaml
+id: actor_free_td_lewm_v2_ema_sg_f_cube_v2_ema_sg
+method: actor_free_td_lewm_v2_ema_sg_f
+variant: f
+display_name: Actor-Free TD-JEPA V2-EMA-SG Coupled Hybrid Same-Future Advantage
+
+source_v1:
+  method: actor_free_td_lewm_v1_f
+  method_family: actor_free_td_lewm_v1
+  variant: f
+  implementation_version: v1
+  objective_version: 0
+  deployment_checkpoint_version: 1
+  source_seed: 3072
+  source_epoch: 10
+  source_global_step: 127960
+  checkpoint_sha256: b4de1b511075d763194ad1e332d127cbe390553738162f3a402ef8847bb74fd0
+  source_code_revision: 3c4e62ef2ab72387536433f27ef11bce75477e7e
+  optimizer_state: reset
+
+joint_objective:
+  objective: same_future_different_goal_advantage
+  score_source: detached_td_target
+  baseline: all_goal_derived_tasks_in_batch
+  positive: matching_transition_goal
+  weight_temperature: 0.5
+  weight_clip: null
+  goal_subset_weighting: softmax_mean_one
