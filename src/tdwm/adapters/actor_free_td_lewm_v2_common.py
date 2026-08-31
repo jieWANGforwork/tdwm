@@ -27,10 +27,14 @@ from tdwm.adapters.frozen_actor_free_td_v1_common import (
     LEWM_HISTORY_SIZE,
     SCORE_MODES,
     ActorFreeTDLeWMV1,
+    _resolve_g_first_weight,
     require_exact_values,
     require_positive_float,
 )
-from tdwm.methods.actor_free_td_lewm_v1 import ActorFreeTDJEPAPredictorV1
+from tdwm.methods.actor_free_td_lewm_v1 import (
+    ActorFreeTDJEPAPredictorV1,
+    project_tasks_to_sphere_v1,
+)
 from tdwm.methods.actor_free_td_lewm_v2 import (
     V2_ACTION_DIM,
     V2_ACTION_EMBEDDING_DIM,
@@ -45,6 +49,7 @@ METHOD_FAMILY = "actor_free_td_lewm_v2"
 IMPLEMENTATION_VERSION = "v2"
 OBJECTIVE_VERSION = 0
 DEPLOYMENT_CHECKPOINT_VERSION = 1
+V2_SCORE_MODES = SCORE_MODES | frozenset({"g_only_f_rollout_mean"})
 SOURCE_V1_FAMILY = "actor_free_td_lewm_v1"
 SOURCE_V1_IMPLEMENTATION_VERSION = "v1"
 SOURCE_V1_CODE_REVISION = "3c4e62ef2ab72387536433f27ef11bce75477e7e"
@@ -510,6 +515,89 @@ class ActorFreeTDLeWMV2(ActorFreeTDLeWMV1):
 
     implementation_version = IMPLEMENTATION_VERSION
     method_family = METHOD_FAMILY
+    supported_score_modes = V2_SCORE_MODES
+
+    def get_cost(
+        self,
+        info_dict: dict[str, Any],
+        action_candidates: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.score_mode != "g_only_f_rollout_mean":
+            return super().get_cost(info_dict, action_candidates)
+        if action_candidates.ndim != 4:
+            raise ValueError(
+                "action_candidates must have shape (batch, samples, horizon, 25)."
+            )
+        if action_candidates.shape[2] != 5:
+            raise ValueError(
+                "V2 g_only_f_rollout_mean requires CEM planning horizon=5."
+            )
+        return self._g_only_f_rollout_mean_cost(info_dict, action_candidates)
+
+    def _g_only_f_rollout_mean_cost(
+        self,
+        info_dict: dict[str, Any],
+        action_candidates: torch.Tensor,
+    ) -> torch.Tensor:
+        """Score aligned ``(z_(k-1), A_k)`` pairs for an arbitrary horizon."""
+
+        if "goal" not in info_dict and "goal_emb" not in info_dict:
+            raise AssertionError("goal not in info_dict")
+        if action_candidates.ndim != 4:
+            raise ValueError(
+                "action_candidates must have shape (batch, samples, horizon, 25)."
+            )
+        if action_candidates.shape[-1] != V2_RAW_ACTION_DIM:
+            raise ValueError("V2 expects normalized raw 25D action blocks.")
+        if not action_candidates.is_floating_point():
+            raise TypeError("action_candidates must have a floating-point dtype.")
+        if not bool(torch.isfinite(action_candidates).all()):
+            raise ValueError("action_candidates must contain only finite values.")
+        batch, samples, horizon = action_candidates.shape[:3]
+        if horizon <= 0:
+            raise ValueError("The planning horizon must be positive.")
+
+        current = self._current_state_for_samples(
+            dict(info_dict),
+            batch=batch,
+            samples=samples,
+            reference=action_candidates,
+        )
+        goal = self._goal_for_samples(
+            info_dict,
+            batch=batch,
+            samples=samples,
+            reference=action_candidates,
+        )
+        task = project_tasks_to_sphere_v1(goal)
+        future = self._rollout_future(
+            info_dict,
+            action_candidates,
+            batch=batch,
+            samples=samples,
+            horizon=horizon,
+        )
+        predecessors = torch.cat(
+            (current.unsqueeze(-2), future[..., :-1, :]),
+            dim=-2,
+        )
+        expected_shape = (batch, samples, horizon, V2_STATE_DIM)
+        if predecessors.shape != expected_shape:
+            raise ValueError(
+                "V2 rollout-mean predecessor states must align one-to-one with "
+                "candidate action blocks."
+            )
+        step_tasks = task.unsqueeze(-2).expand(expected_shape)
+        scores = self._goal_score(
+            predecessors,
+            action_candidates,
+            step_tasks,
+        )
+        if scores.shape != (batch, samples, horizon):
+            raise ValueError(
+                "V2 rollout-mean G scores must have shape (batch, samples, horizon)."
+            )
+        return -scores.mean(dim=-1)
 
 
 def make_actor_free_td_v2_policy(
@@ -522,17 +610,26 @@ def make_actor_free_td_v2_policy(
     transform: dict[str, Any] | None = None,
     device: str | torch.device = "cpu",
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
     wrapper_class: type[ActorFreeTDLeWMV1] = ActorFreeTDLeWMV2,
 ):
     """Build the public Stable World Model CEM policy around V2 online modules."""
 
     resolved_mode = score_mode or wrapper_class.default_score_mode
-    if resolved_mode not in SCORE_MODES:
+    if resolved_mode not in V2_SCORE_MODES:
         raise ValueError(f"Unsupported V2 score mode {resolved_mode!r}.")
     if int(planning["action_block"]) != ACTION_BLOCK_STEPS:
         raise ValueError("V2 requires planning.action_block=5.")
     if resolved_mode == "g_only" and int(planning["horizon"]) != 1:
         raise ValueError("V2 g_only requires planning.horizon=1.")
+    if resolved_mode == "f_plus_g_first" and int(planning["horizon"]) != 5:
+        raise ValueError("V2 f_plus_g_first requires planning.horizon=5.")
+    if resolved_mode == "g_only_f_rollout_mean" and int(planning["horizon"]) != 5:
+        raise ValueError("V2 g_only_f_rollout_mean requires planning.horizon=5.")
+    resolved_g_first_weight = _resolve_g_first_weight(
+        resolved_mode,
+        g_first_weight,
+    )
 
     import stable_worldmodel as swm
 
@@ -541,6 +638,7 @@ def make_actor_free_td_v2_policy(
         predictor,
         gamma=gamma,
         score_mode=resolved_mode,
+        g_first_weight=resolved_g_first_weight,
         lewm_history_size=LEWM_HISTORY_SIZE,
     ).to(device)
     wrapped.eval().requires_grad_(False)
@@ -580,6 +678,7 @@ __all__ = [
     "OBJECTIVE_VERSION",
     "SOURCE_ARTIFACTS",
     "SOURCE_V1_SHA256",
+    "V2_SCORE_MODES",
     "load_actor_free_td_v2_checkpoint",
     "make_actor_free_td_v2_policy",
     "require_exact_values",

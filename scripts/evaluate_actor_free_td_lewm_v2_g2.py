@@ -24,8 +24,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-path", required=True)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(
-        "--score-mode", choices=("f_only", "g_only", "f_plus_g"), default=None
+        "--score-mode",
+        choices=(
+            "f_only",
+            "g_only",
+            "f_plus_g",
+            "f_plus_g_first",
+            "g_only_f_rollout_mean",
+        ),
+        default=None,
     )
+    parser.add_argument("--g-first-weight", type=float, default=None)
     parser.add_argument("--checkpoint-epoch", type=int, choices=range(3, 10))
     parser.add_argument("--video", action="store_true")
     mode = parser.add_mutually_exclusive_group()
@@ -47,6 +56,7 @@ def main() -> None:
                 smoke=args.smoke,
                 pilot=args.pilot,
                 score_mode=args.score_mode,
+                g_first_weight=args.g_first_weight,
             )
         )
     result = evaluate_actor_free_td_lewm_v2_g2(
@@ -58,6 +68,7 @@ def main() -> None:
         smoke=args.smoke,
         pilot=args.pilot,
         score_mode=args.score_mode,
+        g_first_weight=args.g_first_weight,
         checkpoint_epoch=args.checkpoint_epoch,
     )
     print(json.dumps(result, indent=2, sort_keys=True))

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,7 @@ from tdwm.adapters.actor_free_td_lewm_v2_common import (
     DEPLOYMENT_CHECKPOINT_VERSION,
     OBJECTIVE_VERSION,
     SOURCE_ARTIFACTS,
+    V2_SCORE_MODES,
     ActorFreeTDV2MethodSpec,
     require_exact_values,
     validate_source_v1_v2,
@@ -23,15 +26,16 @@ from tdwm.adapters.frozen_actor_free_td_common import (
     FORMAL_DEPLOYMENT_GLOBAL_STEP,
     is_lower_sha256,
 )
-from tdwm.adapters.frozen_actor_free_td_v1_common import SCORE_MODES
 from tdwm.evaluation.frozen_actor_free_td_common import _validate_dataset_protocol
 from tdwm.evaluation.frozen_actor_free_td_v1_common import (
-    FORMAL_HORIZON_BY_SCORE_MODE,
+    FORMAL_HORIZON_BY_SCORE_MODE as V1_FORMAL_HORIZON_BY_SCORE_MODE,
+)
+from tdwm.evaluation.frozen_actor_free_td_v1_common import (
     FORMAL_O50_PLANNING,
     evaluate_actor_free_td_predictor_runtime,
     validate_v1_raw_action_compatibility,
 )
-from tdwm.evaluation.lewm_checkpoint import REQUIRED_PLANNING_KEYS
+from tdwm.evaluation.lewm_checkpoint import REQUIRED_PLANNING_KEYS, _write_json
 from tdwm.methods.actor_free_td_lewm_v2 import (
     V2_ACTION_DIM,
     V2_ACTION_EMBEDDING_DIM,
@@ -40,6 +44,66 @@ from tdwm.methods.actor_free_td_lewm_v2 import (
     V2_STATE_DIM,
     V2_TASK_DIM,
 )
+
+FIRST_ACTION_SCORE_MODE = "f_plus_g_first"
+FIRST_ACTION_SCORE_DEFINITION = {
+    "formula": "f_cost - g_first_weight * q_first",
+    "f_cost": "terminal_summed_mse(z_hat5, z_goal)",
+    "f_rollout": "full_five_action_blocks_A1_through_A5",
+    "q_first": "dot(G(z0, online_E_A(A1), w_goal), w_goal)",
+    "q_first_state": "current_online_lewm_encoder_state_z0",
+    "q_first_action": "first_candidate_raw_action_block_A1",
+    "q_first_action_processing": "online_shared_lewm_action_encoder_to_192d",
+    "q_first_task": "sqrt_dim_l2_normalized_goal_vector",
+    "q_first_discount": "none",
+    "cem_execution": "execute_A1_from_minimum_total_cost_plan",
+}
+ROLLOUT_MEAN_SCORE_MODE = "g_only_f_rollout_mean"
+ROLLOUT_MEAN_G_SCORE = "mean_goal_projection_over_all_rollout_blocks"
+ROLLOUT_MEAN_SCORE_DEFINITION = {
+    "formula": "cost = -mean(q1, q2, q3, q4, q5)",
+    "score": (
+        "negative_mean_goal_projection_over_f_rollout_aligned_predecessor_action_pairs"
+    ),
+    "f_transition_used": True,
+    "f_goal_distance_used": False,
+    "g_score": ROLLOUT_MEAN_G_SCORE,
+    "g_aggregation": "mean_over_5_blocks",
+    "rollout_horizon": 5,
+    "state_source_for_q1": "current_online_encoder_state",
+    "state_source_for_q2_to_q5": "online_lewm_rollout_predicted_states",
+    "state_sequence": "z0_and_first_h_minus_one_full_f_rollout_states",
+    "action_sequence": "all_h_candidate_blocks_online_shared_lewm_action_encoder",
+    "action_alignment": "qk_uses_same_candidate_action_block_Ak",
+    "action_processing": "online_shared_lewm_action_encoder_to_192d",
+    "task": "sqrt_dim_l2_normalized_goal_vector_broadcast_over_5_blocks",
+    "gamma": "unused",
+    "terminal_f_cost": "unused",
+    "executed_action_block": "first_block_only",
+    "replanning": "every_action_block",
+}
+ROLLOUT_MEAN_INFERENCE_FIELDS = {
+    "f_transition_used": True,
+    "f_goal_distance_used": False,
+    "g_score": ROLLOUT_MEAN_G_SCORE,
+    "g_aggregation": "mean_over_5_blocks",
+    "rollout_horizon": 5,
+    "state_source_for_q1": "current_online_encoder_state",
+    "state_source_for_q2_to_q5": "online_lewm_rollout_predicted_states",
+    "executed_action_block": "first_block_only",
+    "replanning": "every_action_block",
+}
+ROLLOUT_MEAN_ONLY_INFERENCE_KEYS = frozenset(ROLLOUT_MEAN_INFERENCE_FIELDS) - {
+    "g_score",
+    "replanning",
+}
+FORMAL_HORIZON_BY_SCORE_MODE = {
+    **V1_FORMAL_HORIZON_BY_SCORE_MODE,
+    ROLLOUT_MEAN_SCORE_MODE: 5,
+}
+LEGACY_F_SCORE = "lewm_rollout_goal_distance"
+LEGACY_F_SCORE_REDUCER = "final_predicted_latent_summed_mse"
+LEGACY_G_SCORE = "negative_goal_projection_of_v2_online_predictor"
 
 
 def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -77,12 +141,111 @@ def _load_protocol_mapping(path: Path, *, seen: frozenset[Path]) -> dict[str, An
 
 
 def validate_v2_score_mode(score_mode: str) -> str:
-    if score_mode not in SCORE_MODES:
+    if score_mode not in V2_SCORE_MODES:
         raise ValueError(
             f"score_mode {score_mode!r} is incompatible with V2; expected one "
-            f"of {sorted(SCORE_MODES)}."
+            f"of {sorted(V2_SCORE_MODES)}."
         )
     return score_mode
+
+
+def _resolve_g_first_weight(
+    protocol: Mapping[str, Any],
+    *,
+    score_mode: str,
+    g_first_weight: float | None,
+) -> float | None:
+    inference = protocol.get("inference_objective", {})
+    configured_weight = (
+        inference.get("g_first_weight") if isinstance(inference, Mapping) else None
+    )
+    if score_mode != FIRST_ACTION_SCORE_MODE:
+        if g_first_weight is not None:
+            raise ValueError(
+                "g_first_weight is only valid for score_mode='f_plus_g_first'."
+            )
+        return None
+    raw_weight = g_first_weight if g_first_weight is not None else configured_weight
+    if raw_weight is None or isinstance(raw_weight, bool):
+        raise ValueError(
+            "score_mode='f_plus_g_first' requires an explicit g_first_weight."
+        )
+    try:
+        weight = float(raw_weight)
+    except (TypeError, ValueError) as error:
+        raise ValueError("g_first_weight must be finite and non-negative.") from error
+    if not math.isfinite(weight) or weight < 0.0:
+        raise ValueError("g_first_weight must be finite and non-negative.")
+    return 0.0 if weight == 0.0 else weight
+
+
+def _g_first_weight_slug(weight: float) -> str:
+    value = format(weight, ".15g").lower()
+    return value.replace("+", "").replace("-", "m").replace(".", "p")
+
+
+def _configure_first_action_score(
+    protocol: dict[str, Any],
+    *,
+    score_mode: str,
+    g_first_weight: float | None,
+) -> float | None:
+    inference = protocol.setdefault("inference_objective", {})
+    weight = _resolve_g_first_weight(
+        protocol,
+        score_mode=score_mode,
+        g_first_weight=g_first_weight,
+    )
+    if score_mode == FIRST_ACTION_SCORE_MODE:
+        inference["g_first_weight"] = weight
+        inference["score_definition"] = copy.deepcopy(FIRST_ACTION_SCORE_DEFINITION)
+    else:
+        inference.pop("g_first_weight", None)
+        inference.pop("score_definition", None)
+    return weight
+
+
+def _configure_rollout_mean_score(
+    protocol: dict[str, Any],
+    *,
+    score_mode: str,
+) -> None:
+    inference = protocol.setdefault("inference_objective", {})
+    if score_mode == ROLLOUT_MEAN_SCORE_MODE:
+        inference.update(copy.deepcopy(ROLLOUT_MEAN_INFERENCE_FIELDS))
+        inference["f_score"] = "none"
+        inference["f_score_reducer"] = "none"
+        inference["score_definition"] = copy.deepcopy(ROLLOUT_MEAN_SCORE_DEFINITION)
+        return
+    for key in ROLLOUT_MEAN_ONLY_INFERENCE_KEYS:
+        inference.pop(key, None)
+    if inference.get("f_score") == "none":
+        inference["f_score"] = LEGACY_F_SCORE
+    if inference.get("f_score_reducer") == "none":
+        inference["f_score_reducer"] = LEGACY_F_SCORE_REDUCER
+    if inference.get("g_score") == ROLLOUT_MEAN_G_SCORE:
+        inference["g_score"] = LEGACY_G_SCORE
+
+
+def _rollout_mean_output_metadata(
+    protocol: Mapping[str, Any],
+    planning: Mapping[str, Any],
+) -> dict[str, Any]:
+    inference = protocol.get("inference_objective", {})
+    if inference.get("score_mode") != ROLLOUT_MEAN_SCORE_MODE:
+        return {}
+    return {
+        "g_aggregation": "mean_over_5_blocks",
+        "state_source_for_q1": "current_online_encoder_state",
+        "state_source_for_q2_to_q5": "online_lewm_rollout_predicted_states",
+        "f_goal_distance_used": False,
+        "f_transition_used": True,
+        "planning_horizon": planning["horizon"],
+        "rollout_horizon": planning["horizon"],
+        "executed_action_block": "first_block_only",
+        "replanning": "every_action_block",
+        "score_definition": copy.deepcopy(inference["score_definition"]),
+    }
 
 
 def actor_free_td_v2_output_directory_name(
@@ -91,6 +254,7 @@ def actor_free_td_v2_output_directory_name(
     smoke: bool,
     pilot: bool,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> str:
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
@@ -101,7 +265,18 @@ def actor_free_td_v2_output_directory_name(
         score_mode
         or str(protocol.get("inference_objective", {}).get("score_mode", "f_plus_g"))
     )
+    weight = _resolve_g_first_weight(
+        protocol,
+        score_mode=selected,
+        g_first_weight=g_first_weight,
+    )
     run_mode = "smoke" if smoke else "pilot" if pilot else "formal"
+    if selected == FIRST_ACTION_SCORE_MODE:
+        assert weight is not None
+        return (
+            f"{method}_cube_o50_{selected}_alpha_"
+            f"{_g_first_weight_slug(weight)}_{run_mode}"
+        )
     return f"{method}_cube_o50_{selected}_{run_mode}"
 
 
@@ -324,12 +499,23 @@ def validate_actor_free_td_v2_evaluation_protocol(
     inference = protocol.get("inference_objective")
     if not isinstance(inference, Mapping):
         raise ValueError("protocol.inference_objective must be a mapping.")
+    score_mode = validate_v2_score_mode(str(inference.get("score_mode", "")))
     require_exact_values(
         inference,
         {
-            "f_score": "lewm_rollout_goal_distance",
-            "f_score_reducer": "final_predicted_latent_summed_mse",
-            "g_score": spec.inference_g_score,
+            "f_score": (
+                "none" if score_mode == ROLLOUT_MEAN_SCORE_MODE else LEGACY_F_SCORE
+            ),
+            "f_score_reducer": (
+                "none"
+                if score_mode == ROLLOUT_MEAN_SCORE_MODE
+                else LEGACY_F_SCORE_REDUCER
+            ),
+            "g_score": (
+                ROLLOUT_MEAN_G_SCORE
+                if score_mode == ROLLOUT_MEAN_SCORE_MODE
+                else spec.inference_g_score
+            ),
             "f_plus_g_split": "first_h_minus_one_blocks_with_f_last_block_with_g",
             "f_plus_g_combination": (
                 "prefix_final_f_cost_minus_gamma_power_tail_g_score"
@@ -345,7 +531,45 @@ def validate_actor_free_td_v2_evaluation_protocol(
         },
         label="inference_objective",
     )
-    score_mode = validate_v2_score_mode(str(inference.get("score_mode", "")))
+    if score_mode == FIRST_ACTION_SCORE_MODE:
+        _resolve_g_first_weight(
+            protocol,
+            score_mode=score_mode,
+            g_first_weight=None,
+        )
+        if inference.get("score_definition") != FIRST_ACTION_SCORE_DEFINITION:
+            raise ValueError(
+                "inference_objective.score_definition must exactly describe "
+                "the V2 first-action score."
+            )
+        for key in ROLLOUT_MEAN_ONLY_INFERENCE_KEYS:
+            if key in inference:
+                raise ValueError(
+                    f"inference_objective.{key} requires "
+                    "score_mode='g_only_f_rollout_mean'."
+                )
+    elif score_mode == ROLLOUT_MEAN_SCORE_MODE:
+        if "g_first_weight" in inference:
+            raise ValueError("g_first_weight requires score_mode='f_plus_g_first'.")
+        require_exact_values(
+            inference,
+            {
+                **ROLLOUT_MEAN_INFERENCE_FIELDS,
+                "score_definition": ROLLOUT_MEAN_SCORE_DEFINITION,
+            },
+            label="inference_objective",
+        )
+    elif "g_first_weight" in inference or "score_definition" in inference:
+        raise ValueError(
+            "Special inference fields require f_plus_g_first or g_only_f_rollout_mean."
+        )
+    else:
+        for key in ROLLOUT_MEAN_ONLY_INFERENCE_KEYS:
+            if key in inference:
+                raise ValueError(
+                    f"inference_objective.{key} requires "
+                    "score_mode='g_only_f_rollout_mean'."
+                )
     training_only = inference.get("training_only_auxiliary")
     if not isinstance(training_only, list) or not all(
         isinstance(item, str) and item for item in training_only
@@ -389,6 +613,7 @@ def configure_actor_free_td_v2_evaluation_mode(
     smoke: bool,
     pilot: bool,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> dict[str, Any]:
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
@@ -398,6 +623,12 @@ def configure_actor_free_td_v2_evaluation_mode(
         or str(configured.get("inference_objective", {}).get("score_mode", "f_plus_g"))
     )
     configured["inference_objective"]["score_mode"] = selected
+    _configure_first_action_score(
+        configured,
+        score_mode=selected,
+        g_first_weight=g_first_weight,
+    )
+    _configure_rollout_mean_score(configured, score_mode=selected)
     configured["planning"]["horizon"] = FORMAL_HORIZON_BY_SCORE_MODE[selected]
     if smoke:
         configured["id"] = f"{configured['id']}_smoke"
@@ -542,6 +773,36 @@ def validate_v2_raw_action_compatibility(**kwargs) -> None:
     validate_v1_raw_action_compatibility(**kwargs)
 
 
+def _record_rollout_mean_outputs(
+    result: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> dict[str, Any]:
+    recorded = copy.deepcopy(dict(result))
+    if recorded.get("score_mode") != ROLLOUT_MEAN_SCORE_MODE:
+        return recorded
+    output_path = Path(output_dir).expanduser().resolve()
+    manifest_path = output_path / "protocol_manifest.json"
+    with manifest_path.open() as stream:
+        manifest = json.load(stream)
+    if not isinstance(manifest, dict):
+        raise ValueError("V2 protocol manifest must contain a JSON object.")
+    protocol = manifest.get("protocol")
+    if not isinstance(protocol, Mapping):
+        raise ValueError("V2 protocol manifest is missing protocol metadata.")
+    planning = protocol.get("planning")
+    if not isinstance(planning, Mapping):
+        raise ValueError("V2 protocol manifest is missing planning metadata.")
+    metadata = _rollout_mean_output_metadata(protocol, planning)
+    if not metadata:
+        raise ValueError("V2 rollout-mean result does not match its protocol manifest.")
+    manifest.update(copy.deepcopy(metadata))
+    recorded.update(metadata)
+    _write_json(manifest_path, manifest)
+    _write_json(output_path / "results.json", recorded)
+    return recorded
+
+
 def evaluate_actor_free_td_v2(
     *,
     spec: ActorFreeTDV2MethodSpec,
@@ -550,7 +811,7 @@ def evaluate_actor_free_td_v2(
     checkpoint_protocol_validator=validate_actor_free_td_v2_checkpoint_protocol,
     **kwargs,
 ) -> dict[str, Any]:
-    return evaluate_actor_free_td_predictor_runtime(
+    result = evaluate_actor_free_td_predictor_runtime(
         spec=spec,
         checkpoint_loader=checkpoint_loader,
         policy_factory=policy_factory,
@@ -561,11 +822,21 @@ def evaluate_actor_free_td_v2(
         checkpoint_provenance_keys=("source_v1_provenance",),
         **kwargs,
     )
+    return _record_rollout_mean_outputs(
+        result,
+        output_dir=kwargs["output_dir"],
+    )
 
 
 __all__ = [
+    "FIRST_ACTION_SCORE_DEFINITION",
+    "FIRST_ACTION_SCORE_MODE",
     "FORMAL_HORIZON_BY_SCORE_MODE",
     "FORMAL_O50_PLANNING",
+    "ROLLOUT_MEAN_G_SCORE",
+    "ROLLOUT_MEAN_INFERENCE_FIELDS",
+    "ROLLOUT_MEAN_SCORE_DEFINITION",
+    "ROLLOUT_MEAN_SCORE_MODE",
     "actor_free_td_v2_output_directory_name",
     "configure_actor_free_td_v2_evaluation_mode",
     "evaluate_actor_free_td_v2",

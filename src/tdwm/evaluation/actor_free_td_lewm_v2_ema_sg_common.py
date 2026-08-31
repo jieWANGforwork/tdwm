@@ -8,7 +8,9 @@ from typing import Any
 
 from tdwm.adapters.actor_free_td_lewm_v2_common import ActorFreeTDV2MethodSpec
 from tdwm.evaluation.actor_free_td_lewm_v2_common import (
-    FORMAL_HORIZON_BY_SCORE_MODE,
+    FORMAL_HORIZON_BY_SCORE_MODE as V2_FORMAL_HORIZON_BY_SCORE_MODE,
+)
+from tdwm.evaluation.actor_free_td_lewm_v2_common import (
     FORMAL_O50_PLANNING,
     actor_free_td_v2_output_directory_name,
     configure_actor_free_td_v2_evaluation_mode,
@@ -17,8 +19,23 @@ from tdwm.evaluation.actor_free_td_lewm_v2_common import (
     validate_actor_free_td_v2_checkpoint_protocol,
     validate_actor_free_td_v2_evaluation_protocol,
     validate_v2_raw_action_compatibility,
-    validate_v2_score_mode,
 )
+
+EMA_SG_SCORE_MODES = frozenset(("f_only", "g_only", "f_plus_g"))
+FORMAL_HORIZON_BY_SCORE_MODE = {
+    mode: V2_FORMAL_HORIZON_BY_SCORE_MODE[mode] for mode in EMA_SG_SCORE_MODES
+}
+
+
+def validate_v2_score_mode(score_mode: str) -> str:
+    """Keep the completed EMA-SG evaluator locked to its historical modes."""
+
+    if score_mode not in EMA_SG_SCORE_MODES:
+        raise ValueError(
+            f"score_mode {score_mode!r} is incompatible with V2-EMA-SG; expected "
+            f"one of {sorted(EMA_SG_SCORE_MODES)}."
+        )
+    return score_mode
 
 
 def actor_free_td_v2_ema_sg_output_directory_name(
@@ -28,6 +45,10 @@ def actor_free_td_v2_ema_sg_output_directory_name(
     pilot: bool,
     score_mode: str | None = None,
 ) -> str:
+    selected = score_mode or str(
+        protocol.get("inference_objective", {}).get("score_mode", "f_plus_g")
+    )
+    validate_v2_score_mode(selected)
     return actor_free_td_v2_output_directory_name(
         protocol,
         smoke=smoke,
@@ -42,6 +63,8 @@ def validate_actor_free_td_v2_ema_sg_evaluation_protocol(
     spec: ActorFreeTDV2MethodSpec,
 ) -> None:
     validate_actor_free_td_v2_evaluation_protocol(protocol, spec=spec)
+    inference = protocol["inference_objective"]
+    validate_v2_score_mode(str(inference.get("score_mode", "f_plus_g")))
 
 
 def load_actor_free_td_v2_ema_sg_evaluation_protocol(
@@ -49,7 +72,9 @@ def load_actor_free_td_v2_ema_sg_evaluation_protocol(
     *,
     spec: ActorFreeTDV2MethodSpec,
 ) -> dict[str, Any]:
-    return load_actor_free_td_v2_evaluation_protocol(path, spec=spec)
+    protocol = load_actor_free_td_v2_evaluation_protocol(path, spec=spec)
+    validate_actor_free_td_v2_ema_sg_evaluation_protocol(protocol, spec=spec)
+    return protocol
 
 
 def configure_actor_free_td_v2_ema_sg_evaluation_mode(
@@ -59,6 +84,10 @@ def configure_actor_free_td_v2_ema_sg_evaluation_mode(
     pilot: bool,
     score_mode: str | None = None,
 ) -> dict[str, Any]:
+    selected = score_mode or str(
+        protocol.get("inference_objective", {}).get("score_mode", "f_plus_g")
+    )
+    validate_v2_score_mode(selected)
     return configure_actor_free_td_v2_evaluation_mode(
         protocol,
         smoke=smoke,
@@ -93,6 +122,14 @@ def evaluate_actor_free_td_v2_ema_sg(
     policy_factory,
     **kwargs,
 ) -> dict[str, Any]:
+    selected = kwargs.get("score_mode")
+    if selected is not None:
+        validate_v2_score_mode(str(selected))
+    if kwargs.get("g_first_weight") is not None:
+        raise ValueError("g_first_weight is unavailable for V2-EMA-SG evaluation.")
+    protocol_path = kwargs.get("protocol_path")
+    if protocol_path is not None:
+        load_actor_free_td_v2_ema_sg_evaluation_protocol(protocol_path, spec=spec)
     return evaluate_actor_free_td_v2(
         spec=spec,
         checkpoint_loader=checkpoint_loader,
@@ -105,6 +142,7 @@ def evaluate_actor_free_td_v2_ema_sg(
 
 
 __all__ = [
+    "EMA_SG_SCORE_MODES",
     "FORMAL_HORIZON_BY_SCORE_MODE",
     "FORMAL_O50_PLANNING",
     "actor_free_td_v2_ema_sg_output_directory_name",

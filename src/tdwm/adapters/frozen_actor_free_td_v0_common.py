@@ -33,7 +33,7 @@ OBJECTIVE_VERSION = 0
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 ACTION_BLOCK_STEPS = 5
 LEWM_HISTORY_SIZE = 3
-SCORE_MODES = frozenset({"f_only", "g_only", "f_plus_g"})
+SCORE_MODES = frozenset({"f_only", "g_only", "f_plus_g", "f_plus_g_first"})
 
 
 @dataclass(frozen=True)
@@ -68,6 +68,33 @@ def require_positive_float(
     if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"{label}.{key} must be finite and positive.")
     return value
+
+
+def _resolve_g_first_weight(
+    score_mode: str,
+    g_first_weight: float | None,
+) -> float | None:
+    if score_mode != "f_plus_g_first":
+        if g_first_weight is not None:
+            raise ValueError(
+                "g_first_weight is only valid for score_mode='f_plus_g_first'."
+            )
+        return None
+    if g_first_weight is None or isinstance(g_first_weight, bool):
+        raise ValueError(
+            "f_plus_g_first requires an explicit finite non-negative g_first_weight."
+        )
+    try:
+        resolved = float(g_first_weight)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "f_plus_g_first requires an explicit finite non-negative g_first_weight."
+        ) from error
+    if not math.isfinite(resolved) or resolved < 0.0:
+        raise ValueError(
+            "f_plus_g_first requires an explicit finite non-negative g_first_weight."
+        )
+    return resolved
 
 
 def _positive_integer(config: Mapping[str, Any], key: str) -> int:
@@ -283,6 +310,7 @@ class ActorFreeTDLeWMV0(nn.Module):
         *,
         gamma: float,
         score_mode: str | None = None,
+        g_first_weight: float | None = None,
         lewm_history_size: int = LEWM_HISTORY_SIZE,
     ) -> None:
         super().__init__()
@@ -304,6 +332,10 @@ class ActorFreeTDLeWMV0(nn.Module):
                 f"{self.score_mode!r}; expected one of "
                 f"{sorted(self.supported_score_modes)}."
             )
+        self.g_first_weight = _resolve_g_first_weight(
+            self.score_mode,
+            g_first_weight,
+        )
         for attribute, expected in (
             ("state_dim", V0_STATE_DIM),
             ("action_dim", V0_ACTION_DIM),
@@ -359,6 +391,8 @@ class ActorFreeTDLeWMV0(nn.Module):
             raise ValueError("The planning horizon must be positive.")
         if self.score_mode == "g_only" and horizon != 1:
             raise ValueError("V0 g_only requires CEM planning horizon=1.")
+        if self.score_mode == "f_plus_g_first" and horizon != 5:
+            raise ValueError("V0 f_plus_g_first requires CEM planning horizon=5.")
 
         goal = self._goal_for_samples(
             info_dict,
@@ -388,6 +422,37 @@ class ActorFreeTDLeWMV0(nn.Module):
                 horizon=horizon,
             )
             return self._explicit_terminal_cost(future, goal)
+
+        if self.score_mode == "f_plus_g_first":
+            weight = self.g_first_weight
+            if weight is None:
+                raise RuntimeError("f_plus_g_first weight was not initialized.")
+            current = None
+            if weight != 0.0:
+                current = self._current_state_for_samples(
+                    dict(info_dict),
+                    batch=batch,
+                    samples=samples,
+                    reference=action_candidates,
+                )
+            future = self._rollout_future(
+                info_dict,
+                action_candidates,
+                batch=batch,
+                samples=samples,
+                horizon=horizon,
+            )
+            explicit_cost = self._explicit_terminal_cost(future, goal)
+            if weight == 0.0:
+                return explicit_cost
+            if current is None:
+                raise RuntimeError("f_plus_g_first state was not initialized.")
+            first_score = self._goal_score(
+                current,
+                action_candidates[..., 0, :],
+                task,
+            )
+            return explicit_cost - weight * first_score
 
         if horizon > 1:
             # The hybrid boundary is exact: F receives only the first H-1
@@ -615,6 +680,7 @@ def make_frozen_actor_free_td_v0_policy(
     transform: dict[str, Any] | None = None,
     device: str | torch.device = "cpu",
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ):
     """Build Stable World Model 0.1.1's public CEM policy around V0."""
 
@@ -625,6 +691,12 @@ def make_frozen_actor_free_td_v0_policy(
         raise ValueError("V0 requires planning.action_block=5 (25 normalized values).")
     if resolved_mode == "g_only" and int(planning["horizon"]) != 1:
         raise ValueError("V0 g_only requires planning.horizon=1.")
+    if resolved_mode == "f_plus_g_first" and int(planning["horizon"]) != 5:
+        raise ValueError("V0 f_plus_g_first requires planning.horizon=5.")
+    resolved_g_first_weight = _resolve_g_first_weight(
+        resolved_mode,
+        g_first_weight,
+    )
 
     import stable_worldmodel as swm
 
@@ -633,6 +705,7 @@ def make_frozen_actor_free_td_v0_policy(
         predictor,
         gamma=gamma,
         score_mode=resolved_mode,
+        g_first_weight=resolved_g_first_weight,
     ).to(device)
     wrapped.eval().requires_grad_(False)
     solver = swm.solver.CEMSolver(

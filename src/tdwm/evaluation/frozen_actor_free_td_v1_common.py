@@ -9,6 +9,7 @@ signals and are intentionally absent from this runtime.
 from __future__ import annotations
 
 import importlib.metadata
+import math
 import os
 import platform
 import time
@@ -77,6 +78,20 @@ FORMAL_HORIZON_BY_SCORE_MODE = {
     "f_only": 5,
     "g_only": 1,
     "f_plus_g": 5,
+    "f_plus_g_first": 5,
+}
+FIRST_ACTION_SCORE_MODE = "f_plus_g_first"
+FIRST_ACTION_SCORE_DEFINITION = {
+    "formula": "f_cost - g_first_weight * q_first",
+    "f_cost": "terminal_summed_mse(z_hat5, z_goal)",
+    "f_rollout": "full_five_action_blocks_A1_through_A5",
+    "q_first": "dot(G(z0, frozen_E_A(A1), w_goal), w_goal)",
+    "q_first_state": "current_frozen_lewm_encoder_state_z0",
+    "q_first_action": "first_candidate_raw_action_block_A1",
+    "q_first_action_processing": "frozen_shared_lewm_action_encoder_to_192d",
+    "q_first_task": "sqrt_dim_l2_normalized_goal_vector",
+    "q_first_discount": "none",
+    "cem_execution": "execute_A1_from_minimum_total_cost_plan",
 }
 
 CheckpointLoader = Callable[..., tuple[Any, Any, dict[str, Any], dict[str, Any]]]
@@ -94,12 +109,85 @@ def validate_v1_score_mode(score_mode: str) -> str:
     return score_mode
 
 
+def _resolve_g_first_weight(
+    protocol: Mapping[str, Any],
+    *,
+    score_mode: str,
+    g_first_weight: float | None,
+) -> float | None:
+    inference = protocol.get("inference_objective", {})
+    configured_weight = (
+        inference.get("g_first_weight") if isinstance(inference, Mapping) else None
+    )
+    if score_mode != FIRST_ACTION_SCORE_MODE:
+        if g_first_weight is not None:
+            raise ValueError(
+                "g_first_weight is only valid for score_mode='f_plus_g_first'."
+            )
+        return None
+    raw_weight = g_first_weight if g_first_weight is not None else configured_weight
+    if raw_weight is None or isinstance(raw_weight, bool):
+        raise ValueError(
+            "score_mode='f_plus_g_first' requires an explicit g_first_weight."
+        )
+    try:
+        weight = float(raw_weight)
+    except (TypeError, ValueError) as error:
+        raise ValueError("g_first_weight must be finite and non-negative.") from error
+    if not math.isfinite(weight) or weight < 0.0:
+        raise ValueError("g_first_weight must be finite and non-negative.")
+    return 0.0 if weight == 0.0 else weight
+
+
+def _g_first_weight_slug(weight: float) -> str:
+    value = format(weight, ".15g").lower()
+    return value.replace("+", "").replace("-", "m").replace(".", "p")
+
+
+def _configure_first_action_score(
+    protocol: dict[str, Any],
+    *,
+    score_mode: str,
+    g_first_weight: float | None,
+) -> float | None:
+    inference = protocol.setdefault("inference_objective", {})
+    weight = _resolve_g_first_weight(
+        protocol,
+        score_mode=score_mode,
+        g_first_weight=g_first_weight,
+    )
+    if score_mode == FIRST_ACTION_SCORE_MODE:
+        inference["g_first_weight"] = weight
+        inference["score_definition"] = deepcopy(FIRST_ACTION_SCORE_DEFINITION)
+    else:
+        inference.pop("g_first_weight", None)
+        inference.pop("score_definition", None)
+    return weight
+
+
+def _first_action_output_metadata(
+    protocol: Mapping[str, Any],
+    planning: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return fields emitted only by the first-action critic evaluation."""
+
+    inference = protocol.get("inference_objective", {})
+    if inference.get("score_mode") != FIRST_ACTION_SCORE_MODE:
+        return {}
+    return {
+        "g_first_weight": inference["g_first_weight"],
+        "planning": {"horizon": planning["horizon"]},
+        "score_definition": deepcopy(inference["score_definition"]),
+    }
+
+
 def actor_free_td_v1_output_directory_name(
     protocol: Mapping[str, Any],
     *,
     smoke: bool,
     pilot: bool,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> str:
     """Return a collision-free output name for one V1 evaluation mode."""
 
@@ -112,7 +200,18 @@ def actor_free_td_v1_output_directory_name(
         score_mode
         or str(protocol.get("inference_objective", {}).get("score_mode", "f_plus_g"))
     )
+    weight = _resolve_g_first_weight(
+        protocol,
+        score_mode=selected_mode,
+        g_first_weight=g_first_weight,
+    )
     run_mode = "smoke" if smoke else "pilot" if pilot else "formal"
+    if selected_mode == FIRST_ACTION_SCORE_MODE:
+        assert weight is not None
+        return (
+            f"{method}_cube_o50_{selected_mode}_alpha_"
+            f"{_g_first_weight_slug(weight)}_{run_mode}"
+        )
     return f"{method}_cube_o50_{selected_mode}_{run_mode}"
 
 
@@ -300,6 +399,21 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
         label="inference_objective",
     )
     score_mode = validate_v1_score_mode(str(inference.get("score_mode", "")))
+    if score_mode == FIRST_ACTION_SCORE_MODE:
+        _resolve_g_first_weight(
+            protocol,
+            score_mode=score_mode,
+            g_first_weight=None,
+        )
+        if inference.get("score_definition") != FIRST_ACTION_SCORE_DEFINITION:
+            raise ValueError(
+                "inference_objective.score_definition must exactly describe "
+                "the V1 first-action score."
+            )
+    elif "g_first_weight" in inference or "score_definition" in inference:
+        raise ValueError(
+            "First-action inference fields require score_mode='f_plus_g_first'."
+        )
     training_only = inference.get("training_only_auxiliary", [])
     if not isinstance(training_only, list) or not all(
         isinstance(item, str) and item for item in training_only
@@ -352,6 +466,7 @@ def configure_frozen_actor_free_td_v1_evaluation_mode(
     smoke: bool,
     pilot: bool,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> dict[str, Any]:
     """Apply a run/score override while preserving the V1 horizon contract."""
 
@@ -363,6 +478,11 @@ def configure_frozen_actor_free_td_v1_evaluation_mode(
         or str(configured.get("inference_objective", {}).get("score_mode", "f_plus_g"))
     )
     configured.setdefault("inference_objective", {})["score_mode"] = selected_mode
+    _configure_first_action_score(
+        configured,
+        score_mode=selected_mode,
+        g_first_weight=g_first_weight,
+    )
     configured.setdefault("planning", {})["horizon"] = FORMAL_HORIZON_BY_SCORE_MODE[
         selected_mode
     ]
@@ -495,16 +615,9 @@ def validate_v1_raw_action_compatibility(
             "The V1 predictor must declare raw and embedded action dimensions."
         ) from error
     if raw_action_dim != expected_raw_action_dim:
-        raise ValueError(
-            "The V1 predictor raw action-block dimension is incompatible."
-        )
-    if (
-        action_dim != V1_ACTION_DIM
-        or action_embedding_dim != V1_ACTION_EMBEDDING_DIM
-    ):
-        raise ValueError(
-            "The V1 predictor action-embedding dimension is incompatible."
-        )
+        raise ValueError("The V1 predictor raw action-block dimension is incompatible.")
+    if action_dim != V1_ACTION_DIM or action_embedding_dim != V1_ACTION_EMBEDDING_DIM:
+        raise ValueError("The V1 predictor action-embedding dimension is incompatible.")
 
 
 def evaluate_actor_free_td_predictor_runtime(
@@ -525,6 +638,7 @@ def evaluate_actor_free_td_predictor_runtime(
     smoke: bool = False,
     pilot: bool = False,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
     checkpoint_epoch: int | None = None,
 ) -> dict[str, Any]:
     """Run the shared online-world/online-G Cube evaluation runtime."""
@@ -538,6 +652,7 @@ def evaluate_actor_free_td_predictor_runtime(
         smoke=smoke,
         pilot=pilot,
         score_mode=score_mode,
+        g_first_weight=g_first_weight,
     )
     dataset_path = Path(dataset_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
@@ -562,9 +677,7 @@ def evaluate_actor_free_td_predictor_runtime(
         map_location=device,
     )
     if checkpoint_epoch is not None and (smoke or pilot):
-        raise ValueError(
-            "checkpoint_epoch is only supported for full O50 evaluation."
-        )
+        raise ValueError("checkpoint_epoch is only supported for full O50 evaluation.")
     require_formal_completion = not (smoke or pilot) and checkpoint_epoch is None
     checkpoint_validation = {
         "payload": payload,
@@ -636,16 +749,21 @@ def evaluate_actor_free_td_predictor_runtime(
             transforms.Resize(size=protocol["world"]["image_size"]),
         ]
     )
-    policy = policy_factory(
-        world_model=world_model,
-        predictor=predictor,
-        planning=planning,
-        gamma=float(protocol["predictor"]["gamma"]),
-        process={"action": action_processor},
-        transform={"pixels": image_transform, "goal": image_transform},
-        device=device,
-        score_mode=protocol["inference_objective"]["score_mode"],
-    )
+    policy_kwargs = {
+        "world_model": world_model,
+        "predictor": predictor,
+        "planning": planning,
+        "gamma": float(protocol["predictor"]["gamma"]),
+        "process": {"action": action_processor},
+        "transform": {"pixels": image_transform, "goal": image_transform},
+        "device": device,
+        "score_mode": protocol["inference_objective"]["score_mode"],
+    }
+    if protocol["inference_objective"]["score_mode"] == FIRST_ACTION_SCORE_MODE:
+        policy_kwargs["g_first_weight"] = protocol["inference_objective"][
+            "g_first_weight"
+        ]
+    policy = policy_factory(**policy_kwargs)
 
     runtime = {
         "stable_worldmodel": package_version,
@@ -695,6 +813,7 @@ def evaluate_actor_free_td_predictor_runtime(
         "normalization": {"action": action_stats},
         "runtime": runtime,
     }
+    manifest.update(_first_action_output_metadata(protocol, planning))
     _write_json(output_dir / "protocol_manifest.json", manifest)
 
     world_cfg = protocol["world"]
@@ -755,6 +874,7 @@ def evaluate_actor_free_td_predictor_runtime(
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
     }
+    result.update(_first_action_output_metadata(protocol, planning))
     if checkpoint_epoch is not None:
         result["checkpoint_epoch"] = payload["epoch"]
         result["checkpoint_role"] = "intermediate_epoch_o50"
@@ -776,6 +896,7 @@ def evaluate_frozen_actor_free_td_v1(
     smoke: bool = False,
     pilot: bool = False,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> dict[str, Any]:
     """Run the audited Stable World Model Cube evaluation for one V1 method."""
 
@@ -796,10 +917,13 @@ def evaluate_frozen_actor_free_td_v1(
         smoke=smoke,
         pilot=pilot,
         score_mode=score_mode,
+        g_first_weight=g_first_weight,
     )
 
 
 __all__ = [
+    "FIRST_ACTION_SCORE_DEFINITION",
+    "FIRST_ACTION_SCORE_MODE",
     "FORMAL_HORIZON_BY_SCORE_MODE",
     "FORMAL_O50_PLANNING",
     "actor_free_td_v1_output_directory_name",
