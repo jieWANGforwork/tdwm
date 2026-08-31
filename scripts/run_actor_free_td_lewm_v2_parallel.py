@@ -843,6 +843,7 @@ def run_launcher(
     running: dict[str, RunningJob] = {}
     fail_closed = False
     environment = os.environ.copy()
+    render_backend = environment.get("MUJOCO_GL", "egl")
     environment.update(
         {
             "PYTHONPATH": str(paths.repository / "src"),
@@ -850,7 +851,10 @@ def run_launcher(
             "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
             "OMP_NUM_THREADS": "1",
             "MKL_NUM_THREADS": "1",
-            "MUJOCO_GL": "egl",
+            "MUJOCO_GL": render_backend,
+            "PYOPENGL_PLATFORM": environment.get(
+                "PYOPENGL_PLATFORM", render_backend
+            ),
         }
     )
 
