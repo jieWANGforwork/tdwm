@@ -193,35 +193,44 @@ def test_first_action_manifest_and_result_metadata_is_structured_and_conditional
     )
 
 
-def test_v2_ema_sg_evaluator_remains_locked_to_its_historical_modes() -> None:
-    protocol = _version_case("v2")["protocol"]
-
+def test_v2_ema_supports_first_action_without_changing_legacy_horizons() -> None:
+    module = importlib.import_module("tdwm.evaluation.actor_free_td_lewm_v2_ema_sg_c")
+    protocol = module.load_actor_free_td_lewm_v2_ema_sg_c_evaluation_protocol(
+        ROOT
+        / "configs"
+        / "experiment"
+        / "actor_free_td_lewm_v2_ema_sg_c_cube_checkpoint_o50.yaml"
+    )
     assert set(ema_sg_common.FORMAL_HORIZON_BY_SCORE_MODE) == {
         "f_only",
         "g_only",
         "f_plus_g",
+        "f_plus_g_first",
+        "g_only_f_rollout_mean",
     }
-    with pytest.raises(ValueError, match="V2-EMA-SG"):
-        ema_sg_common.configure_actor_free_td_v2_ema_sg_evaluation_mode(
-            protocol,
-            smoke=False,
-            pilot=False,
-            score_mode="f_plus_g_first",
-        )
-    with pytest.raises(ValueError, match="V2-EMA-SG"):
+    configured = ema_sg_common.configure_actor_free_td_v2_ema_sg_evaluation_mode(
+        protocol,
+        smoke=False,
+        pilot=False,
+        score_mode="f_plus_g_first",
+        g_first_weight=0.5,
+    )
+    assert configured["planning"]["horizon"] == 5
+    assert configured["inference_objective"]["g_first_weight"] == 0.5
+    assert configured["inference_objective"]["score_definition"] == (
+        v2_common.FIRST_ACTION_SCORE_DEFINITION
+    )
+    assert (
         ema_sg_common.actor_free_td_v2_ema_sg_output_directory_name(
             protocol,
             smoke=False,
             pilot=False,
             score_mode="f_plus_g_first",
+            g_first_weight=0.5,
         )
-    with pytest.raises(ValueError, match="V2-EMA-SG"):
-        ema_sg_common.evaluate_actor_free_td_v2_ema_sg(
-            spec=object(),
-            checkpoint_loader=object(),
-            policy_factory=object(),
-            score_mode="f_plus_g_first",
-        )
+        == "actor_free_td_lewm_v2_ema_sg_c_cube_o50_"
+        "f_plus_g_first_alpha_0p5_formal"
+    )
 
 
 def _load_cli(version: str, variant: str) -> ModuleType:

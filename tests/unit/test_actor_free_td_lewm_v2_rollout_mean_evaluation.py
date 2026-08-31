@@ -320,7 +320,7 @@ def test_v2_runtime_records_exact_rollout_mean_fields_in_manifest_and_results(
     assert inference["replanning"] == "every_action_block"
 
 
-def test_v0_v1_and_v2_ema_sg_explicitly_reject_rollout_mean_mode() -> None:
+def test_v0_v1_reject_but_v2_ema_supports_rollout_mean_mode() -> None:
     v0_module = _evaluation_module("v0", "c")
     v0_protocol = getattr(
         v0_module,
@@ -347,21 +347,45 @@ def test_v0_v1_and_v2_ema_sg_explicitly_reject_rollout_mean_mode() -> None:
             score_mode=MODE,
         )
 
-    with pytest.raises(ValueError, match="V2-EMA-SG"):
-        ema_sg_common.validate_v2_score_mode(MODE)
-    with pytest.raises(ValueError, match="V2-EMA-SG"):
-        ema_sg_common.configure_actor_free_td_v2_ema_sg_evaluation_mode(
-            _load_v2("c", _base_config("v2", "c")),
-            smoke=False,
-            pilot=False,
-            score_mode=MODE,
-        )
+    ema_module = importlib.import_module(
+        "tdwm.evaluation.actor_free_td_lewm_v2_ema_sg_c"
+    )
+    ema_protocol = ema_module.load_actor_free_td_lewm_v2_ema_sg_c_evaluation_protocol(
+        _base_config("v2_ema_sg", "c")
+    )
+    configured = ema_sg_common.configure_actor_free_td_v2_ema_sg_evaluation_mode(
+        ema_protocol,
+        smoke=False,
+        pilot=False,
+        score_mode=MODE,
+    )
+    assert ema_sg_common.validate_v2_score_mode(MODE) == MODE
+    assert configured["planning"]["horizon"] == 5
+    assert configured["inference_objective"]["f_goal_distance_used"] is False
+    assert configured["inference_objective"]["g_aggregation"] == "mean_over_5_blocks"
 
 
-def test_v2_ema_sg_cli_does_not_offer_rollout_mean_mode(
+def test_v2_ema_cli_offers_and_forwards_rollout_mean_mode(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    captured: dict[str, Any] = {}
+
+    def evaluate(**kwargs: Any) -> dict[str, bool]:
+        captured.update(kwargs)
+        return {"ok": True}
+
+    fake_module = type(
+        "FakeModule",
+        (),
+        {
+            "load_actor_free_td_lewm_v2_ema_sg_c_evaluation_protocol": staticmethod(
+                lambda _path: {}
+            ),
+            "evaluate_actor_free_td_lewm_v2_ema_sg_c": staticmethod(evaluate),
+        },
+    )
+    monkeypatch.setattr(importlib, "import_module", lambda _name: fake_module)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -373,13 +397,19 @@ def test_v2_ema_sg_cli_does_not_offer_rollout_mean_mode(
             "dataset.lance",
             "--checkpoint-path",
             "checkpoint.pt",
+            "--output-dir",
+            "results",
             "--score-mode",
             MODE,
+            "--training-manifest",
+            "training_manifest.json",
         ],
     )
 
-    with pytest.raises(SystemExit) as error:
-        run_actor_free_td_lewm_v2_ema_sg_evaluation("c")
+    run_actor_free_td_lewm_v2_ema_sg_evaluation("c")
 
-    assert error.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
+    assert captured["score_mode"] == MODE
+    assert captured["g_first_weight"] is None
+    assert captured["training_manifest_path"] == "training_manifest.json"
+    assert captured["output_dir"] == "results"
+    assert '"ok": true' in capsys.readouterr().out

@@ -16,17 +16,27 @@ from tdwm.evaluation.actor_free_td_lewm_v2_ema_sg_common import (
 def run_actor_free_td_lewm_v2_ema_sg_evaluation(variant: str) -> None:
     parser = argparse.ArgumentParser(
         description=(
-            f"Evaluate Actor-Free TD-LeWM V2-EMA-SG {variant.upper()} with "
+            f"Evaluate Actor-Free TD-LeWM V2 EMA {variant.upper()} with "
             "policy-free CEM."
         )
     )
     parser.add_argument("--config", required=True)
     parser.add_argument("--dataset", default=os.environ.get("TDWM_CUBE_DATASET"))
     parser.add_argument("--checkpoint-path", required=True)
+    parser.add_argument("--training-manifest", default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(
-        "--score-mode", choices=("f_only", "g_only", "f_plus_g"), default=None
+        "--score-mode",
+        choices=(
+            "f_only",
+            "g_only",
+            "f_plus_g",
+            "f_plus_g_first",
+            "g_only_f_rollout_mean",
+        ),
+        default=None,
     )
+    parser.add_argument("--g-first-weight", type=float, default=None)
     parser.add_argument("--checkpoint-epoch", type=int, choices=range(3, 10))
     parser.add_argument("--video", action="store_true")
     mode = parser.add_mutually_exclusive_group()
@@ -56,6 +66,7 @@ def run_actor_free_td_lewm_v2_ema_sg_evaluation(variant: str) -> None:
                 smoke=args.smoke,
                 pilot=args.pilot,
                 score_mode=args.score_mode,
+                g_first_weight=args.g_first_weight,
             )
         )
     result = evaluate(
@@ -63,10 +74,12 @@ def run_actor_free_td_lewm_v2_ema_sg_evaluation(variant: str) -> None:
         dataset_path=args.dataset,
         output_dir=output_dir,
         checkpoint_path=args.checkpoint_path,
+        training_manifest_path=args.training_manifest,
         video=args.video,
         smoke=args.smoke,
         pilot=args.pilot,
         score_mode=args.score_mode,
+        g_first_weight=args.g_first_weight,
         checkpoint_epoch=args.checkpoint_epoch,
     )
     print(json.dumps(result, indent=2, sort_keys=True))

@@ -22,6 +22,9 @@ from tdwm.adapters.actor_free_td_lewm_v2_common import (
 
 METHOD_FAMILY = "actor_free_td_lewm_v2_ema_sg"
 IMPLEMENTATION_VERSION = "v2_ema_sg"
+VERSION_KEY = "v2_ema"
+VERSION_DISPLAY_NAME = "V2 EMA"
+TRAINING_COMMIT = "18cd574d522515f20f4103509b1e660b2fc89ea6"
 TRAINING_STAGE = "coupled_hybrid_ema_target_finetuning"
 EVALUATION_STAGE = "planner_evaluation"
 INITIALIZATION = "corresponding_v1_deployment_finetune"
@@ -51,7 +54,7 @@ def make_actor_free_td_v2_ema_sg_spec(
     return ActorFreeTDV2MethodSpec(
         method=f"{METHOD_FAMILY}_{base_spec.variant}",
         variant=base_spec.variant,
-        display_name=base_spec.display_name.replace("V2", "V2-EMA-SG", 1),
+        display_name=base_spec.display_name.replace("V2", VERSION_DISPLAY_NAME, 1),
         objective_keys=base_spec.objective_keys,
         validate_method_config=base_spec.validate_method_config,
         method_family=METHOD_FAMILY,
@@ -105,7 +108,10 @@ __all__ = [
     "LOCAL_PREDICTION_TARGET_GRADIENT",
     "METHOD_FAMILY",
     "OBJECTIVE_VERSION",
+    "TRAINING_COMMIT",
     "TRAINING_STAGE",
+    "VERSION_DISPLAY_NAME",
+    "VERSION_KEY",
     "load_actor_free_td_v2_ema_sg_checkpoint",
     "make_actor_free_td_v2_ema_sg_policy",
     "make_actor_free_td_v2_ema_sg_spec",
