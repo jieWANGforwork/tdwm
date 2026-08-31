@@ -177,6 +177,33 @@ def test_v2_checkpoint_source_artifacts_must_exactly_match_protocol() -> None:
         )
 
 
+def test_v2_intermediate_o50_checkpoint_is_strictly_epoch_bound() -> None:
+    payload = _payload()
+    payload["epoch"] = 3
+    payload["global_step"] = 38_388
+    protocol = load_actor_free_td_lewm_v2_c_evaluation_protocol(
+        Path("configs/experiment/actor_free_td_lewm_v2_c_cube_checkpoint_o50.yaml")
+    )
+
+    validate_actor_free_td_lewm_v2_c_checkpoint_protocol(
+        payload=payload,
+        predictor_config=payload["predictor_config"],
+        protocol=protocol,
+        require_formal_completion=False,
+        expected_checkpoint_epoch=3,
+    )
+
+    payload["global_step"] += 1
+    with pytest.raises(ValueError, match="global_step"):
+        validate_actor_free_td_lewm_v2_c_checkpoint_protocol(
+            payload=payload,
+            predictor_config=payload["predictor_config"],
+            protocol=protocol,
+            require_formal_completion=False,
+            expected_checkpoint_epoch=3,
+        )
+
+
 def test_v2_g1_adapter_locks_the_archived_neighbor_count() -> None:
     protocol = load_actor_free_td_v2_evaluation_protocol(
         Path("configs/experiment/actor_free_td_lewm_v2_g1_cube_checkpoint_o50.yaml"),

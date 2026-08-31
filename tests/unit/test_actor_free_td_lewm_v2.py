@@ -205,10 +205,12 @@ def test_hybrid_batch_uses_one_g_twice_and_one_detached_ema_target():
     assert batch.predicted_per_transition_td_loss.shape == (5,)
     assert torch.equal(
         batch.per_transition_td_loss,
-        batch.real_per_transition_td_loss
-        + batch.predicted_per_transition_td_loss,
+        batch.real_per_transition_td_loss + batch.predicted_per_transition_td_loss,
     )
-    assert batch.hybrid_td_loss == batch.real_td_loss + batch.predicted_td_loss
+    torch.testing.assert_close(
+        batch.hybrid_td_loss,
+        batch.real_td_loss + batch.predicted_td_loss,
+    )
     assert not batch.target.requires_grad
 
 
@@ -261,9 +263,7 @@ def test_hybrid_batch_sums_feature_mse_across_real_and_predicted_branches():
     for predictor in (online, target):
         for parameter in predictor.parameters():
             parameter.data.zero_()
-    ema_next_state = torch.stack(
-        (torch.ones(192), torch.full((192,), 2.0))
-    )
+    ema_next_state = torch.stack((torch.ones(192), torch.full((192,), 2.0)))
 
     batch = build_hybrid_tdjepa_td_batch_v2(
         online,

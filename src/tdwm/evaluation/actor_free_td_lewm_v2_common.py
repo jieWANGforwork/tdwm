@@ -412,7 +412,12 @@ def validate_actor_free_td_v2_checkpoint_protocol(
     protocol: Mapping[str, Any],
     spec: ActorFreeTDV2MethodSpec,
     require_formal_completion: bool = True,
+    expected_checkpoint_epoch: int | None = None,
 ) -> None:
+    if require_formal_completion and expected_checkpoint_epoch is not None:
+        raise ValueError(
+            "Formal completion and an intermediate checkpoint epoch are mutually exclusive."
+        )
     for values, label in (
         (payload, "checkpoint"),
         (predictor_config, "predictor_config"),
@@ -468,6 +473,20 @@ def validate_actor_free_td_v2_checkpoint_protocol(
             {
                 "epoch": FORMAL_DEPLOYMENT_EPOCH,
                 "global_step": FORMAL_DEPLOYMENT_GLOBAL_STEP,
+            },
+            label="checkpoint",
+        )
+    elif expected_checkpoint_epoch is not None:
+        if not 3 <= expected_checkpoint_epoch < FORMAL_DEPLOYMENT_EPOCH:
+            raise ValueError(
+                "Intermediate V2 O50 checkpoint_epoch must be between 3 and 9."
+            )
+        steps_per_epoch = FORMAL_DEPLOYMENT_GLOBAL_STEP // FORMAL_DEPLOYMENT_EPOCH
+        require_exact_values(
+            payload,
+            {
+                "epoch": expected_checkpoint_epoch,
+                "global_step": expected_checkpoint_epoch * steps_per_epoch,
             },
             label="checkpoint",
         )

@@ -119,6 +119,7 @@ V1_SOURCE_SHA256 = {
     "g2": "1c290f91772b42fdf6824d92832c6fff4e2d8ca3ea08089ff1a41016ea1c2ebe",
     "g3": "b279a85b1dd0816bd5fb9724da490810d470755880639297aa13699c86c2d8fb",
 }
+V2_RESUME_IDENTITY_KEY = "v2_resume_identity"
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,68 @@ def _canonical_sha256(value: Any) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _is_lower_hex(value: Any, *, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _build_v2_resume_identity(
+    *,
+    spec: ActorFreeTDLeWMV2Spec,
+    protocol_sha256: str,
+    source_v1_sha256: str,
+    v2_start_revision: str,
+    neighbor_index_manifest_sha256: str | None,
+) -> dict[str, Any]:
+    """Build the exact identity embedded in every resumable V2 checkpoint."""
+
+    if not _is_lower_hex(protocol_sha256, length=64):
+        raise ValueError("V2 resume protocol_sha256 must be lowercase SHA-256.")
+    if not _is_lower_hex(source_v1_sha256, length=64):
+        raise ValueError("V2 resume source_v1_sha256 must be lowercase SHA-256.")
+    if not _is_lower_hex(v2_start_revision, length=40):
+        raise ValueError("V2 start revision must be a full lowercase Git revision.")
+    if spec.requires_neighbor_index:
+        if not _is_lower_hex(neighbor_index_manifest_sha256, length=64):
+            raise ValueError(
+                "V2 G1 resume identity requires its neighbor-index SHA-256."
+            )
+    elif neighbor_index_manifest_sha256 is not None:
+        raise ValueError("Only V2 G1 may bind a neighbor-index resume identity.")
+    return {
+        "schema_version": 1,
+        "method": spec.method,
+        "method_family": spec.method_family,
+        "variant": spec.variant,
+        "implementation_version": spec.implementation_version,
+        "objective_version": spec.objective_version,
+        "deployment_checkpoint_version": spec.deployment_checkpoint_version,
+        "protocol_sha256": protocol_sha256,
+        "source_v1_sha256": source_v1_sha256,
+        "v2_start_revision": v2_start_revision,
+        "neighbor_index_manifest_sha256": neighbor_index_manifest_sha256,
+    }
+
+
+def _validate_v2_resume_checkpoint_identity(
+    checkpoint: Mapping[str, Any], expected: Mapping[str, Any]
+) -> None:
+    actual_value = checkpoint.get(V2_RESUME_IDENTITY_KEY)
+    if not isinstance(actual_value, Mapping):
+        raise RuntimeError("V2 resume checkpoint is missing its embedded identity.")
+    actual = dict(actual_value)
+    if set(actual) != set(expected):
+        raise RuntimeError("V2 resume checkpoint identity fields are incompatible.")
+    for key, expected_value in expected.items():
+        if actual.get(key) != expected_value:
+            raise RuntimeError(
+                f"V2 resume checkpoint {key} differs from the current run."
+            )
 
 
 def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -787,6 +850,9 @@ def _build_v2_training_module(
     validation_goal_generator: torch.Generator,
     validation_task_generator: torch.Generator,
     neighbor_index: StateNeighborActionIndex | None,
+    protocol_sha256: str,
+    v2_start_revision: str,
+    neighbor_index_manifest_sha256: str | None,
     device_image_preprocessing: bool,
 ):
     import lightning as pl
@@ -825,6 +891,13 @@ def _build_v2_training_module(
             self.neighbor_index = neighbor_index
             if spec.requires_neighbor_index != (neighbor_index is not None):
                 raise ValueError("Only V2 G1 accepts a neighbor index.")
+            self._v2_resume_identity = _build_v2_resume_identity(
+                spec=spec,
+                protocol_sha256=protocol_sha256,
+                source_v1_sha256=initialization.checkpoint_sha256,
+                v2_start_revision=v2_start_revision,
+                neighbor_index_manifest_sha256=(neighbor_index_manifest_sha256),
+            )
             self.history_size = int(protocol["sequence"]["history_frames"])
             self.frame_skip = int(protocol["sequence"]["frame_skip"])
             self.gamma = float(cfg["gamma"])
@@ -874,6 +947,7 @@ def _build_v2_training_module(
             return self
 
         def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+            checkpoint[V2_RESUME_IDENTITY_KEY] = copy.deepcopy(self._v2_resume_identity)
             checkpoint["v2_data_generator_state"] = self.data_generator.get_state()
             checkpoint["v2_goal_generator_state"] = self.goal_generator.get_state()
             checkpoint["v2_task_generator_state"] = self.task_generator.get_state()
@@ -891,6 +965,10 @@ def _build_v2_training_module(
             )
 
         def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+            _validate_v2_resume_checkpoint_identity(
+                checkpoint,
+                self._v2_resume_identity,
+            )
             keys = (
                 "v2_data_generator_state",
                 "v2_goal_generator_state",
@@ -902,27 +980,21 @@ def _build_v2_training_module(
             )
             if any(checkpoint.get(key) is None for key in keys):
                 raise RuntimeError("V2 resume checkpoint is missing RNG state.")
-            self.data_generator.set_state(
-                checkpoint["v2_data_generator_state"].cpu()
-            )
-            self.goal_generator.set_state(
-                checkpoint["v2_goal_generator_state"].cpu()
-            )
-            self.task_generator.set_state(
-                checkpoint["v2_task_generator_state"].cpu()
-            )
+            self.data_generator.set_state(checkpoint["v2_data_generator_state"].cpu())
+            self.goal_generator.set_state(checkpoint["v2_goal_generator_state"].cpu())
+            self.task_generator.set_state(checkpoint["v2_task_generator_state"].cpu())
             self.validation_goal_generator.set_state(
                 checkpoint["v2_validation_goal_generator_state"].cpu()
             )
             self.validation_task_generator.set_state(
                 checkpoint["v2_validation_task_generator_state"].cpu()
             )
-            self._validation_goal_epoch_state = checkpoint[
-                "v2_validation_goal_epoch_state"
-            ].cpu().clone()
-            self._validation_task_epoch_state = checkpoint[
-                "v2_validation_task_epoch_state"
-            ].cpu().clone()
+            self._validation_goal_epoch_state = (
+                checkpoint["v2_validation_goal_epoch_state"].cpu().clone()
+            )
+            self._validation_task_epoch_state = (
+                checkpoint["v2_validation_task_epoch_state"].cpu().clone()
+            )
 
         def on_validation_epoch_start(self) -> None:
             self.validation_goal_generator.set_state(
@@ -1037,9 +1109,7 @@ def _build_v2_training_module(
                     task,
                     goal_mask,
                     per_td,
-                    projection_coefficient=float(
-                        objective["goal_projection_weight"]
-                    ),
+                    projection_coefficient=float(objective["goal_projection_weight"]),
                 )
                 return output.loss, {
                     f"{prefix}_goal_projection_loss": output.projection_loss.detach(),
@@ -1283,20 +1353,28 @@ def _build_v2_training_module(
             current_slice = slice(self.history_size, expected_steps - 1)
             next_slice = slice(self.history_size + 1, expected_steps)
             real_state = embeddings[:, current_slice].reshape(-1, V1_STATE_DIM)
-            predicted_state = td_inputs.predicted_context[:, current_slice].reshape(
-                -1, V1_STATE_DIM
+            predicted_state = (
+                td_inputs.predicted_context[:, current_slice]
+                .reshape(-1, V1_STATE_DIM)
+                .to(real_state)
             )
             raw_action = td_inputs.actions[:, current_slice].reshape(
                 -1, V1_RAW_ACTION_DIM
             )
-            action_embedding = action_embeddings[:, current_slice].reshape(
-                -1, V1_ACTION_EMBEDDING_DIM
+            action_embedding = (
+                action_embeddings[:, current_slice]
+                .reshape(-1, V1_ACTION_EMBEDDING_DIM)
+                .to(real_state)
             )
-            ema_next_state = target_embeddings[:, next_slice].reshape(
-                -1, V1_STATE_DIM
+            ema_next_state = (
+                target_embeddings[:, next_slice]
+                .reshape(-1, V1_STATE_DIM)
+                .to(real_state)
             )
-            ema_next_action_embedding = target_action_embeddings[:, next_slice].reshape(
-                -1, V1_ACTION_EMBEDDING_DIM
+            ema_next_action_embedding = (
+                target_action_embeddings[:, next_slice]
+                .reshape(-1, V1_ACTION_EMBEDDING_DIM)
+                .to(real_state)
             )
             terminal = td_inputs.terminals[:, current_slice].reshape(-1)
             goal_source = (
@@ -1310,6 +1388,7 @@ def _build_v2_training_module(
                 first_current_index=self.history_size,
                 generator=goal_source,
             )
+            matched_goals = matched_goals.to(real_state)
             task_source = (
                 self.task_generator
                 if stage == "train"
@@ -1317,12 +1396,11 @@ def _build_v2_training_module(
             )
             mixed = sample_mixed_tasks_v1(
                 matched_goals.reshape(-1, V1_TASK_DIM),
-                goal_probability=float(
-                    protocol["task_sampling"]["goal_probability"]
-                ),
+                goal_probability=float(protocol["task_sampling"]["goal_probability"]),
                 generator=task_source,
             )
-            task = mixed.task
+            task = mixed.task.to(real_state)
+            goal_mask = mixed.goal_mask.to(device=real_state.device)
             transition_positions = torch.arange(
                 self.history_size,
                 expected_steps - 1,
@@ -1352,7 +1430,7 @@ def _build_v2_training_module(
                 raw_action=raw_action,
                 action_embedding=action_embedding,
                 task=task,
-                goal_mask=mixed.goal_mask,
+                goal_mask=goal_mask,
                 global_rows=global_rows,
                 stage=stage,
             )
@@ -1385,8 +1463,8 @@ def _build_v2_training_module(
                     td_batch.predicted_td_loss.detach()
                 ),
                 f"{stage}/td_weight_scale": loss.new_tensor(auxiliary_scale),
-                f"{stage}/goal_task_fraction": mixed.goal_mask.float().mean(),
-                f"{stage}/random_task_fraction": (~mixed.goal_mask).float().mean(),
+                f"{stage}/goal_task_fraction": goal_mask.float().mean(),
+                f"{stage}/random_task_fraction": (~goal_mask).float().mean(),
                 f"{stage}/terminal_fraction": terminal.float().mean(),
                 f"{stage}/td_pairs": loss.new_tensor(float(real_state.shape[0])),
                 f"{stage}/goal_offset_mean": goal_offsets.float().mean(),
@@ -1454,10 +1532,7 @@ def _build_v2_training_module(
             )
             warmup_steps = max(
                 1,
-                int(
-                    float(protocol["scheduler"]["warmup_fraction"])
-                    * int(total_steps)
-                ),
+                int(float(protocol["scheduler"]["warmup_fraction"]) * int(total_steps)),
             )
 
             def learning_rate_scale(step: int) -> float:
@@ -1466,9 +1541,7 @@ def _build_v2_training_module(
                 progress = (step - warmup_steps) / max(
                     1, int(total_steps) - warmup_steps
                 )
-                return 0.5 * (
-                    1.0 + math.cos(math.pi * min(float(progress), 1.0))
-                )
+                return 0.5 * (1.0 + math.cos(math.pi * min(float(progress), 1.0)))
 
             scheduler = torch.optim.lr_scheduler.LambdaLR(
                 optimizer, lr_lambda=learning_rate_scale
@@ -1597,6 +1670,7 @@ def _validate_v2_resume_manifest(
     split_manifest: Mapping[str, Any],
     initialization: V2Initialization,
     neighbor_info: Mapping[str, Any] | None,
+    v2_start_revision: str,
 ) -> None:
     compatible = (
         manifest.get("method") == spec.method
@@ -1613,13 +1687,12 @@ def _validate_v2_resume_manifest(
         and manifest.get("seed") == seed
         and manifest.get("source_v1", {}).get("checkpoint_sha256")
         == initialization.checkpoint_sha256
-        and manifest.get("dataset", {}).get("split", {}).get(
-            "train_indices_sha256"
-        )
+        and manifest.get("runtime", {}).get("tdwm_git_revision") == v2_start_revision
+        and manifest.get("dataset", {}).get("split", {}).get("train_indices_sha256")
         == split_manifest.get("train_indices_sha256")
-        and manifest.get("dataset", {}).get("split", {}).get(
-            "validation_indices_sha256"
-        )
+        and manifest.get("dataset", {})
+        .get("split", {})
+        .get("validation_indices_sha256")
         == split_manifest.get("validation_indices_sha256")
     )
     previous_neighbor = manifest.get("neighbor_index")
@@ -1652,9 +1725,7 @@ def _load_neighbor_index(
         raise ValueError("V2 G1 neighbor index differs from the archived V1 index.")
     source_bank = manifest.get("source_bank", {})
     latent_store_hash = source_bank.get("latent_store_manifest_sha256")
-    expected_latent_store_hash = source_artifacts[
-        "frozen_latent_store_manifest_sha256"
-    ]
+    expected_latent_store_hash = source_artifacts["frozen_latent_store_manifest_sha256"]
     if latent_store_hash != expected_latent_store_hash:
         raise ValueError("V2 G1 neighbor index uses another frozen latent store.")
     index = StateNeighborActionIndex(
@@ -1694,9 +1765,7 @@ def train_actor_free_td_lewm_v2(
 ) -> dict[str, Any]:
     """Fine-tune one C--G3 method with the full coupled Hybrid dataflow."""
 
-    protocol = load_actor_free_td_lewm_v2_training_protocol(
-        protocol_path, spec=spec
-    )
+    protocol = load_actor_free_td_lewm_v2_training_protocol(protocol_path, spec=spec)
     if seed not in protocol["seeds"]:
         raise ValueError(f"Seed {seed} is not in {protocol['seeds']}.")
     if resume not in {"auto", "never", "required"}:
@@ -1740,9 +1809,7 @@ def train_actor_free_td_lewm_v2(
     pl.seed_everything(seed, workers=True)
     dataset_source = validate_cube_training_dataset(dataset_path, protocol["dataset"])
     if dataset_source["format"] != "lance":
-        raise ValueError(
-            "V2 coupled training requires the audited Lance clip loader."
-        )
+        raise ValueError("V2 coupled training requires the audited Lance clip loader.")
     sequence = protocol["sequence"]
     dataset_cfg = protocol["dataset"]
     loader_cfg = protocol["loader"]
@@ -1770,9 +1837,10 @@ def train_actor_free_td_lewm_v2(
         normalization_path,
     )
     normalization_sha256 = _file_sha256(normalization_path)
-    if normalization_sha256 != protocol["source_artifacts"][
-        "column_normalization_sha256"
-    ]:
+    if (
+        normalization_sha256
+        != protocol["source_artifacts"]["column_normalization_sha256"]
+    ):
         raise ValueError(
             "V2 column normalization differs from the archived V1 normalization."
         )
@@ -1804,9 +1872,7 @@ def train_actor_free_td_lewm_v2(
     expected_split = {
         "file_sha256": source_artifacts["split_file_sha256"],
         "train_indices_sha256": source_artifacts["train_indices_sha256"],
-        "validation_indices_sha256": source_artifacts[
-            "validation_indices_sha256"
-        ],
+        "validation_indices_sha256": source_artifacts["validation_indices_sha256"],
     }
     _require_exact(split_manifest, expected_split, label="split_indices")
     train_set = torch.utils.data.Subset(dataset, train_indices.tolist())
@@ -1938,6 +2004,15 @@ def train_actor_free_td_lewm_v2(
     validation_task_generator = torch.Generator().manual_seed(
         seed + int(protocol["task_sampling"]["task_sampling_seed_offset"]) + 1
     )
+    protocol_hash = _canonical_sha256(protocol)
+    v2_start_revision = _git_revision()
+    if not _is_lower_hex(v2_start_revision, length=40):
+        raise RuntimeError(
+            "V2 training requires a full Git revision for resumable identity."
+        )
+    neighbor_manifest_sha256 = (
+        str(neighbor_info["manifest_sha256"]) if neighbor_info is not None else None
+    )
     module = _build_v2_training_module(
         world_model,
         initialization,
@@ -1950,6 +2025,9 @@ def train_actor_free_td_lewm_v2(
         validation_goal_generator=validation_goal_generator,
         validation_task_generator=validation_task_generator,
         neighbor_index=neighbor_index,
+        protocol_sha256=protocol_hash,
+        v2_start_revision=v2_start_revision,
+        neighbor_index_manifest_sha256=neighbor_manifest_sha256,
         device_image_preprocessing=device_preprocessing,
     )
 
@@ -1974,7 +2052,6 @@ def train_actor_free_td_lewm_v2(
     if episode_train_dataset is not None:
         callbacks.append(_build_episode_epoch_callback(episode_train_dataset))
 
-    protocol_hash = _canonical_sha256(protocol)
     last_checkpoint = checkpoint_dir / "last.ckpt"
     if resume == "required" and not last_checkpoint.is_file():
         raise FileNotFoundError(last_checkpoint)
@@ -1993,6 +2070,7 @@ def train_actor_free_td_lewm_v2(
             split_manifest=split_manifest,
             initialization=initialization,
             neighbor_info=neighbor_info,
+            v2_start_revision=v2_start_revision,
         )
         checkpoint_path = str(last_checkpoint)
 
@@ -2001,7 +2079,7 @@ def train_actor_free_td_lewm_v2(
         "torch": torch.__version__,
         "python": platform.python_version(),
         "platform": platform.platform(),
-        "tdwm_git_revision": _git_revision(),
+        "tdwm_git_revision": v2_start_revision,
         "compatibility_adapter": compatibility,
     }
     if torch.cuda.is_available():
