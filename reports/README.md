@@ -11,21 +11,25 @@
 [`artifacts/aligned_acd_o50_seed3072/`](artifacts/aligned_acd_o50_seed3072/README.md)：
 它只含 start/goal 索引、成功布尔值、哈希和 provenance，不含数据、模型或原始日志。
 
-Actor-Free TD-LeWM 目前有四组必须分开解释的正式记录：
+Actor-Free TD-LeWM 现在有一份统一总账，并保留各阶段报告作为来源说明。统一总账覆盖
+**465 个 O50 结果单元、23,250 个逐 episode 布尔 outcome**；所有格使用同一组 50 个
+start-goal pair。固定 E10 比较与 E3--E10 checkpoint sweep 在总账中分开标记，不能把
+事后最佳 epoch 当成固定 checkpoint 主结果。
 
 | 记录 | 正式范围 | 报告 / 轻量证据 |
 | --- | --- | --- |
+| **统一 Results TD 总账** | **Legacy + V0 + V1 + V2 + V2-EMA-SG = 465 O50** | [`actor_free_td_lewm_complete_cube_seed3072.md`](actor_free_td_lewm_complete_cube_seed3072.md) / [`results_td_actor_free_td_lewm_complete_cube_seed3072.docx`](results_td_actor_free_td_lewm_complete_cube_seed3072.docx) / [`artifacts/actor_free_td_lewm_complete_cube_seed3072/`](artifacts/actor_free_td_lewm_complete_cube_seed3072/) |
 | 较早结构消融 | 7 methods × 3 scores = 21 O50 | [`actor_free_td_lewm_cube_seed3072.md`](actor_free_td_lewm_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_cube_seed3072/`](artifacts/actor_free_td_lewm_cube_seed3072/README.md) |
-| C–G3 raw-action V0 | 6 methods × 3 scores = 18 O50 | [`actor_free_td_lewm_v0_v1_cube_seed3072.md`](actor_free_td_lewm_v0_v1_cube_seed3072.md) / [`formal_o50_summary.json`](artifacts/actor_free_td_lewm_v0_cube_seed3072/formal_o50_summary.json) |
-| C–G3 action-encoder V1 | 6 methods × 3 scores = 18 O50 | [`actor_free_td_lewm_v1_cube_seed3072.md`](actor_free_td_lewm_v1_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_v1_cube_seed3072/`](artifacts/actor_free_td_lewm_v1_cube_seed3072/README.md) |
-| V2-EMA-SG 联合微调与新评分 | 96 EMA epoch-score cells + 24 fixed-checkpoint cells | [`actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072.md`](actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/`](artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/) |
+| C–G3 raw-action V0 | 18 原评分 + 6 first-Q = 24 O50 | [`actor_free_td_lewm_v0_v1_cube_seed3072.md`](actor_free_td_lewm_v0_v1_cube_seed3072.md) / [`formal_o50_summary.json`](artifacts/actor_free_td_lewm_v0_cube_seed3072/formal_o50_summary.json) |
+| C–G3 action-encoder V1 | 18 原评分 + 6 first-Q = 24 O50 | [`actor_free_td_lewm_v1_cube_seed3072.md`](actor_free_td_lewm_v1_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_v1_cube_seed3072/`](artifacts/actor_free_td_lewm_v1_cube_seed3072/README.md) |
+| V2 joint fine-tune | 144 原评分 epoch cells + 12 E10 新评分 = 156 O50 | 统一总账中的 V2 exact checkpoint trajectory / [`artifacts/actor_free_td_lewm_complete_cube_seed3072/`](artifacts/actor_free_td_lewm_complete_cube_seed3072/) |
+| V2-EMA-SG | E3--E10 × 6 methods × 5 scores = 240 O50 | [`actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072.md`](actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/`](artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/) |
 
-旧 7-method bundle 由 `scripts/archive_actor_free_td_lewm_o50.py` 审计；V1 bundle 由
-`scripts/archive_actor_free_td_lewm_v1_o50.py` 审计；V2-EMA-SG 新评分由
-`scripts/archive_actor_free_td_lewm_v2_ema_new_scores.py` 合并并复验 96+24 格。它们都从原始训练/评测 JSON、metrics
-和逐 episode outcome 生成，不接受人工补齐结果。C–G3 V0 的 compact index 还记录了 18 个
-服务器 raw `results.json` 的 SHA-256。三组都只有一个 training seed；V0/V1 虽使用同一
-selection，但网络 action 表示和参数量不同，不能把单组百分比解释为多 seed 总体优劣。
+统一总账由 `scripts/archive_actor_free_td_lewm_complete.py` 对各阶段已锁定归档和原始
+训练/评测证据再次 fail-closed 对账；465/465 格均从 50 个严格布尔 outcome 重算成功数，
+并记录 checkpoint、commit、来源路径及 SHA-256。所有训练仍只有 seed 3072；V0/V1/V2
+虽然使用同一 selection，但网络更新范围、action 表示和参数量不同，不能把单组百分比
+解释为多 seed 总体优劣。
 
 ## 结论边界
 

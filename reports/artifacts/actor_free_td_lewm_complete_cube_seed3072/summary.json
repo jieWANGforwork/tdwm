@@ -1,0 +1,1221 @@
+{
+  "action_normalization_sha256": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+  "cell_count": 465,
+  "cell_counts_by_comparison_role": {
+    "epoch_sweep_new_scores": 96,
+    "epoch_sweep_original_scores": 288,
+    "fixed_checkpoint_new_scores": 24,
+    "fixed_checkpoint_original_scores": 57
+  },
+  "cell_counts_by_version": {
+    "legacy": 21,
+    "v0": 24,
+    "v1": 24,
+    "v2": 156,
+    "v2_ema_sg": 240
+  },
+  "outcome_cell_count": 465,
+  "outcome_count": 23250,
+  "planning_seed": 42,
+  "retry_attempt_02_cells": [
+    {
+      "cell_id": "epoch_sweep_original_scores__v2_ema_sg__e03__g1__f_plus_g",
+      "source_path": "/private/tmp/td-results-full.y1qTdB/v2_ema/evaluation_retry_18cd574/epoch_03/g1/f_plus_g/attempt_02",
+      "source_protocol_sha256": "a8ef50c71149ac02a8ffbef07876b2d388df4602edaf95c094ae0e8f49fb3254",
+      "source_results_sha256": "07bd490966070623e3a13db21190a639f67b301eef55ee6940e447bda776bc94"
+    },
+    {
+      "cell_id": "epoch_sweep_original_scores__v2_ema_sg__e03__g2__f_only",
+      "source_path": "/private/tmp/td-results-full.y1qTdB/v2_ema/evaluation_retry_18cd574/epoch_03/g2/f_only/attempt_02",
+      "source_protocol_sha256": "4c7c62c6e8aa586601623a728b5abe4e1203e0c8e38e86b008de067b608b10c1",
+      "source_results_sha256": "cfc30105c43e7d0342c491a3489307a952ef8a4cef5cb7778bbba8741c60ff4d"
+    }
+  ],
+  "schema_version": 1,
+  "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+  "source": "actor_free_td_lewm_complete_o50_summary",
+  "sources": {
+    "ema_new_scores": {
+      "cell_count": 120,
+      "ema_epoch_sweep_cell_count": 96,
+      "fixed_checkpoint_cell_count": 24,
+      "ledger_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/new_scores/reconciliation_ledger.json",
+      "ledger_sha256": "b3dc4c77468bca45a1fd2af886f39916c4795a82fcfdffe2d02d1119edb5db29"
+    },
+    "legacy": {
+      "cell_count": 21,
+      "paired_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_cube_seed3072/paired_outcomes.csv",
+      "paired_sha256": "3047c9a419f066548b6e942e29c49b35d286670dc60e5db27fcd845897a6f2ae",
+      "raw_root": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/artifacts/actor_free_td_lewm_final_lightweight_bundle_fa46ed9/methods",
+      "summary_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_cube_seed3072/summary.json",
+      "summary_sha256": "9fa31a12476ff4a332e555505fc720964d81c5640c77cc394beb5df538ae2da6"
+    },
+    "v0": {
+      "cell_count": 18,
+      "root": "/private/tmp/td-results-full.y1qTdB/v0",
+      "summary_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v0_cube_seed3072/formal_o50_summary.json",
+      "summary_sha256": "10ec73f4d40fd2a21e01016f9d55c4ac931ba338dde6296dad6877b167bca323"
+    },
+    "v1": {
+      "bundle_root": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-bundle-3c4e62e",
+      "cell_count": 18,
+      "paired_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v1_cube_seed3072/paired_outcomes.csv",
+      "paired_sha256": "528aa62cafbc8c540fed65c41ee48a6a4c856b3667f8ab0d47673f387db134ca",
+      "summary_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v1_cube_seed3072/summary.json",
+      "summary_sha256": "a0210525dfc361e98420d26e1a97cd57dc784186ef58cc3f70d99bbe8ed77922"
+    },
+    "v2_ema_original_epoch_sweep": {
+      "cell_count": 144,
+      "epoch10_paired_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/original_scores/paired_outcomes.csv",
+      "epoch10_paired_sha256": "25710a0c2383d5c5639a0ff46c76ea5e70b988476d30b60e0c176bbe357d4d1a",
+      "epoch10_summary_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/original_scores/summary.json",
+      "epoch10_summary_sha256": "735afc0cce4498fb84b05efbb185db63ff613986b1a74625106f65aa7512f47c",
+      "epochs": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "retry_cells": [
+        {
+          "epoch": 3,
+          "path": "/private/tmp/td-results-full.y1qTdB/v2_ema/evaluation_retry_18cd574/epoch_03/g1/f_plus_g/attempt_02",
+          "score_mode": "f_plus_g",
+          "variant": "g1"
+        },
+        {
+          "epoch": 3,
+          "path": "/private/tmp/td-results-full.y1qTdB/v2_ema/evaluation_retry_18cd574/epoch_03/g2/f_only/attempt_02",
+          "score_mode": "f_only",
+          "variant": "g2"
+        }
+      ],
+      "root": "/private/tmp/td-results-full.y1qTdB/v2_ema",
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "variants": [
+        "c",
+        "d",
+        "f",
+        "g1",
+        "g2",
+        "g3"
+      ]
+    },
+    "v2_original_epoch_sweep": {
+      "cell_count": 144,
+      "epochs": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "retry_cells": [],
+      "root": "/private/tmp/td-results-full.y1qTdB/v2",
+      "score_modes": [
+        "f_only",
+        "g_only",
+        "f_plus_g"
+      ],
+      "variants": [
+        "c",
+        "d",
+        "f",
+        "g1",
+        "g2",
+        "g3"
+      ]
+    }
+  },
+  "statistics_by_scope_version_score_mode": {
+    "epoch_sweep_new_scores|v2_ema_sg|f_plus_g_first": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_new_scores__v2_ema_sg__e05__c__f_plus_g_first",
+          "epoch": 5,
+          "method_id": "actor_free_td_lewm_v2_ema_sg_c",
+          "success_count": 24,
+          "success_rate_percent": 48.0,
+          "variant": "c"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 48.0,
+      "mean_success_rate_percent": 38.75,
+      "minimum_success_rate_percent": 26.0,
+      "population_sd_percentage_points": 4.977030573879704
+    },
+    "epoch_sweep_new_scores|v2_ema_sg|g_only_f_rollout_mean": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_new_scores__v2_ema_sg__e04__f__g_only_f_rollout_mean",
+          "epoch": 4,
+          "method_id": "actor_free_td_lewm_v2_ema_sg_f",
+          "success_count": 25,
+          "success_rate_percent": 50.0,
+          "variant": "f"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 50.0,
+      "mean_success_rate_percent": 37.125,
+      "minimum_success_rate_percent": 18.0,
+      "population_sd_percentage_points": 6.270383427935913
+    },
+    "epoch_sweep_original_scores|v2_ema_sg|f_only": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_original_scores__v2_ema_sg__e07__f__f_only",
+          "epoch": 7,
+          "method_id": "actor_free_td_lewm_v2_ema_sg_f",
+          "success_count": 20,
+          "success_rate_percent": 40.0,
+          "variant": "f"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 40.0,
+      "mean_success_rate_percent": 28.958333333333332,
+      "minimum_success_rate_percent": 16.0,
+      "population_sd_percentage_points": 5.049580565639971
+    },
+    "epoch_sweep_original_scores|v2_ema_sg|f_plus_g": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_original_scores__v2_ema_sg__e03__d__f_plus_g",
+          "epoch": 3,
+          "method_id": "actor_free_td_lewm_v2_ema_sg_d",
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "d"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 44.0,
+      "mean_success_rate_percent": 30.708333333333332,
+      "minimum_success_rate_percent": 20.0,
+      "population_sd_percentage_points": 5.235926905100524
+    },
+    "epoch_sweep_original_scores|v2_ema_sg|g_only": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_original_scores__v2_ema_sg__e08__c__g_only",
+          "epoch": 8,
+          "method_id": "actor_free_td_lewm_v2_ema_sg_c",
+          "success_count": 21,
+          "success_rate_percent": 42.0,
+          "variant": "c"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 42.0,
+      "mean_success_rate_percent": 33.208333333333336,
+      "minimum_success_rate_percent": 18.0,
+      "population_sd_percentage_points": 4.911543941459639
+    },
+    "epoch_sweep_original_scores|v2|f_only": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_original_scores__v2__e07__d__f_only",
+          "epoch": 7,
+          "method_id": "actor_free_td_lewm_v2_d",
+          "success_count": 20,
+          "success_rate_percent": 40.0,
+          "variant": "d"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 40.0,
+      "mean_success_rate_percent": 28.0,
+      "minimum_success_rate_percent": 18.0,
+      "population_sd_percentage_points": 4.453463071962463
+    },
+    "epoch_sweep_original_scores|v2|f_plus_g": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_original_scores__v2__e07__d__f_plus_g",
+          "epoch": 7,
+          "method_id": "actor_free_td_lewm_v2_d",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "d"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 46.0,
+      "mean_success_rate_percent": 30.0,
+      "minimum_success_rate_percent": 20.0,
+      "population_sd_percentage_points": 5.70087712549569
+    },
+    "epoch_sweep_original_scores|v2|g_only": {
+      "best_cells": [
+        {
+          "cell_id": "epoch_sweep_original_scores__v2__e04__d__g_only",
+          "epoch": 4,
+          "method_id": "actor_free_td_lewm_v2_d",
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "d"
+        },
+        {
+          "cell_id": "epoch_sweep_original_scores__v2__e06__f__g_only",
+          "epoch": 6,
+          "method_id": "actor_free_td_lewm_v2_f",
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "f"
+        }
+      ],
+      "cell_count": 48,
+      "maximum_success_rate_percent": 44.0,
+      "mean_success_rate_percent": 35.166666666666664,
+      "minimum_success_rate_percent": 26.0,
+      "population_sd_percentage_points": 4.633812924819281
+    },
+    "fixed_checkpoint_new_scores|v0|f_plus_g_first": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_new_scores__v0__e10__c__f_plus_g_first",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_c",
+          "success_count": 26,
+          "success_rate_percent": 52.0,
+          "variant": "c"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 52.0,
+      "mean_success_rate_percent": 47.0,
+      "minimum_success_rate_percent": 40.0,
+      "population_sd_percentage_points": 3.605551275463989
+    },
+    "fixed_checkpoint_new_scores|v1|f_plus_g_first": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_new_scores__v1__e10__c__f_plus_g_first",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_c",
+          "success_count": 28,
+          "success_rate_percent": 56.0,
+          "variant": "c"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 56.0,
+      "mean_success_rate_percent": 52.0,
+      "minimum_success_rate_percent": 50.0,
+      "population_sd_percentage_points": 2.0
+    },
+    "fixed_checkpoint_new_scores|v2|f_plus_g_first": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_new_scores__v2__e10__d__f_plus_g_first",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v2_d",
+          "success_count": 21,
+          "success_rate_percent": 42.0,
+          "variant": "d"
+        },
+        {
+          "cell_id": "fixed_checkpoint_new_scores__v2__e10__f__f_plus_g_first",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v2_f",
+          "success_count": 21,
+          "success_rate_percent": 42.0,
+          "variant": "f"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 42.0,
+      "mean_success_rate_percent": 39.666666666666664,
+      "minimum_success_rate_percent": 38.0,
+      "population_sd_percentage_points": 1.7950549357115013
+    },
+    "fixed_checkpoint_new_scores|v2|g_only_f_rollout_mean": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_new_scores__v2__e10__d__g_only_f_rollout_mean",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v2_d",
+          "success_count": 24,
+          "success_rate_percent": 48.0,
+          "variant": "d"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 48.0,
+      "mean_success_rate_percent": 34.333333333333336,
+      "minimum_success_rate_percent": 20.0,
+      "population_sd_percentage_points": 9.620579793107874
+    },
+    "fixed_checkpoint_original_scores|legacy|c_only": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__legacy__e10__direct_goal_hybrid__c_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm",
+          "success_count": 16,
+          "success_rate_percent": 32.0,
+          "variant": "direct_goal_hybrid"
+        }
+      ],
+      "cell_count": 1,
+      "maximum_success_rate_percent": 32.0,
+      "mean_success_rate_percent": 32.0,
+      "minimum_success_rate_percent": 32.0,
+      "population_sd_percentage_points": 0.0
+    },
+    "fixed_checkpoint_original_scores|legacy|f_only": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__legacy__e10__serial_coupled__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm",
+          "success_count": 26,
+          "success_rate_percent": 52.0,
+          "variant": "serial_coupled"
+        }
+      ],
+      "cell_count": 7,
+      "maximum_success_rate_percent": 52.0,
+      "mean_success_rate_percent": 45.42857142857143,
+      "minimum_success_rate_percent": 34.0,
+      "population_sd_percentage_points": 6.020373573058708
+    },
+    "fixed_checkpoint_original_scores|legacy|f_plus_c": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__legacy__e10__direct_goal_hybrid__f_plus_c",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm",
+          "success_count": 19,
+          "success_rate_percent": 38.0,
+          "variant": "direct_goal_hybrid"
+        }
+      ],
+      "cell_count": 1,
+      "maximum_success_rate_percent": 38.0,
+      "mean_success_rate_percent": 38.0,
+      "minimum_success_rate_percent": 38.0,
+      "population_sd_percentage_points": 0.0
+    },
+    "fixed_checkpoint_original_scores|legacy|f_plus_g": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__legacy__e10__hybrid__f_plus_g",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm",
+          "success_count": 27,
+          "success_rate_percent": 54.0,
+          "variant": "hybrid"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 54.0,
+      "mean_success_rate_percent": 44.666666666666664,
+      "minimum_success_rate_percent": 38.0,
+      "population_sd_percentage_points": 5.120763831912406
+    },
+    "fixed_checkpoint_original_scores|legacy|g_only": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__legacy__e10__goal_hybrid__g_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm",
+          "success_count": 19,
+          "success_rate_percent": 38.0,
+          "variant": "goal_hybrid"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 38.0,
+      "mean_success_rate_percent": 29.0,
+      "minimum_success_rate_percent": 26.0,
+      "population_sd_percentage_points": 4.281744192888376
+    },
+    "fixed_checkpoint_original_scores|v0|f_only": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__c__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_c",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "c"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__d__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_d",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "d"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__f__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_f",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "f"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__g1__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_g1",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "g1"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__g2__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_g2",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "g2"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__g3__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_g3",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "g3"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 46.0,
+      "mean_success_rate_percent": 46.0,
+      "minimum_success_rate_percent": 46.0,
+      "population_sd_percentage_points": 0.0
+    },
+    "fixed_checkpoint_original_scores|v0|f_plus_g": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__g1__f_plus_g",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_g1",
+          "success_count": 25,
+          "success_rate_percent": 50.0,
+          "variant": "g1"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__g2__f_plus_g",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_g2",
+          "success_count": 25,
+          "success_rate_percent": 50.0,
+          "variant": "g2"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 50.0,
+      "mean_success_rate_percent": 46.0,
+      "minimum_success_rate_percent": 40.0,
+      "population_sd_percentage_points": 3.8297084310253524
+    },
+    "fixed_checkpoint_original_scores|v0|g_only": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v0__e10__d__g_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_d",
+          "success_count": 20,
+          "success_rate_percent": 40.0,
+          "variant": "d"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 40.0,
+      "mean_success_rate_percent": 35.666666666666664,
+      "minimum_success_rate_percent": 32.0,
+      "population_sd_percentage_points": 2.9249881291307074
+    },
+    "fixed_checkpoint_original_scores|v1|f_only": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__c__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_c",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "c"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__d__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_d",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "d"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__f__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_f",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "f"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__g1__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_g1",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "g1"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__g2__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_g2",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "g2"
+        },
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__g3__f_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_g3",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "g3"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 46.0,
+      "mean_success_rate_percent": 46.0,
+      "minimum_success_rate_percent": 46.0,
+      "population_sd_percentage_points": 0.0
+    },
+    "fixed_checkpoint_original_scores|v1|f_plus_g": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__g3__f_plus_g",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_g3",
+          "success_count": 27,
+          "success_rate_percent": 54.0,
+          "variant": "g3"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 54.0,
+      "mean_success_rate_percent": 47.666666666666664,
+      "minimum_success_rate_percent": 42.0,
+      "population_sd_percentage_points": 3.9015666369065416
+    },
+    "fixed_checkpoint_original_scores|v1|g_only": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_original_scores__v1__e10__f__g_only",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_f",
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "f"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 46.0,
+      "mean_success_rate_percent": 41.333333333333336,
+      "minimum_success_rate_percent": 36.0,
+      "population_sd_percentage_points": 3.39934634239519
+    }
+  },
+  "training_loss_curves": {
+    "v0": {
+      "epoch_rows": 60,
+      "family": "actor_free_td_lewm_v0",
+      "generated_csv_sha256": "5f3a65f6b5a5cfa912a59f9628b6ed7a7b82300c73664d1328b125fc7dbed458",
+      "root": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata",
+      "variant_count": 6,
+      "variants": {
+        "c": {
+          "metric_columns": [
+            "train/base_td_loss_epoch",
+            "train/goal_projection_loss_epoch",
+            "train/goal_score_residual_mean_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_td_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/td_pairs_epoch",
+            "train/td_prediction_mean_epoch",
+            "train/td_target_mean_epoch",
+            "train/terminal_fraction_epoch",
+            "validation/base_td_loss",
+            "validation/goal_projection_loss",
+            "validation/goal_score_residual_mean",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_td_loss",
+            "validation/random_task_fraction",
+            "validation/td_pairs",
+            "validation/td_prediction_mean",
+            "validation/td_target_mean",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/c/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "edc626b435812a8266e3dc6574a2cd3d8b956efe2f391ccaf4400549bae9e31a",
+          "row_count": 10,
+          "training_commit": "79706d3d16bd845d74c6fc54bfef809aaa851b8b",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/c/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "fbcc0af2b71d79085f273f57e83a7fee77a5ed8bc7ed6cc1424793eee26cec32",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/c/seed_3072/training_result.json",
+          "training_result_sha256": "77e17c869810c1a0ac2444fa1b1661db069e48141e2c2db06db620522f30672d"
+        },
+        "d": {
+          "metric_columns": [
+            "train/base_td_loss_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_td_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/target_goal_score_mean_epoch",
+            "train/td_pairs_epoch",
+            "train/td_prediction_mean_epoch",
+            "train/td_target_mean_epoch",
+            "train/terminal_fraction_epoch",
+            "train/weight_mean_epoch",
+            "train/weight_std_epoch",
+            "validation/base_td_loss",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_td_loss",
+            "validation/random_task_fraction",
+            "validation/target_goal_score_mean",
+            "validation/td_pairs",
+            "validation/td_prediction_mean",
+            "validation/td_target_mean",
+            "validation/terminal_fraction",
+            "validation/weight_mean",
+            "validation/weight_std"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/d/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "07aa4f61914218f74e1b98a1bc63153cb755577d8d10417609a1b1c3db078f0a",
+          "row_count": 10,
+          "training_commit": "79706d3d16bd845d74c6fc54bfef809aaa851b8b",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/d/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "3f89dced3c7c4a2b288997b04cc172350eedddb4b012ffa59b139ab5873c82d6",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/d/seed_3072/training_result.json",
+          "training_result_sha256": "b2dca5fbbec052dc57d1904900821bff54d84785b75be81ef922eb845c9144bc"
+        },
+        "f": {
+          "metric_columns": [
+            "train/base_td_loss_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_td_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/same_future_advantage_mean_epoch",
+            "train/td_pairs_epoch",
+            "train/td_prediction_mean_epoch",
+            "train/td_target_mean_epoch",
+            "train/terminal_fraction_epoch",
+            "train/weight_mean_epoch",
+            "train/weight_std_epoch",
+            "validation/base_td_loss",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_td_loss",
+            "validation/random_task_fraction",
+            "validation/same_future_advantage_mean",
+            "validation/td_pairs",
+            "validation/td_prediction_mean",
+            "validation/td_target_mean",
+            "validation/terminal_fraction",
+            "validation/weight_mean",
+            "validation/weight_std"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/f/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "0c99cdcfafeb1d6dae7010c3818a88e4c623c1ad1e642d0df208f509095898db",
+          "row_count": 10,
+          "training_commit": "79706d3d16bd845d74c6fc54bfef809aaa851b8b",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/f/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "33f0598030d732f0b020bec99aad271e98d88f7495517456d200ee457e470f5b",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/f/seed_3072/training_result.json",
+          "training_result_sha256": "e132cdfae1317242ab6620bd3f95b3acdd11e8970fd88cff604b022fe14c9579"
+        },
+        "g1": {
+          "metric_columns": [
+            "train/base_td_loss_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_td_loss_epoch",
+            "train/neighbor_advantage_mean_epoch",
+            "train/neighbor_objective_available_epoch",
+            "train/random_task_fraction_epoch",
+            "train/td_pairs_epoch",
+            "train/td_prediction_mean_epoch",
+            "train/td_target_mean_epoch",
+            "train/terminal_fraction_epoch",
+            "train/weight_mean_epoch",
+            "validation/base_td_loss",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_td_loss",
+            "validation/neighbor_objective_available",
+            "validation/random_task_fraction",
+            "validation/td_pairs",
+            "validation/td_prediction_mean",
+            "validation/td_target_mean",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g1/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "f5b6d7c0c13ca336fcbeb776619de4213c3561b0ca49a415431b21c813ca721c",
+          "row_count": 10,
+          "training_commit": "79706d3d16bd845d74c6fc54bfef809aaa851b8b",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g1/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "ef2c1ac24ce5cb2ad535159cedca6dc60c023fdc3f42230732b23b0e0d8c15c7",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g1/seed_3072/training_result.json",
+          "training_result_sha256": "c99334c9921517ed95702c661fe519e3b8dfff20e2720fa6c2f1839e85cba5a0"
+        },
+        "g2": {
+          "metric_columns": [
+            "train/base_td_loss_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_td_loss_epoch",
+            "train/prefix_mean_advantage_mean_epoch",
+            "train/random_task_fraction_epoch",
+            "train/td_pairs_epoch",
+            "train/td_prediction_mean_epoch",
+            "train/td_target_mean_epoch",
+            "train/terminal_fraction_epoch",
+            "train/weight_mean_epoch",
+            "train/weight_std_epoch",
+            "validation/base_td_loss",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_td_loss",
+            "validation/prefix_mean_advantage_mean",
+            "validation/random_task_fraction",
+            "validation/td_pairs",
+            "validation/td_prediction_mean",
+            "validation/td_target_mean",
+            "validation/terminal_fraction",
+            "validation/weight_mean",
+            "validation/weight_std"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g2/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "7ece5f4a1394e483d89f71ccd6a3df71f0256328c2faa27b97629f511547fbde",
+          "row_count": 10,
+          "training_commit": "79706d3d16bd845d74c6fc54bfef809aaa851b8b",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g2/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "81b14a90be84cc831f5731cd4cf88557505c27630e635dc86c33974fb1099964",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g2/seed_3072/training_result.json",
+          "training_result_sha256": "7e6261f9b52af651bffe7884eaf15b4c0e56bb430f947ce206e705d101488969"
+        },
+        "g3": {
+          "metric_columns": [
+            "train/base_td_loss_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_td_loss_epoch",
+            "train/prefix_marginal_advantage_mean_epoch",
+            "train/random_task_fraction_epoch",
+            "train/td_pairs_epoch",
+            "train/td_prediction_mean_epoch",
+            "train/td_target_mean_epoch",
+            "train/terminal_fraction_epoch",
+            "train/weight_mean_epoch",
+            "train/weight_std_epoch",
+            "validation/base_td_loss",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_td_loss",
+            "validation/prefix_marginal_advantage_mean",
+            "validation/random_task_fraction",
+            "validation/td_pairs",
+            "validation/td_prediction_mean",
+            "validation/td_target_mean",
+            "validation/terminal_fraction",
+            "validation/weight_mean",
+            "validation/weight_std"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g3/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "1fc1ac570f0e199c4301f29ca292f92a361395f1cf1a30f169fe837c60dfb341",
+          "row_count": 10,
+          "training_commit": "79706d3d16bd845d74c6fc54bfef809aaa851b8b",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g3/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "9d7898c8175e5d000c91a8e5d7698a5d138d3f609d8abd62b2dd7e80af32e3de",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v0/training_metadata/g3/seed_3072/training_result.json",
+          "training_result_sha256": "33242aac587ad8a5f9952107147fbd53c0d2e6b5bb021de4129b838b80a3d1a4"
+        }
+      },
+      "version": "v0"
+    },
+    "v2": {
+      "epoch_rows": 60,
+      "family": "actor_free_td_lewm_v2",
+      "generated_csv_sha256": "e8a6d0c1b21ca048b5c424a3465edf3031d97481a8c29944117876e4350aadaf",
+      "root": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata",
+      "variant_count": 6,
+      "variants": {
+        "c": {
+          "metric_columns": [
+            "train/base_hybrid_td_loss_epoch",
+            "train/compressed_cache_gib_epoch",
+            "train/ema_next_action_embedding_mean_epoch",
+            "train/goal_offset_mean_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_hybrid_td_loss_epoch",
+            "train/online_action_embedding_mean_epoch",
+            "train/predicted_base_td_loss_epoch",
+            "train/predicted_goal_projection_loss_epoch",
+            "train/predicted_goal_score_residual_mean_epoch",
+            "train/predicted_method_td_loss_epoch",
+            "train/prediction_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/real_base_td_loss_epoch",
+            "train/real_goal_projection_loss_epoch",
+            "train/real_goal_score_residual_mean_epoch",
+            "train/real_method_td_loss_epoch",
+            "train/sigreg_loss_epoch",
+            "train/td_pairs_epoch",
+            "train/td_weight_scale_epoch",
+            "train/terminal_fraction_epoch",
+            "train/unique_episodes_per_batch_epoch",
+            "validation/base_hybrid_td_loss",
+            "validation/ema_next_action_embedding_mean",
+            "validation/goal_offset_mean",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_hybrid_td_loss",
+            "validation/online_action_embedding_mean",
+            "validation/predicted_base_td_loss",
+            "validation/predicted_goal_projection_loss",
+            "validation/predicted_goal_score_residual_mean",
+            "validation/predicted_method_td_loss",
+            "validation/prediction_loss",
+            "validation/random_task_fraction",
+            "validation/real_base_td_loss",
+            "validation/real_goal_projection_loss",
+            "validation/real_goal_score_residual_mean",
+            "validation/real_method_td_loss",
+            "validation/sigreg_loss",
+            "validation/td_pairs",
+            "validation/td_weight_scale",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/c/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "c5750c239ccae6b2726ca04d36f015527532a2d6ffe665e54eb34acca6953139",
+          "row_count": 10,
+          "training_commit": "a5624e5b331d263a967501ef8a8cb1d8b7001072",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/c/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "06b3f0dbeac2177eae168d7c3987816e091b63e48577016ff8d0af5e8fd89d3a",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/c/seed_3072/training_result.json",
+          "training_result_sha256": "93efd2ece27f9abbed08bdb89de259a3af3412875dacc88170c49ef89652071c"
+        },
+        "d": {
+          "metric_columns": [
+            "train/base_hybrid_td_loss_epoch",
+            "train/compressed_cache_gib_epoch",
+            "train/ema_next_action_embedding_mean_epoch",
+            "train/goal_offset_mean_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_hybrid_td_loss_epoch",
+            "train/online_action_embedding_mean_epoch",
+            "train/predicted_base_td_loss_epoch",
+            "train/predicted_method_td_loss_epoch",
+            "train/predicted_weight_mean_epoch",
+            "train/predicted_weight_std_epoch",
+            "train/prediction_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/real_base_td_loss_epoch",
+            "train/real_method_td_loss_epoch",
+            "train/real_weight_mean_epoch",
+            "train/real_weight_std_epoch",
+            "train/sigreg_loss_epoch",
+            "train/td_pairs_epoch",
+            "train/td_weight_scale_epoch",
+            "train/terminal_fraction_epoch",
+            "train/unique_episodes_per_batch_epoch",
+            "validation/base_hybrid_td_loss",
+            "validation/ema_next_action_embedding_mean",
+            "validation/goal_offset_mean",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_hybrid_td_loss",
+            "validation/online_action_embedding_mean",
+            "validation/predicted_base_td_loss",
+            "validation/predicted_method_td_loss",
+            "validation/predicted_weight_mean",
+            "validation/predicted_weight_std",
+            "validation/prediction_loss",
+            "validation/random_task_fraction",
+            "validation/real_base_td_loss",
+            "validation/real_method_td_loss",
+            "validation/real_weight_mean",
+            "validation/real_weight_std",
+            "validation/sigreg_loss",
+            "validation/td_pairs",
+            "validation/td_weight_scale",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/d/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "d61d92debffc9e2c6b2a57acea88a7cbde976532b4df3c331cb7de7c4799aed7",
+          "row_count": 10,
+          "training_commit": "a5624e5b331d263a967501ef8a8cb1d8b7001072",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/d/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "cbc3c9874d5933cdfa008098a3a13e5cc5cd8cbb4b11e57daac12800fc8fb1a8",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/d/seed_3072/training_result.json",
+          "training_result_sha256": "e25178196ea94bb2920cff86a3fe0b89bd6a5d08ce192e973032d4614115303a"
+        },
+        "f": {
+          "metric_columns": [
+            "train/base_hybrid_td_loss_epoch",
+            "train/compressed_cache_gib_epoch",
+            "train/ema_next_action_embedding_mean_epoch",
+            "train/goal_offset_mean_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_hybrid_td_loss_epoch",
+            "train/online_action_embedding_mean_epoch",
+            "train/predicted_advantage_mean_epoch",
+            "train/predicted_base_td_loss_epoch",
+            "train/predicted_method_td_loss_epoch",
+            "train/predicted_weight_mean_epoch",
+            "train/predicted_weight_std_epoch",
+            "train/prediction_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/real_advantage_mean_epoch",
+            "train/real_base_td_loss_epoch",
+            "train/real_method_td_loss_epoch",
+            "train/real_weight_mean_epoch",
+            "train/real_weight_std_epoch",
+            "train/sigreg_loss_epoch",
+            "train/td_pairs_epoch",
+            "train/td_weight_scale_epoch",
+            "train/terminal_fraction_epoch",
+            "train/unique_episodes_per_batch_epoch",
+            "validation/base_hybrid_td_loss",
+            "validation/ema_next_action_embedding_mean",
+            "validation/goal_offset_mean",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_hybrid_td_loss",
+            "validation/online_action_embedding_mean",
+            "validation/predicted_advantage_mean",
+            "validation/predicted_base_td_loss",
+            "validation/predicted_method_td_loss",
+            "validation/predicted_weight_mean",
+            "validation/predicted_weight_std",
+            "validation/prediction_loss",
+            "validation/random_task_fraction",
+            "validation/real_advantage_mean",
+            "validation/real_base_td_loss",
+            "validation/real_method_td_loss",
+            "validation/real_weight_mean",
+            "validation/real_weight_std",
+            "validation/sigreg_loss",
+            "validation/td_pairs",
+            "validation/td_weight_scale",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/f/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "7f38522e2cabd1630300cdf6084e85cee04be9d9bc7b9deb7e771160bee67a80",
+          "row_count": 10,
+          "training_commit": "a5624e5b331d263a967501ef8a8cb1d8b7001072",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/f/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "548674fb2268d8772707249beb12a5bc809883c2d5f90b879eb2bcc49bdcd480",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/f/seed_3072/training_result.json",
+          "training_result_sha256": "9e25baf71bfe84979085eb4cb589cd6831792e768c5bac20ba738beeeab1391a"
+        },
+        "g1": {
+          "metric_columns": [
+            "train/base_hybrid_td_loss_epoch",
+            "train/compressed_cache_gib_epoch",
+            "train/ema_next_action_embedding_mean_epoch",
+            "train/goal_offset_mean_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_hybrid_td_loss_epoch",
+            "train/online_action_embedding_mean_epoch",
+            "train/predicted_advantage_mean_epoch",
+            "train/predicted_base_td_loss_epoch",
+            "train/predicted_method_td_loss_epoch",
+            "train/predicted_neighbor_objective_available_epoch",
+            "train/predicted_weight_mean_epoch",
+            "train/prediction_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/real_advantage_mean_epoch",
+            "train/real_base_td_loss_epoch",
+            "train/real_method_td_loss_epoch",
+            "train/real_neighbor_objective_available_epoch",
+            "train/real_weight_mean_epoch",
+            "train/sigreg_loss_epoch",
+            "train/td_pairs_epoch",
+            "train/td_weight_scale_epoch",
+            "train/terminal_fraction_epoch",
+            "train/unique_episodes_per_batch_epoch",
+            "validation/base_hybrid_td_loss",
+            "validation/ema_next_action_embedding_mean",
+            "validation/goal_offset_mean",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_hybrid_td_loss",
+            "validation/online_action_embedding_mean",
+            "validation/predicted_base_td_loss",
+            "validation/predicted_method_td_loss",
+            "validation/predicted_neighbor_objective_available",
+            "validation/prediction_loss",
+            "validation/random_task_fraction",
+            "validation/real_base_td_loss",
+            "validation/real_method_td_loss",
+            "validation/real_neighbor_objective_available",
+            "validation/sigreg_loss",
+            "validation/td_pairs",
+            "validation/td_weight_scale",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g1/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "554b3f11d2b59d4ce6becf1a33996ffbc6031191316b124569061c223b0a5c16",
+          "row_count": 10,
+          "training_commit": "a5624e5b331d263a967501ef8a8cb1d8b7001072",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g1/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "7a4acd90ce790fbb858de8d9604e8d8ca528281e349115d5d83430a3ad1eda28",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g1/seed_3072/training_result.json",
+          "training_result_sha256": "019b06dec86ce642050bcec056e86bd1d2d9015fb48e43efe1e4c3afa1400233"
+        },
+        "g2": {
+          "metric_columns": [
+            "train/base_hybrid_td_loss_epoch",
+            "train/compressed_cache_gib_epoch",
+            "train/ema_next_action_embedding_mean_epoch",
+            "train/goal_offset_mean_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_hybrid_td_loss_epoch",
+            "train/online_action_embedding_mean_epoch",
+            "train/predicted_advantage_mean_epoch",
+            "train/predicted_base_td_loss_epoch",
+            "train/predicted_method_td_loss_epoch",
+            "train/predicted_weight_mean_epoch",
+            "train/predicted_weight_std_epoch",
+            "train/prediction_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/real_advantage_mean_epoch",
+            "train/real_base_td_loss_epoch",
+            "train/real_method_td_loss_epoch",
+            "train/real_weight_mean_epoch",
+            "train/real_weight_std_epoch",
+            "train/sigreg_loss_epoch",
+            "train/td_pairs_epoch",
+            "train/td_weight_scale_epoch",
+            "train/terminal_fraction_epoch",
+            "train/unique_episodes_per_batch_epoch",
+            "validation/base_hybrid_td_loss",
+            "validation/ema_next_action_embedding_mean",
+            "validation/goal_offset_mean",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_hybrid_td_loss",
+            "validation/online_action_embedding_mean",
+            "validation/predicted_advantage_mean",
+            "validation/predicted_base_td_loss",
+            "validation/predicted_method_td_loss",
+            "validation/predicted_weight_mean",
+            "validation/predicted_weight_std",
+            "validation/prediction_loss",
+            "validation/random_task_fraction",
+            "validation/real_advantage_mean",
+            "validation/real_base_td_loss",
+            "validation/real_method_td_loss",
+            "validation/real_weight_mean",
+            "validation/real_weight_std",
+            "validation/sigreg_loss",
+            "validation/td_pairs",
+            "validation/td_weight_scale",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g2/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "9c0cb1b10b4a3687962773c19105e204e4dacadb15a7b750956d43a355ae829b",
+          "row_count": 10,
+          "training_commit": "a5624e5b331d263a967501ef8a8cb1d8b7001072",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g2/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "b699d4ef19a91ff299272e6ae2feb8b7bed70973c793e7f779257a6ff0da6661",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g2/seed_3072/training_result.json",
+          "training_result_sha256": "74fcdb3428897b7e96b90052cd2cb6d9131961f65ebc3b035557bc1cc697b82b"
+        },
+        "g3": {
+          "metric_columns": [
+            "train/base_hybrid_td_loss_epoch",
+            "train/compressed_cache_gib_epoch",
+            "train/ema_next_action_embedding_mean_epoch",
+            "train/goal_offset_mean_epoch",
+            "train/goal_task_fraction_epoch",
+            "train/loss_epoch",
+            "train/method_hybrid_td_loss_epoch",
+            "train/online_action_embedding_mean_epoch",
+            "train/predicted_advantage_mean_epoch",
+            "train/predicted_base_td_loss_epoch",
+            "train/predicted_method_td_loss_epoch",
+            "train/predicted_weight_mean_epoch",
+            "train/predicted_weight_std_epoch",
+            "train/prediction_loss_epoch",
+            "train/random_task_fraction_epoch",
+            "train/real_advantage_mean_epoch",
+            "train/real_base_td_loss_epoch",
+            "train/real_method_td_loss_epoch",
+            "train/real_weight_mean_epoch",
+            "train/real_weight_std_epoch",
+            "train/sigreg_loss_epoch",
+            "train/td_pairs_epoch",
+            "train/td_weight_scale_epoch",
+            "train/terminal_fraction_epoch",
+            "train/unique_episodes_per_batch_epoch",
+            "validation/base_hybrid_td_loss",
+            "validation/ema_next_action_embedding_mean",
+            "validation/goal_offset_mean",
+            "validation/goal_task_fraction",
+            "validation/loss",
+            "validation/method_hybrid_td_loss",
+            "validation/online_action_embedding_mean",
+            "validation/predicted_advantage_mean",
+            "validation/predicted_base_td_loss",
+            "validation/predicted_method_td_loss",
+            "validation/predicted_weight_mean",
+            "validation/predicted_weight_std",
+            "validation/prediction_loss",
+            "validation/random_task_fraction",
+            "validation/real_advantage_mean",
+            "validation/real_base_td_loss",
+            "validation/real_method_td_loss",
+            "validation/real_weight_mean",
+            "validation/real_weight_std",
+            "validation/sigreg_loss",
+            "validation/td_pairs",
+            "validation/td_weight_scale",
+            "validation/terminal_fraction"
+          ],
+          "metrics_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g3/seed_3072/metrics/version_0/metrics.csv",
+          "metrics_sha256": "15a869834d6fb2f91aadb8c0acb7b7e20dbbad389e07cb9a70545b39a0927057",
+          "row_count": 10,
+          "training_commit": "a5624e5b331d263a967501ef8a8cb1d8b7001072",
+          "training_manifest_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g3/seed_3072/training_manifest.json",
+          "training_manifest_sha256": "c62ca19217e13fcd1868ac20f0c1d92a572e94d0f4747eaf374152c0adb16fe0",
+          "training_result_path": "/private/tmp/td-results-full.y1qTdB/v2/formal_metadata/g3/seed_3072/training_result.json",
+          "training_result_sha256": "2396c762206aa2e909c2c49f0ea4d6f8395df22deaa1526ab19556ebbefbea53"
+        }
+      },
+      "version": "v2"
+    }
+  },
+  "training_seed": 3072
+}
