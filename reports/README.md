@@ -1,6 +1,6 @@
 # TDWM 实验结果总览
 
-最后更新：2026-08-31（Asia/Shanghai）
+最后更新：2026-09-01（Asia/Shanghai）
 
 本目录汇总当前仓库报告、趋动云下载结果和本地 3090 服务器下载结果。大型日志、数据、
 视频和 checkpoint 不进入 Git；本地轻量原始文件位于被 Git 忽略的
@@ -11,16 +11,18 @@
 [`artifacts/aligned_acd_o50_seed3072/`](artifacts/aligned_acd_o50_seed3072/README.md)：
 它只含 start/goal 索引、成功布尔值、哈希和 provenance，不含数据、模型或原始日志。
 
-Actor-Free TD-LeWM 目前有三组必须分开解释的正式记录：
+Actor-Free TD-LeWM 目前有四组必须分开解释的正式记录：
 
 | 记录 | 正式范围 | 报告 / 轻量证据 |
 | --- | --- | --- |
 | 较早结构消融 | 7 methods × 3 scores = 21 O50 | [`actor_free_td_lewm_cube_seed3072.md`](actor_free_td_lewm_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_cube_seed3072/`](artifacts/actor_free_td_lewm_cube_seed3072/README.md) |
 | C–G3 raw-action V0 | 6 methods × 3 scores = 18 O50 | [`actor_free_td_lewm_v0_v1_cube_seed3072.md`](actor_free_td_lewm_v0_v1_cube_seed3072.md) / [`formal_o50_summary.json`](artifacts/actor_free_td_lewm_v0_cube_seed3072/formal_o50_summary.json) |
 | C–G3 action-encoder V1 | 6 methods × 3 scores = 18 O50 | [`actor_free_td_lewm_v1_cube_seed3072.md`](actor_free_td_lewm_v1_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_v1_cube_seed3072/`](artifacts/actor_free_td_lewm_v1_cube_seed3072/README.md) |
+| V2-EMA-SG 联合微调与新评分 | 96 EMA epoch-score cells + 24 fixed-checkpoint cells | [`actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072.md`](actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072.md) / [`artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/`](artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/) |
 
 旧 7-method bundle 由 `scripts/archive_actor_free_td_lewm_o50.py` 审计；V1 bundle 由
-`scripts/archive_actor_free_td_lewm_v1_o50.py` 审计。两者都从原始训练/评测 JSON、metrics
+`scripts/archive_actor_free_td_lewm_v1_o50.py` 审计；V2-EMA-SG 新评分由
+`scripts/archive_actor_free_td_lewm_v2_ema_new_scores.py` 合并并复验 96+24 格。它们都从原始训练/评测 JSON、metrics
 和逐 episode outcome 生成，不接受人工补齐结果。C–G3 V0 的 compact index 还记录了 18 个
 服务器 raw `results.json` 的 SHA-256。三组都只有一个 training seed；V0/V1 虽使用同一
 selection，但网络 action 表示和参数量不同，不能把单组百分比解释为多 seed 总体优劣。

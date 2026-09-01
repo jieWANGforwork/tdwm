@@ -1,0 +1,938 @@
+{
+  "best_by_epoch_and_score_mode": {
+    "10": {
+      "f_plus_g_first": [
+        {
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "d"
+        },
+        {
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "f"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "f"
+        }
+      ]
+    },
+    "3": {
+      "f_plus_g_first": [
+        {
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "g3"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 24,
+          "success_rate_percent": 48.0,
+          "variant": "f"
+        }
+      ]
+    },
+    "4": {
+      "f_plus_g_first": [
+        {
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "f"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 25,
+          "success_rate_percent": 50.0,
+          "variant": "f"
+        }
+      ]
+    },
+    "5": {
+      "f_plus_g_first": [
+        {
+          "success_count": 24,
+          "success_rate_percent": 48.0,
+          "variant": "c"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 21,
+          "success_rate_percent": 42.0,
+          "variant": "d"
+        }
+      ]
+    },
+    "6": {
+      "f_plus_g_first": [
+        {
+          "success_count": 21,
+          "success_rate_percent": 42.0,
+          "variant": "f"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "f"
+        },
+        {
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "g3"
+        }
+      ]
+    },
+    "7": {
+      "f_plus_g_first": [
+        {
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "g2"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "f"
+        }
+      ]
+    },
+    "8": {
+      "f_plus_g_first": [
+        {
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "d"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 21,
+          "success_rate_percent": 42.0,
+          "variant": "f"
+        }
+      ]
+    },
+    "9": {
+      "f_plus_g_first": [
+        {
+          "success_count": 23,
+          "success_rate_percent": 46.0,
+          "variant": "f"
+        }
+      ],
+      "g_only_f_rollout_mean": [
+        {
+          "success_count": 22,
+          "success_rate_percent": 44.0,
+          "variant": "f"
+        }
+      ]
+    }
+  },
+  "cell_count": 96,
+  "evaluation_commit": "5456f3d18116812d078d4ec2e85ba1f83d89c7c7",
+  "fixed_checkpoint_cell_count": 24,
+  "fixed_checkpoint_results": [
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 26,
+      "success_rate": 0.52,
+      "success_rate_percent": 52.0,
+      "variant": "c",
+      "version": "v0"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 24,
+      "success_rate": 0.48,
+      "success_rate_percent": 48.0,
+      "variant": "d",
+      "version": "v0"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 24,
+      "success_rate": 0.48,
+      "success_rate_percent": 48.0,
+      "variant": "f",
+      "version": "v0"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 20,
+      "success_rate": 0.4,
+      "success_rate_percent": 40.0,
+      "variant": "g1",
+      "version": "v0"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 23,
+      "success_rate": 0.46,
+      "success_rate_percent": 46.0,
+      "variant": "g2",
+      "version": "v0"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 24,
+      "success_rate": 0.48,
+      "success_rate_percent": 48.0,
+      "variant": "g3",
+      "version": "v0"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 28,
+      "success_rate": 0.56,
+      "success_rate_percent": 56.0,
+      "variant": "c",
+      "version": "v1"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 25,
+      "success_rate": 0.5,
+      "success_rate_percent": 50.0,
+      "variant": "d",
+      "version": "v1"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 26,
+      "success_rate": 0.52,
+      "success_rate_percent": 52.0,
+      "variant": "f",
+      "version": "v1"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 26,
+      "success_rate": 0.52,
+      "success_rate_percent": 52.0,
+      "variant": "g1",
+      "version": "v1"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 25,
+      "success_rate": 0.5,
+      "success_rate_percent": 50.0,
+      "variant": "g2",
+      "version": "v1"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 26,
+      "success_rate": 0.52,
+      "success_rate_percent": 52.0,
+      "variant": "g3",
+      "version": "v1"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 19,
+      "success_rate": 0.38,
+      "success_rate_percent": 38.0,
+      "variant": "c",
+      "version": "v2"
+    },
+    {
+      "score_mode": "g_only_f_rollout_mean",
+      "success_count": 10,
+      "success_rate": 0.2,
+      "success_rate_percent": 20.0,
+      "variant": "c",
+      "version": "v2"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 21,
+      "success_rate": 0.42,
+      "success_rate_percent": 42.0,
+      "variant": "d",
+      "version": "v2"
+    },
+    {
+      "score_mode": "g_only_f_rollout_mean",
+      "success_count": 24,
+      "success_rate": 0.48,
+      "success_rate_percent": 48.0,
+      "variant": "d",
+      "version": "v2"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 21,
+      "success_rate": 0.42,
+      "success_rate_percent": 42.0,
+      "variant": "f",
+      "version": "v2"
+    },
+    {
+      "score_mode": "g_only_f_rollout_mean",
+      "success_count": 22,
+      "success_rate": 0.44,
+      "success_rate_percent": 44.0,
+      "variant": "f",
+      "version": "v2"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 19,
+      "success_rate": 0.38,
+      "success_rate_percent": 38.0,
+      "variant": "g1",
+      "version": "v2"
+    },
+    {
+      "score_mode": "g_only_f_rollout_mean",
+      "success_count": 17,
+      "success_rate": 0.34,
+      "success_rate_percent": 34.0,
+      "variant": "g1",
+      "version": "v2"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 20,
+      "success_rate": 0.4,
+      "success_rate_percent": 40.0,
+      "variant": "g2",
+      "version": "v2"
+    },
+    {
+      "score_mode": "g_only_f_rollout_mean",
+      "success_count": 13,
+      "success_rate": 0.26,
+      "success_rate_percent": 26.0,
+      "variant": "g2",
+      "version": "v2"
+    },
+    {
+      "score_mode": "f_plus_g_first",
+      "success_count": 19,
+      "success_rate": 0.38,
+      "success_rate_percent": 38.0,
+      "variant": "g3",
+      "version": "v2"
+    },
+    {
+      "score_mode": "g_only_f_rollout_mean",
+      "success_count": 17,
+      "success_rate": 0.34,
+      "success_rate_percent": 34.0,
+      "variant": "g3",
+      "version": "v2"
+    }
+  ],
+  "fixed_checkpoint_selection_sha256": "88c204770f33c0b0220057d45b187766e3cfc54912e3f5ca49f2aa93d16437e9",
+  "results_by_epoch": {
+    "10": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 14,
+          "success_rate": 0.28,
+          "success_rate_percent": 28.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 23,
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      }
+    },
+    "3": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 24,
+          "success_rate": 0.48,
+          "success_rate_percent": 48.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 23,
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        }
+      }
+    },
+    "4": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 23,
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 25,
+          "success_rate": 0.5,
+          "success_rate_percent": 50.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 15,
+          "success_rate": 0.3,
+          "success_rate_percent": 30.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 23,
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0
+        }
+      }
+    },
+    "5": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 24,
+          "success_rate": 0.48,
+          "success_rate_percent": 48.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 14,
+          "success_rate": 0.28,
+          "success_rate_percent": 28.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 15,
+          "success_rate": 0.3,
+          "success_rate_percent": 30.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      }
+    },
+    "6": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 15,
+          "success_rate": 0.3,
+          "success_rate_percent": 30.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        }
+      }
+    },
+    "7": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 23,
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 13,
+          "success_rate": 0.26,
+          "success_rate_percent": 26.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 15,
+          "success_rate": 0.3,
+          "success_rate_percent": 30.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        }
+      }
+    },
+    "8": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 14,
+          "success_rate": 0.28,
+          "success_rate_percent": 28.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 23,
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 14,
+          "success_rate": 0.28,
+          "success_rate_percent": 28.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 18,
+          "success_rate": 0.36,
+          "success_rate_percent": 36.0
+        }
+      }
+    },
+    "9": {
+      "c": {
+        "f_plus_g_first": {
+          "success_count": 21,
+          "success_rate": 0.42,
+          "success_rate_percent": 42.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 9,
+          "success_rate": 0.18,
+          "success_rate_percent": 18.0
+        }
+      },
+      "d": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 19,
+          "success_rate": 0.38,
+          "success_rate_percent": 38.0
+        }
+      },
+      "f": {
+        "f_plus_g_first": {
+          "success_count": 23,
+          "success_rate": 0.46,
+          "success_rate_percent": 46.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        }
+      },
+      "g1": {
+        "f_plus_g_first": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 17,
+          "success_rate": 0.34,
+          "success_rate_percent": 34.0
+        }
+      },
+      "g2": {
+        "f_plus_g_first": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 20,
+          "success_rate": 0.4,
+          "success_rate_percent": 40.0
+        }
+      },
+      "g3": {
+        "f_plus_g_first": {
+          "success_count": 22,
+          "success_rate": 0.44,
+          "success_rate_percent": 44.0
+        },
+        "g_only_f_rollout_mean": {
+          "success_count": 16,
+          "success_rate": 0.32,
+          "success_rate_percent": 32.0
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+  "source": "actor_free_td_lewm_v2_ema_new_score_summary",
+  "training_commit": "18cd574d522515f20f4103509b1e660b2fc89ea6"
+}
