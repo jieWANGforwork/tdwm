@@ -24,6 +24,7 @@ from torch import nn
 
 from tdwm.adapters.frozen_actor_free_td_v1_common import (
     ACTION_BLOCK_STEPS,
+    FIRST_Q2_SCORE_MODE,
     LEWM_HISTORY_SIZE,
     SCORE_MODES,
     ActorFreeTDLeWMV1,
@@ -49,7 +50,9 @@ METHOD_FAMILY = "actor_free_td_lewm_v2"
 IMPLEMENTATION_VERSION = "v2"
 OBJECTIVE_VERSION = 0
 DEPLOYMENT_CHECKPOINT_VERSION = 1
-V2_SCORE_MODES = SCORE_MODES | frozenset({"g_only_f_rollout_mean"})
+V2_SCORE_MODES = (SCORE_MODES - {FIRST_Q2_SCORE_MODE}) | frozenset(
+    {"g_only_f_rollout_mean"}
+)
 SOURCE_V1_FAMILY = "actor_free_td_lewm_v1"
 SOURCE_V1_IMPLEMENTATION_VERSION = "v1"
 SOURCE_V1_CODE_REVISION = "3c4e62ef2ab72387536433f27ef11bce75477e7e"

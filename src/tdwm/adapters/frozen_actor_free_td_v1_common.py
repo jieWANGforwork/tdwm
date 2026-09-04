@@ -38,9 +38,13 @@ OBJECTIVE_VERSION = 0
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 ACTION_BLOCK_STEPS = 5
 LEWM_HISTORY_SIZE = 3
+FIRST_ACTION_SCORE_MODE = "f_plus_g_first"
+FIRST_Q2_SCORE_MODE = "f_plus_g_first_q2"
+FIRST_ACTION_SCORE_MODES = frozenset({FIRST_ACTION_SCORE_MODE, FIRST_Q2_SCORE_MODE})
+FIRST_Q2_STD_EPSILON = 1e-6
 ROLLOUT_MEAN_SCORE_MODE = "g_only_f_rollout_mean"
 SCORE_MODES = frozenset(
-    {"f_only", "g_only", "f_plus_g", "f_plus_g_first", ROLLOUT_MEAN_SCORE_MODE}
+    {"f_only", "g_only", "f_plus_g", *FIRST_ACTION_SCORE_MODES, ROLLOUT_MEAN_SCORE_MODE}
 )
 
 
@@ -80,27 +84,63 @@ def _resolve_g_first_weight(
     score_mode: str,
     g_first_weight: float | None,
 ) -> float | None:
-    if score_mode != "f_plus_g_first":
+    if score_mode not in FIRST_ACTION_SCORE_MODES:
         if g_first_weight is not None:
             raise ValueError(
-                "g_first_weight is only valid for score_mode='f_plus_g_first'."
+                "g_first_weight is only valid for a first-action score mode."
             )
         return None
     if g_first_weight is None or isinstance(g_first_weight, bool):
         raise ValueError(
-            "f_plus_g_first requires an explicit finite non-negative g_first_weight."
+            f"{score_mode} requires an explicit finite non-negative g_first_weight."
         )
     try:
         resolved = float(g_first_weight)
     except (TypeError, ValueError) as error:
         raise ValueError(
-            "f_plus_g_first requires an explicit finite non-negative g_first_weight."
+            f"{score_mode} requires an explicit finite non-negative g_first_weight."
         ) from error
     if not math.isfinite(resolved) or resolved < 0.0:
         raise ValueError(
-            "f_plus_g_first requires an explicit finite non-negative g_first_weight."
+            f"{score_mode} requires an explicit finite non-negative g_first_weight."
         )
     return resolved
+
+
+def _normalize_cem_candidate_scores(values: torch.Tensor) -> torch.Tensor:
+    """Population-z-score one CEM candidate set independently per environment.
+
+    Stable World Model 0.1.1 supplies costs as ``(batch, samples)`` and selects
+    elites along ``samples``.  First-Q2 therefore normalizes only axis 1 on
+    every call to ``get_cost``; no statistics persist across environments,
+    CEM iterations, or replanning steps.  A constant (or singleton) candidate
+    row contributes zeros instead of NaNs.
+    """
+
+    if values.ndim != 2:
+        raise ValueError("CEM scores must have shape (batch, samples).")
+    if values.shape[1] <= 0:
+        raise ValueError("CEM scores require at least one candidate sample.")
+    if not values.is_floating_point():
+        raise TypeError("CEM scores must have a floating-point dtype.")
+    if not bool(torch.isfinite(values).all()):
+        raise ValueError("CEM scores must contain only finite values.")
+
+    # Accumulate half-precision statistics in float32.  The formal Cube
+    # planner is float32; this additionally makes an explicit mixed-precision
+    # deployment deterministic and numerically stable.
+    working = (
+        values.float() if values.dtype in {torch.float16, torch.bfloat16} else values
+    )
+    centered = working - working.mean(dim=1, keepdim=True)
+    population_std = centered.square().mean(dim=1, keepdim=True).sqrt()
+    normalized = centered / population_std.clamp_min(FIRST_Q2_STD_EPSILON)
+    normalized = torch.where(
+        population_std > FIRST_Q2_STD_EPSILON,
+        normalized,
+        torch.zeros_like(normalized),
+    )
+    return normalized.to(dtype=values.dtype)
 
 
 def _positive_integer(config: Mapping[str, Any], key: str) -> int:
@@ -450,8 +490,8 @@ class ActorFreeTDLeWMV1(nn.Module):
             raise ValueError("The planning horizon must be positive.")
         if self.score_mode == "g_only" and horizon != 1:
             raise ValueError("V1 g_only requires CEM planning horizon=1.")
-        if self.score_mode == "f_plus_g_first" and horizon != 5:
-            raise ValueError("V1 f_plus_g_first requires CEM planning horizon=5.")
+        if self.score_mode in FIRST_ACTION_SCORE_MODES and horizon != 5:
+            raise ValueError(f"V1 {self.score_mode} requires CEM planning horizon=5.")
         if self.score_mode == ROLLOUT_MEAN_SCORE_MODE:
             if horizon != 5:
                 raise ValueError(
@@ -488,10 +528,10 @@ class ActorFreeTDLeWMV1(nn.Module):
             )
             return self._explicit_terminal_cost(future, goal)
 
-        if self.score_mode == "f_plus_g_first":
+        if self.score_mode in FIRST_ACTION_SCORE_MODES:
             weight = self.g_first_weight
             if weight is None:
-                raise RuntimeError("f_plus_g_first weight was not initialized.")
+                raise RuntimeError("First-action weight was not initialized.")
             current = None
             if weight != 0.0:
                 current = self._current_state_for_samples(
@@ -509,14 +549,19 @@ class ActorFreeTDLeWMV1(nn.Module):
             )
             explicit_cost = self._explicit_terminal_cost(future, goal)
             if weight == 0.0:
+                if self.score_mode == FIRST_Q2_SCORE_MODE:
+                    return _normalize_cem_candidate_scores(explicit_cost)
                 return explicit_cost
             if current is None:
-                raise RuntimeError("f_plus_g_first state was not initialized.")
+                raise RuntimeError("First-action state was not initialized.")
             first_score = self._goal_score(
                 current,
                 action_candidates[..., 0, :],
                 task,
             )
+            if self.score_mode == FIRST_Q2_SCORE_MODE:
+                explicit_cost = _normalize_cem_candidate_scores(explicit_cost)
+                first_score = _normalize_cem_candidate_scores(first_score)
             return explicit_cost - weight * first_score
 
         if horizon > 1:
@@ -818,8 +863,8 @@ def make_frozen_actor_free_td_v1_policy(
         raise ValueError("V1 requires planning.action_block=5 (25 normalized values).")
     if resolved_mode == "g_only" and int(planning["horizon"]) != 1:
         raise ValueError("V1 g_only requires planning.horizon=1.")
-    if resolved_mode == "f_plus_g_first" and int(planning["horizon"]) != 5:
-        raise ValueError("V1 f_plus_g_first requires planning.horizon=5.")
+    if resolved_mode in FIRST_ACTION_SCORE_MODES and int(planning["horizon"]) != 5:
+        raise ValueError(f"V1 {resolved_mode} requires planning.horizon=5.")
     if resolved_mode == ROLLOUT_MEAN_SCORE_MODE and int(planning["horizon"]) != 5:
         raise ValueError("V1 g_only_f_rollout_mean requires planning.horizon=5.")
     resolved_g_first_weight = _resolve_g_first_weight(

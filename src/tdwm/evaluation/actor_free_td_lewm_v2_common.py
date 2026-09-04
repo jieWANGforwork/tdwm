@@ -98,7 +98,11 @@ ROLLOUT_MEAN_ONLY_INFERENCE_KEYS = frozenset(ROLLOUT_MEAN_INFERENCE_FIELDS) - {
     "replanning",
 }
 FORMAL_HORIZON_BY_SCORE_MODE = {
-    **V1_FORMAL_HORIZON_BY_SCORE_MODE,
+    **{
+        mode: horizon
+        for mode, horizon in V1_FORMAL_HORIZON_BY_SCORE_MODE.items()
+        if mode in V2_SCORE_MODES
+    },
     ROLLOUT_MEAN_SCORE_MODE: 5,
 }
 LEGACY_F_SCORE = "lewm_rollout_goal_distance"

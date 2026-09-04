@@ -16,6 +16,7 @@ def build_frozen_actor_free_td_parser(
     *,
     method_label: str,
     requires_neighbor_index: bool,
+    requires_v1_c_checkpoint: bool = False,
 ) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=f"Train standalone Actor-Free TD-LeWM method {method_label}."
@@ -48,6 +49,15 @@ def build_frozen_actor_free_td_parser(
         required=True,
         help="Immutable global-row LeWM latent/action store.",
     )
+    if requires_v1_c_checkpoint:
+        parser.add_argument(
+            "--initial-v1-c-checkpoint",
+            required=True,
+            help=(
+                "Completed V1-C epoch-10 deployment checkpoint whose complete "
+                "model parameter state initializes V1-C2."
+            ),
+        )
     parser.add_argument(
         "--split-indices",
         required=True,
@@ -69,6 +79,7 @@ def run_frozen_actor_free_td_cli(
     *,
     method_label: str,
     requires_neighbor_index: bool,
+    requires_v1_c_checkpoint: bool = False,
     load_protocol: ProtocolLoader,
     train: Trainer,
     argv: Sequence[str] | None = None,
@@ -76,6 +87,7 @@ def run_frozen_actor_free_td_cli(
     parser = build_frozen_actor_free_td_parser(
         method_label=method_label,
         requires_neighbor_index=requires_neighbor_index,
+        requires_v1_c_checkpoint=requires_v1_c_checkpoint,
     )
     args = parser.parse_args(argv)
     if not args.dataset:
@@ -106,6 +118,8 @@ def run_frozen_actor_free_td_cli(
     }
     if requires_neighbor_index:
         training_kwargs["neighbor_index_path"] = args.neighbor_index
+    if requires_v1_c_checkpoint:
+        training_kwargs["initial_v1_c_checkpoint_path"] = args.initial_v1_c_checkpoint
     result = train(**training_kwargs)
     print(json.dumps(result, indent=2, sort_keys=True))
     return result

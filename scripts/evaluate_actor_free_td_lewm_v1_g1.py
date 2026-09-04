@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
             "g_only",
             "f_plus_g",
             "f_plus_g_first",
+            "f_plus_g_first_q2",
             "g_only_f_rollout_mean",
         ),
         default=None,

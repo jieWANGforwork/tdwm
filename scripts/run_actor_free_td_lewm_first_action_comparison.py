@@ -23,13 +23,25 @@ from typing import Any, Callable, Mapping, Sequence
 VERSIONS = ("v0", "v1", "v2")
 VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
 FIRST_ACTION_MODE = "f_plus_g_first"
+FIRST_Q2_MODE = "f_plus_g_first_q2"
+FIRST_ACTION_MODES = frozenset((FIRST_ACTION_MODE, FIRST_Q2_MODE))
 FORMAL_SCORE_MODES = ("f_only", "f_plus_g", FIRST_ACTION_MODE)
 ROLLOUT_MEAN_MODE = "g_only_f_rollout_mean"
 V2_ONLY_FORMAL_SCORE_MODES = ("g_only", ROLLOUT_MEAN_MODE)
-ALL_FORMAL_SCORE_MODES = FORMAL_SCORE_MODES + V2_ONLY_FORMAL_SCORE_MODES
+V1_ONLY_FORMAL_SCORE_MODES = (FIRST_Q2_MODE,)
+ALL_FORMAL_SCORE_MODES = (
+    FORMAL_SCORE_MODES + V2_ONLY_FORMAL_SCORE_MODES + V1_ONLY_FORMAL_SCORE_MODES
+)
 DEVELOPMENT_ALPHA_GRID = (0.0, 0.25, 0.5, 1.0, 2.0)
 EXPECTED_HORIZON = 5
 EXPECTED_EPISODES_BY_STAGE = {"smoke": 1, "development": 10, "formal": 50}
+FIRST_Q2_NORMALIZATION_METADATA = {
+    "normalization": "population_z_score",
+    "normalization_axis": "cem_candidate_sample_axis_dim_1_per_environment",
+    "normalization_scope": "independent_per_get_cost_call",
+    "normalization_epsilon": 1e-6,
+    "degenerate_signal": "zeros_when_population_std_lte_epsilon",
+}
 ROLLOUT_MEAN_METADATA = {
     "g_aggregation": "mean_over_5_blocks",
     "state_source_for_q1": "current_online_encoder_state",
@@ -184,6 +196,10 @@ def resolve_stage_plan(
     if unsupported_variants:
         raise ValueError(f"Unsupported variants: {sorted(unsupported_variants)}")
 
+    requested_first_q2 = score_modes is not None and FIRST_Q2_MODE in score_modes
+    if requested_first_q2 and selected_versions != ("v1",):
+        raise ValueError("f_plus_g_first_q2 is V1-only; pass exactly --versions v1.")
+
     if stage == "formal":
         requested_modes = tuple(score_modes or ALL_FORMAL_SCORE_MODES)
         if not requested_modes or len(set(requested_modes)) != len(requested_modes):
@@ -201,29 +217,37 @@ def resolve_stage_plan(
         else:
             selected_modes = requested_modes
             selected_v2_only_modes = ()
-        if FIRST_ACTION_MODE in selected_modes:
+        if FIRST_ACTION_MODES.intersection(selected_modes):
             if alphas is None or len(alphas) != 1:
                 raise ValueError(
-                    "formal comparison containing f_plus_g_first requires "
+                    "formal comparison containing a first-action mode requires "
                     "exactly one explicit --alpha; this launcher never selects alpha."
                 )
             selected_alphas = _unique_alphas(alphas)
         else:
             if alphas not in (None, (), []):
                 raise ValueError(
-                    "--alpha is only valid when f_plus_g_first is selected."
+                    "--alpha is only valid when a first-action mode is selected."
                 )
             selected_alphas = ()
     elif stage == "development":
-        if score_modes not in (None, (), [FIRST_ACTION_MODE], (FIRST_ACTION_MODE,)):
-            raise ValueError("development runs only f_plus_g_first.")
-        selected_modes = (FIRST_ACTION_MODE,)
+        allowed = {FIRST_ACTION_MODE, FIRST_Q2_MODE}
+        if score_modes in (None, ()):
+            selected_modes = (FIRST_ACTION_MODE,)
+        elif len(score_modes) == 1 and score_modes[0] in allowed:
+            selected_modes = (score_modes[0],)
+        else:
+            raise ValueError("development runs exactly one first-action mode.")
         selected_v2_only_modes = ()
         selected_alphas = _unique_alphas(alphas or DEVELOPMENT_ALPHA_GRID)
     else:
-        if score_modes not in (None, (), [FIRST_ACTION_MODE], (FIRST_ACTION_MODE,)):
-            raise ValueError("smoke runs only f_plus_g_first.")
-        selected_modes = (FIRST_ACTION_MODE,)
+        allowed = {FIRST_ACTION_MODE, FIRST_Q2_MODE}
+        if score_modes in (None, ()):
+            selected_modes = (FIRST_ACTION_MODE,)
+        elif len(score_modes) == 1 and score_modes[0] in allowed:
+            selected_modes = (score_modes[0],)
+        else:
+            raise ValueError("smoke runs exactly one first-action mode.")
         selected_v2_only_modes = ()
         selected_alphas = _unique_alphas(alphas or (1.0,))
         if len(selected_alphas) != 1:
@@ -293,7 +317,7 @@ def _job_output_dir(
     alpha: float | None,
 ) -> Path:
     output = stage_root / version / variant / score_mode
-    if score_mode == FIRST_ACTION_MODE:
+    if score_mode in FIRST_ACTION_MODES:
         if alpha is None:
             raise ValueError("First-action jobs require alpha.")
         output /= f"alpha_{alpha_slug(alpha)}"
@@ -349,6 +373,8 @@ def build_jobs(
             if version == "v2":
                 version_score_modes += plan.v2_only_score_modes
             for score_mode in version_score_modes:
+                if score_mode == FIRST_Q2_MODE and version != "v1":
+                    raise ValueError("f_plus_g_first_q2 jobs require version='v1'.")
                 config = evaluation_config_path(
                     repository_path,
                     version=version,
@@ -356,7 +382,7 @@ def build_jobs(
                     score_mode=score_mode,
                 )
                 mode_alphas: tuple[float | None, ...]
-                if score_mode == FIRST_ACTION_MODE:
+                if score_mode in FIRST_ACTION_MODES:
                     mode_alphas = plan.alphas
                 else:
                     mode_alphas = (None,)
@@ -546,7 +572,7 @@ def validate_job_output(
             f"{job.job_id} protocol planning.horizon must be {mode_horizon}."
         )
 
-    if job.score_mode == FIRST_ACTION_MODE:
+    if job.score_mode in FIRST_ACTION_MODES:
         if job.alpha is None:
             raise AssertionError("First-action job has no alpha.")
         for values, label in (
@@ -560,6 +586,13 @@ def validate_job_output(
             definition = values.get("score_definition")
             if not isinstance(definition, Mapping) or not definition:
                 raise ValueError(f"{job.job_id} {label}.score_definition is missing.")
+            if job.score_mode == FIRST_Q2_MODE:
+                for key, expected in FIRST_Q2_NORMALIZATION_METADATA.items():
+                    if definition.get(key) != expected:
+                        raise ValueError(
+                            f"{job.job_id} {label}.score_definition.{key} "
+                            f"must be {expected!r}."
+                        )
     elif job.score_mode == ROLLOUT_MEAN_MODE:
         expected_metadata = ROLLOUT_MEAN_METADATA_BY_VERSION[job.version]
         for values, label in ((results, "results"), (manifest, "manifest")):
@@ -743,6 +776,7 @@ def _launcher_payload(
         "variants": list(plan.variants),
         "shared_score_modes": list(plan.score_modes),
         "v2_only_score_modes": list(plan.v2_only_score_modes),
+        "v1_only_supported_score_modes": list(V1_ONLY_FORMAL_SCORE_MODES),
         "score_modes_by_version": {
             version: list(
                 plan.score_modes + (plan.v2_only_score_modes if version == "v2" else ())

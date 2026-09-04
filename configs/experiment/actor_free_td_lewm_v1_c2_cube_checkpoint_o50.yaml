@@ -1,0 +1,64 @@
+extends: actor_free_td_lewm_v1_c_cube_checkpoint_o50.yaml
+id: actor_free_td_lewm_v1_c2_cube_checkpoint_o50
+method: actor_free_td_lewm_v1_c2
+method_family: actor_free_td_lewm_v1
+variant: c2
+display_name: Actor-Free TD-JEPA V1 C2 First-Q-Aligned TD
+
+checkpoint:
+  source: actor_free_td_lewm_v1_c2_deployment_export
+
+source_v1_c:
+  method: actor_free_td_lewm_v1_c
+  method_family: actor_free_td_lewm_v1
+  variant: c
+  implementation_version: v1
+  objective_version: 0
+  deployment_checkpoint_version: 1
+  source_seed: 3072
+  source_epoch: 10
+  source_global_step: 127960
+  checkpoint_sha256: 88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3
+  parameter_state: strict_all_model_parameters
+  optimizer_state: reset
+  scheduler_state: reset
+  epoch_and_global_step: reset
+
+joint_objective:
+  objective: goal_projected_td_plus_first_q_alignment
+  first_q_alignment:
+    version: 1
+    loss: teacher_student_cross_entropy
+    weight: 1.0
+    teacher: frozen_lewm_terminal_goal_cost
+    teacher_gradient: stop_gradient
+    teacher_cost_reducer: final_predicted_latent_summed_mse
+    student: first_action_goal_projection
+    student_gradient: online_predictor_only
+    candidate_source: cem_initial_gaussian_no_actor
+    candidate_count: 16
+    rollout_horizon: 5
+    initial_mean: 0.0
+    initial_variance: 1.0
+    force_first_candidate_to_mean: true
+    goal_population: goal_derived_tasks_with_valid_five_block_context
+    max_goal_examples_per_batch: 8
+    subset_selection: first_valid_in_random_replay_batch
+    score_standardization: population_z_score_over_candidates
+    standardization_epsilon: 1.0e-6
+    teacher_temperature: 1.0
+    student_temperature: 1.0
+    candidate_sampling_seed_offset: 370009
+
+inference_objective:
+  training_only_auxiliary:
+    - goal_projection_training_loss
+    - first_q_candidate_ranking_alignment
+
+provenance:
+  training_protocol: configs/experiment/actor_free_td_lewm_v1_c2_cube_train.yaml
+  initialization_method: actor_free_td_lewm_v1_c
+  initialization_checkpoint_sha256: 88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3
+  comparison_protocol: configs/experiment/lewm_cube_seed3072_o50.yaml
+  status: implementation_ready_checkpoint_pending
+  note: C2 initializes every model parameter from the formal V1-C checkpoint, keeps LeWM frozen, and refines only G with the original C losses plus frozen-F First-Q candidate-ranking alignment. All alignment machinery remains training-only; deployment uses the shared six-mode V1 planner.

@@ -95,8 +95,15 @@ def _write_job_output(job, *, ranks: list[int] | None = None) -> None:
         },
         "checkpoint": {"path": job.checkpoint},
     }
-    if job.score_mode == COMPARISON.FIRST_ACTION_MODE:
+    if job.score_mode in COMPARISON.FIRST_ACTION_MODES:
         definition = {"formula": "f_cost - g_first_weight * q_first"}
+        if job.score_mode == COMPARISON.FIRST_Q2_MODE:
+            definition = {
+                "formula": (
+                    "zscore_samples(f_cost) - g_first_weight * zscore_samples(q_first)"
+                ),
+                **COMPARISON.FIRST_Q2_NORMALIZATION_METADATA,
+            }
         for values in (result, inference, manifest):
             values["g_first_weight"] = job.alpha
             values["score_definition"] = definition
@@ -276,6 +283,92 @@ def test_explicit_v0_v1_rollout_mean_builds_exactly_twelve_jobs_and_manifest(
     assert set(payload["score_modes_by_version"]) == {"v0", "v1"}
     assert len(payload["jobs"]) == 12
     assert payload["expected_selection_file_sha256"] == expected_selection_file_sha256
+
+
+@pytest.mark.parametrize("stage", ("smoke", "development", "formal"))
+def test_first_q2_builds_v1_only_jobs_with_alpha_and_auditable_manifest(
+    tmp_path: Path,
+    stage: str,
+) -> None:
+    checkpoint_manifest, plan, jobs = _jobs(
+        tmp_path,
+        stage=stage,
+        versions=("v1",),
+        variants=("c",),
+        score_modes=(COMPARISON.FIRST_Q2_MODE,),
+        alphas=(0.25,),
+    )
+
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job.version == "v1"
+    assert job.score_mode == COMPARISON.FIRST_Q2_MODE
+    assert job.alpha == 0.25
+    assert "--g-first-weight" in job.argv
+    assert Path(job.output_dir).parts[-2:] == (
+        COMPARISON.FIRST_Q2_MODE,
+        "alpha_0p25",
+    )
+    payload = COMPARISON._launcher_payload(
+        plan=plan,
+        repository=ROOT,
+        dataset=tmp_path / "cube.lance",
+        checkpoint_manifest=checkpoint_manifest,
+        output_root=tmp_path / "comparison",
+        jobs=jobs,
+        gpus=(),
+        max_concurrency=1,
+    )
+    assert payload["score_modes_by_version"] == {"v1": [COMPARISON.FIRST_Q2_MODE]}
+    assert payload["v1_only_supported_score_modes"] == [COMPARISON.FIRST_Q2_MODE]
+
+    _write_job_output(job)
+    evidence = COMPARISON.validate_job_output(job)
+    assert (
+        len(evidence["valid_row_ranks"])
+        == (COMPARISON.EXPECTED_EPISODES_BY_STAGE[stage])
+    )
+
+
+@pytest.mark.parametrize(
+    "versions",
+    (None, ("v0",), ("v2",), ("v0", "v1"), ("v1", "v2")),
+)
+def test_first_q2_launcher_rejects_every_non_v1_version_set(
+    versions: tuple[str, ...] | None,
+) -> None:
+    with pytest.raises(ValueError, match="V1-only"):
+        COMPARISON.resolve_stage_plan(
+            stage="formal",
+            versions=versions,
+            variants=("c",),
+            score_modes=(COMPARISON.FIRST_Q2_MODE,),
+            alphas=(0.25,),
+        )
+
+
+def test_first_q2_output_validation_rejects_normalization_drift(
+    tmp_path: Path,
+) -> None:
+    _, _, jobs = _jobs(
+        tmp_path,
+        stage="formal",
+        versions=("v1",),
+        variants=("c",),
+        score_modes=(COMPARISON.FIRST_Q2_MODE,),
+        alphas=(0.25,),
+    )
+    job = jobs[0]
+    _write_job_output(job)
+    manifest_path = Path(job.output_dir) / "protocol_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["protocol"]["inference_objective"]["score_definition"][
+        "normalization_axis"
+    ] = "all_batches_and_samples"
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="normalization_axis"):
+        COMPARISON.validate_job_output(job)
 
 
 def test_formal_selection_file_sha_is_distinct_from_rank_sha_and_fail_closed(

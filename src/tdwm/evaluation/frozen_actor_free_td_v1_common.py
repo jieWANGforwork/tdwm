@@ -28,6 +28,10 @@ from tdwm.adapters.frozen_actor_free_td_common import (
 )
 from tdwm.adapters.frozen_actor_free_td_v1_common import (
     DEPLOYMENT_CHECKPOINT_VERSION,
+    FIRST_ACTION_SCORE_MODE,
+    FIRST_ACTION_SCORE_MODES,
+    FIRST_Q2_SCORE_MODE,
+    FIRST_Q2_STD_EPSILON,
     IMPLEMENTATION_VERSION,
     METHOD_FAMILY,
     OBJECTIVE_VERSION,
@@ -78,10 +82,10 @@ FORMAL_HORIZON_BY_SCORE_MODE = {
     "f_only": 5,
     "g_only": 1,
     "f_plus_g": 5,
-    "f_plus_g_first": 5,
+    FIRST_ACTION_SCORE_MODE: 5,
+    FIRST_Q2_SCORE_MODE: 5,
     "g_only_f_rollout_mean": 5,
 }
-FIRST_ACTION_SCORE_MODE = "f_plus_g_first"
 FIRST_ACTION_SCORE_DEFINITION = {
     "formula": "f_cost - g_first_weight * q_first",
     "f_cost": "terminal_summed_mse(z_hat5, z_goal)",
@@ -92,6 +96,23 @@ FIRST_ACTION_SCORE_DEFINITION = {
     "q_first_action_processing": "frozen_shared_lewm_action_encoder_to_192d",
     "q_first_task": "sqrt_dim_l2_normalized_goal_vector",
     "q_first_discount": "none",
+    "cem_execution": "execute_A1_from_minimum_total_cost_plan",
+}
+FIRST_Q2_SCORE_DEFINITION = {
+    "formula": "zscore_samples(f_cost) - g_first_weight * zscore_samples(q_first)",
+    "f_cost": "terminal_summed_mse(z_hat5, z_goal)",
+    "f_rollout": "full_five_action_blocks_A1_through_A5",
+    "q_first": "dot(G(z0, frozen_E_A(A1), w_goal), w_goal)",
+    "q_first_state": "current_frozen_lewm_encoder_state_z0",
+    "q_first_action": "first_candidate_raw_action_block_A1",
+    "q_first_action_processing": "frozen_shared_lewm_action_encoder_to_192d",
+    "q_first_task": "sqrt_dim_l2_normalized_goal_vector",
+    "q_first_discount": "none",
+    "normalization": "population_z_score",
+    "normalization_axis": "cem_candidate_sample_axis_dim_1_per_environment",
+    "normalization_scope": "independent_per_get_cost_call",
+    "normalization_epsilon": FIRST_Q2_STD_EPSILON,
+    "degenerate_signal": "zeros_when_population_std_lte_epsilon",
     "cem_execution": "execute_A1_from_minimum_total_cost_plan",
 }
 ROLLOUT_MEAN_SCORE_MODE = "g_only_f_rollout_mean"
@@ -162,16 +183,16 @@ def _resolve_g_first_weight(
     configured_weight = (
         inference.get("g_first_weight") if isinstance(inference, Mapping) else None
     )
-    if score_mode != FIRST_ACTION_SCORE_MODE:
+    if score_mode not in FIRST_ACTION_SCORE_MODES:
         if g_first_weight is not None:
             raise ValueError(
-                "g_first_weight is only valid for score_mode='f_plus_g_first'."
+                "g_first_weight is only valid for a first-action score mode."
             )
         return None
     raw_weight = g_first_weight if g_first_weight is not None else configured_weight
     if raw_weight is None or isinstance(raw_weight, bool):
         raise ValueError(
-            "score_mode='f_plus_g_first' requires an explicit g_first_weight."
+            f"score_mode={score_mode!r} requires an explicit g_first_weight."
         )
     try:
         weight = float(raw_weight)
@@ -199,9 +220,14 @@ def _configure_first_action_score(
         score_mode=score_mode,
         g_first_weight=g_first_weight,
     )
-    if score_mode == FIRST_ACTION_SCORE_MODE:
+    if score_mode in FIRST_ACTION_SCORE_MODES:
         inference["g_first_weight"] = weight
-        inference["score_definition"] = deepcopy(FIRST_ACTION_SCORE_DEFINITION)
+        score_definition = (
+            FIRST_Q2_SCORE_DEFINITION
+            if score_mode == FIRST_Q2_SCORE_MODE
+            else FIRST_ACTION_SCORE_DEFINITION
+        )
+        inference["score_definition"] = deepcopy(score_definition)
     else:
         inference.pop("g_first_weight", None)
         inference.pop("score_definition", None)
@@ -237,7 +263,7 @@ def _first_action_output_metadata(
     """Return fields emitted only by the first-action critic evaluation."""
 
     inference = protocol.get("inference_objective", {})
-    if inference.get("score_mode") != FIRST_ACTION_SCORE_MODE:
+    if inference.get("score_mode") not in FIRST_ACTION_SCORE_MODES:
         return {}
     return {
         "g_first_weight": inference["g_first_weight"],
@@ -327,7 +353,7 @@ def actor_free_td_v1_output_directory_name(
         g_first_weight=g_first_weight,
     )
     run_mode = "smoke" if smoke else "pilot" if pilot else "formal"
-    if selected_mode == FIRST_ACTION_SCORE_MODE:
+    if selected_mode in FIRST_ACTION_SCORE_MODES:
         assert weight is not None
         return (
             f"{method}_cube_o50_{selected_mode}_alpha_"
@@ -530,16 +556,21 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
         },
         label="inference_objective",
     )
-    if score_mode == FIRST_ACTION_SCORE_MODE:
+    if score_mode in FIRST_ACTION_SCORE_MODES:
         _resolve_g_first_weight(
             protocol,
             score_mode=score_mode,
             g_first_weight=None,
         )
-        if inference.get("score_definition") != FIRST_ACTION_SCORE_DEFINITION:
+        expected_definition = (
+            FIRST_Q2_SCORE_DEFINITION
+            if score_mode == FIRST_Q2_SCORE_MODE
+            else FIRST_ACTION_SCORE_DEFINITION
+        )
+        if inference.get("score_definition") != expected_definition:
             raise ValueError(
                 "inference_objective.score_definition must exactly describe "
-                "the V1 first-action score."
+                f"the V1 {score_mode} score."
             )
         for key in ROLLOUT_MEAN_ONLY_INFERENCE_KEYS:
             if key in inference:
@@ -549,7 +580,7 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
                 )
     elif score_mode == ROLLOUT_MEAN_SCORE_MODE:
         if "g_first_weight" in inference:
-            raise ValueError("g_first_weight requires score_mode='f_plus_g_first'.")
+            raise ValueError("g_first_weight requires a first-action score mode.")
         require_exact_values(
             inference,
             {
@@ -560,7 +591,7 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
         )
     elif "g_first_weight" in inference or "score_definition" in inference:
         raise ValueError(
-            "Special inference fields require f_plus_g_first or g_only_f_rollout_mean."
+            "Special inference fields require a first-action or rollout-mean mode."
         )
     else:
         for key in ROLLOUT_MEAN_ONLY_INFERENCE_KEYS:
@@ -912,7 +943,7 @@ def evaluate_actor_free_td_predictor_runtime(
         "device": device,
         "score_mode": protocol["inference_objective"]["score_mode"],
     }
-    if protocol["inference_objective"]["score_mode"] == FIRST_ACTION_SCORE_MODE:
+    if protocol["inference_objective"]["score_mode"] in FIRST_ACTION_SCORE_MODES:
         policy_kwargs["g_first_weight"] = protocol["inference_objective"][
             "g_first_weight"
         ]
@@ -1052,6 +1083,9 @@ def evaluate_frozen_actor_free_td_v1(
     pilot: bool = False,
     score_mode: str | None = None,
     g_first_weight: float | None = None,
+    checkpoint_validator: Callable[..., None] = (
+        validate_frozen_actor_free_td_v1_checkpoint_protocol
+    ),
 ) -> dict[str, Any]:
     """Run the audited Stable World Model Cube evaluation for one V1 method."""
 
@@ -1061,7 +1095,7 @@ def evaluate_frozen_actor_free_td_v1(
         policy_factory=policy_factory,
         protocol_loader=load_frozen_actor_free_td_v1_evaluation_protocol,
         protocol_configurer=configure_frozen_actor_free_td_v1_evaluation_mode,
-        checkpoint_validator=validate_frozen_actor_free_td_v1_checkpoint_protocol,
+        checkpoint_validator=checkpoint_validator,
         raw_action_validator=validate_v1_raw_action_compatibility,
         checkpoint_provenance_keys=("pretrained_world_model_provenance",),
         protocol_path=protocol_path,
@@ -1079,6 +1113,10 @@ def evaluate_frozen_actor_free_td_v1(
 __all__ = [
     "FIRST_ACTION_SCORE_DEFINITION",
     "FIRST_ACTION_SCORE_MODE",
+    "FIRST_ACTION_SCORE_MODES",
+    "FIRST_Q2_SCORE_DEFINITION",
+    "FIRST_Q2_SCORE_MODE",
+    "FIRST_Q2_STD_EPSILON",
     "FORMAL_HORIZON_BY_SCORE_MODE",
     "FORMAL_O50_PLANNING",
     "ROLLOUT_MEAN_G_SCORE",

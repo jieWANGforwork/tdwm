@@ -14,6 +14,7 @@ import importlib.metadata
 import json
 import math
 import platform
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,11 @@ from tdwm.methods.actor_free_td_lewm_v1 import (
     tdjepa_goal_score_v1,
     validate_frozen_lewm_action_encoder_v1,
 )
+from tdwm.methods.actor_free_td_lewm_v1_c2 import (
+    C2_OBJECTIVE_VERSION,
+    first_q_alignment_v1_c2_loss,
+    sample_first_q_candidates_v1_c2,
+)
 from tdwm.methods.actor_free_td_lewm_v1_objectives import (
     OBJECTIVE_VERSION,
     goal_projected_v1_loss,
@@ -62,6 +68,7 @@ from tdwm.training.frozen_actor_free_td import (
     resolve_actor_free_training_schedule,
 )
 from tdwm.training.frozen_actor_free_td_v1_data import (
+    FrozenActorFreeTDV1C2TransitionDataset,
     FrozenActorFreeTDV1TransitionDataset,
     sample_reachable_future_latents_v1,
 )
@@ -82,6 +89,8 @@ METHOD_FAMILY = "actor_free_td_lewm_v1"
 IMPLEMENTATION_VERSION = "v1"
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 SUPPORTED_VARIANTS = frozenset({"c", "d", "f", "g1", "g2", "g3"})
+C2_VARIANT = "c2"
+C2_METHOD = f"{METHOD_FAMILY}_{C2_VARIANT}"
 
 
 @dataclass(frozen=True)
@@ -95,7 +104,7 @@ class ActorFreeTDLeWMV1Spec:
     def __post_init__(self) -> None:
         if self.method != f"{METHOD_FAMILY}_{self.variant}":
             raise ValueError("V1 method names must end in their exact variant.")
-        if self.variant not in SUPPORTED_VARIANTS:
+        if self.variant not in SUPPORTED_VARIANTS | {C2_VARIANT}:
             raise ValueError(f"Unsupported V1 variant: {self.variant!r}.")
         if self.requires_neighbor_index != (self.variant == "g1"):
             raise ValueError("Only V1 G1 uses the training neighbor index.")
@@ -109,6 +118,7 @@ V1_SPECS = {
     )
     for variant in sorted(SUPPORTED_VARIANTS)
 }
+C2_SPEC = ActorFreeTDLeWMV1Spec(method=C2_METHOD, variant=C2_VARIANT)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -116,6 +126,89 @@ def _canonical_sha256(value: Any) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _state_dict_sha256(state_dict: Mapping[str, torch.Tensor]) -> str:
+    """Hash tensor names, metadata, and raw bytes in a stable order."""
+
+    digest = hashlib.sha256()
+    for key in sorted(state_dict):
+        value = state_dict[key]
+        if not isinstance(value, torch.Tensor):
+            raise TypeError(f"state_dict[{key!r}] must be a tensor.")
+        tensor = value.detach().to(device="cpu").contiguous()
+        digest.update(key.encode("utf-8"))
+        digest.update(str(tensor.dtype).encode("ascii"))
+        digest.update(json.dumps(list(tensor.shape)).encode("ascii"))
+        digest.update(tensor.reshape(-1).view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _load_v1_c_parent_payload(
+    checkpoint_path: str | Path,
+    *,
+    protocol: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load and fail-closed validate the exact V1-C parent for C2."""
+
+    path = Path(checkpoint_path).expanduser().resolve()
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise FileNotFoundError(path)
+    expected = str(protocol["source_v1_c"]["checkpoint_sha256"])
+    actual = _file_sha256(path)
+    if actual != expected:
+        raise ValueError("V1-C parent checkpoint SHA differs from the C2 protocol.")
+    payload_value = torch.load(path, map_location="cpu", weights_only=False)
+    if not isinstance(payload_value, Mapping):
+        raise ValueError("V1-C parent deployment checkpoint must be a mapping.")
+    payload = dict(payload_value)
+    from tdwm.adapters.actor_free_td_lewm_v1_c import METHOD_SPEC
+    from tdwm.adapters.frozen_actor_free_td_v1_common import (
+        validate_frozen_actor_free_td_v1_payload,
+    )
+
+    predictor_config = validate_frozen_actor_free_td_v1_payload(
+        payload,
+        spec=METHOD_SPEC,
+    )
+    source = protocol["source_v1_c"]
+    for key, expected_value in {
+        "method": source["method"],
+        "method_family": source["method_family"],
+        "variant": source["variant"],
+        "implementation_version": source["implementation_version"],
+        "objective_version": source["objective_version"],
+        "deployment_checkpoint_version": source["deployment_checkpoint_version"],
+        "epoch": source["source_epoch"],
+        "global_step": source["source_global_step"],
+    }.items():
+        if payload.get(key) != expected_value:
+            raise ValueError(f"V1-C parent {key} differs from the C2 protocol.")
+    state_hashes = {
+        "world_model_state_sha256": _state_dict_sha256(
+            payload["world_model_state_dict"]
+        ),
+        "online_predictor_state_sha256": _state_dict_sha256(
+            payload["predictor_state_dict"]
+        ),
+        "target_predictor_state_sha256": _state_dict_sha256(
+            payload["target_predictor_state_dict"]
+        ),
+    }
+    return payload, {
+        "parent_method": source["method"],
+        "parent_seed": int(source["source_seed"]),
+        "parent_epoch": int(source["source_epoch"]),
+        "parent_global_step": int(source["source_global_step"]),
+        "parent_checkpoint_path": str(path),
+        "parent_checkpoint_sha256": actual,
+        "parameter_state": source["parameter_state"],
+        "optimizer_state": source["optimizer_state"],
+        "scheduler_state": source["scheduler_state"],
+        "epoch_and_global_step": source["epoch_and_global_step"],
+        "predictor_config_sha256": _canonical_sha256(predictor_config),
+        **state_hashes,
+    }
 
 
 def _cuda_runtime_provenance() -> tuple[torch.device | None, dict[str, str]]:
@@ -175,16 +268,7 @@ def _validate_v1_resume_manifest(
         == split_manifest.get("validation_indices_sha256")
     )
     previous_initialization = previous.get("model", {}).get("initialization", {})
-    compatible = compatible and all(
-        previous_initialization.get(key) == initialization_info.get(key)
-        for key in (
-            "source_checkpoint_sha256",
-            "source_training_result_sha256",
-            "source_training_manifest_sha256",
-            "source_final_epoch",
-            "source_global_step",
-        )
-    )
+    compatible = compatible and previous_initialization == initialization_info
     previous_store = previous.get("frozen_latent_store", {})
     compatible = compatible and all(
         previous_store.get(key) == frozen_latent_store_info.get(key)
@@ -234,6 +318,14 @@ def _positive_float(mapping: dict[str, Any], key: str, *, section: str) -> float
     return value
 
 
+def _is_lower_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def validate_actor_free_td_lewm_v1_training_protocol(
     protocol: dict[str, Any],
     *,
@@ -249,13 +341,18 @@ def validate_actor_free_td_lewm_v1_training_protocol(
         "variant": spec.variant,
         "environment": "cube",
         "stage": "full_training",
-        "initialization": "frozen_pretrained_lewm",
+        "initialization": (
+            "v1_c_deployment_parameter_initialization"
+            if spec.variant == C2_VARIANT
+            else "frozen_pretrained_lewm"
+        ),
     }
     for key, expected in exact.items():
         if protocol.get(key) != expected:
             raise ValueError(f"protocol.{key} must be {expected!r}.")
-    if protocol.get("seeds") != [0, 42, 3072]:
-        raise ValueError("V1 uses the comparison seeds [0, 42, 3072].")
+    expected_seeds = [3072] if spec.variant == C2_VARIANT else [0, 42, 3072]
+    if protocol.get("seeds") != expected_seeds:
+        raise ValueError(f"V1 {spec.variant} uses the locked seeds {expected_seeds}.")
     if protocol.get("runtime", {}).get("stable_worldmodel_version") != "0.1.1":
         raise ValueError("V1 requires stable-worldmodel 0.1.1.")
 
@@ -269,12 +366,31 @@ def validate_actor_free_td_lewm_v1_training_protocol(
         if pretrained.get(key) != expected:
             raise ValueError(f"pretrained_world_model.{key} must be {expected!r}.")
     source_hash = pretrained.get("checkpoint_sha256")
-    if (
-        not isinstance(source_hash, str)
-        or len(source_hash) != 64
-        or any(character not in "0123456789abcdef" for character in source_hash)
-    ):
+    if not _is_lower_sha256(source_hash):
         raise ValueError("pretrained checkpoint_sha256 must be lowercase SHA-256.")
+
+    if spec.variant == C2_VARIANT:
+        source_v1_c = protocol.get("source_v1_c", {})
+        expected_source = {
+            "method": "actor_free_td_lewm_v1_c",
+            "method_family": METHOD_FAMILY,
+            "variant": "c",
+            "implementation_version": IMPLEMENTATION_VERSION,
+            "objective_version": OBJECTIVE_VERSION,
+            "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
+            "source_seed": 3072,
+            "source_epoch": 10,
+            "source_global_step": FORMAL_OPTIMIZER_UPDATES,
+            "parameter_state": "strict_all_model_parameters",
+            "optimizer_state": "reset",
+            "scheduler_state": "reset",
+            "epoch_and_global_step": "reset",
+        }
+        for key, expected in expected_source.items():
+            if source_v1_c.get(key) != expected:
+                raise ValueError(f"source_v1_c.{key} must be {expected!r}.")
+        if not _is_lower_sha256(source_v1_c.get("checkpoint_sha256")):
+            raise ValueError("source_v1_c.checkpoint_sha256 must be lowercase SHA-256.")
 
     sequence = protocol.get("sequence", {})
     if (
@@ -360,6 +476,13 @@ def validate_actor_free_td_lewm_v1_training_protocol(
             "goal_projection_prediction_gradient": "online_predictor",
             "projection_population": "goal_derived_tasks_only",
         },
+        C2_VARIANT: {
+            "objective": "goal_projected_td_plus_first_q_alignment",
+            "goal_signal": "matched_future_latent",
+            "goal_projection_target": "detached_td_target_projection",
+            "goal_projection_prediction_gradient": "online_predictor",
+            "projection_population": "goal_derived_tasks_only",
+        },
         "d": {
             "objective": "goal_value_weighted_td",
             "score_source": "detached_td_target",
@@ -402,10 +525,56 @@ def validate_actor_free_td_lewm_v1_training_protocol(
     for key, expected in variant_objective_locks[spec.variant].items():
         if objective.get(key) != expected:
             raise ValueError(f"joint_objective.{key} must be {expected!r}.")
-    if spec.variant == "c":
+    if spec.variant in {"c", C2_VARIANT}:
         _positive_float(objective, "goal_projection_weight", section="joint_objective")
     else:
         _positive_float(objective, "weight_temperature", section="joint_objective")
+    if spec.variant == C2_VARIANT:
+        alignment = objective.get("first_q_alignment")
+        if not isinstance(alignment, dict):
+            raise ValueError("joint_objective.first_q_alignment must be a mapping.")
+        exact_alignment = {
+            "version": C2_OBJECTIVE_VERSION,
+            "loss": "teacher_student_cross_entropy",
+            "weight": 1.0,
+            "teacher": "frozen_lewm_terminal_goal_cost",
+            "teacher_gradient": "stop_gradient",
+            "teacher_cost_reducer": "final_predicted_latent_summed_mse",
+            "student": "first_action_goal_projection",
+            "student_gradient": "online_predictor_only",
+            "candidate_source": "cem_initial_gaussian_no_actor",
+            "candidate_count": 16,
+            "rollout_horizon": 5,
+            "initial_mean": 0.0,
+            "initial_variance": 1.0,
+            "force_first_candidate_to_mean": True,
+            "goal_population": "goal_derived_tasks_with_valid_five_block_context",
+            "max_goal_examples_per_batch": 8,
+            "subset_selection": "first_valid_in_random_replay_batch",
+            "score_standardization": "population_z_score_over_candidates",
+            "standardization_epsilon": 1e-6,
+            "teacher_temperature": 1.0,
+            "student_temperature": 1.0,
+            "candidate_sampling_seed_offset": 370009,
+        }
+        if set(alignment) != set(exact_alignment):
+            raise ValueError(
+                "joint_objective.first_q_alignment must contain exactly the "
+                "locked V1-C2 fields."
+            )
+        for key, expected in exact_alignment.items():
+            if alignment.get(key) != expected:
+                raise ValueError(
+                    f"joint_objective.first_q_alignment.{key} must be {expected!r}."
+                )
+            if type(alignment[key]) is not type(expected):
+                raise ValueError(
+                    f"joint_objective.first_q_alignment.{key} must use the "
+                    f"locked {type(expected).__name__} type."
+                )
+        _positive_float(
+            alignment, "weight", section="joint_objective.first_q_alignment"
+        )
     if spec.variant == "g1":
         _positive_float(objective, "neighbor_temperature", section="joint_objective")
         if int(objective.get("neighbors_per_anchor", 0)) <= 0:
@@ -494,6 +663,7 @@ def _build_v1_training_module(
     data_generator: torch.Generator,
     goal_generator: torch.Generator,
     task_generator: torch.Generator,
+    candidate_generator: torch.Generator | None = None,
     validation_goal_generator: torch.Generator | None = None,
     validation_task_generator: torch.Generator | None = None,
     neighbor_index: StateNeighborActionIndex | None,
@@ -522,6 +692,9 @@ def _build_v1_training_module(
             self.data_generator = data_generator
             self.goal_generator = goal_generator
             self.task_generator = task_generator
+            self.candidate_generator = candidate_generator
+            if (self.variant == C2_VARIANT) != (self.candidate_generator is not None):
+                raise ValueError("Only V1-C2 accepts a candidate RNG stream.")
             self.validation_goal_generator = (
                 validation_goal_generator
                 if validation_goal_generator is not None
@@ -555,6 +728,10 @@ def _build_v1_training_module(
             checkpoint["v1_data_generator_state"] = self.data_generator.get_state()
             checkpoint["v1_goal_generator_state"] = self.goal_generator.get_state()
             checkpoint["v1_task_generator_state"] = self.task_generator.get_state()
+            if self.candidate_generator is not None:
+                checkpoint["v1_c2_candidate_generator_state"] = (
+                    self.candidate_generator.get_state()
+                )
             checkpoint["v1_validation_goal_generator_state"] = (
                 self.validation_goal_generator.get_state()
             )
@@ -572,6 +749,7 @@ def _build_v1_training_module(
             data_state = checkpoint.get("v1_data_generator_state")
             goal_state = checkpoint.get("v1_goal_generator_state")
             task_state = checkpoint.get("v1_task_generator_state")
+            candidate_state = checkpoint.get("v1_c2_candidate_generator_state")
             validation_goal_state = checkpoint.get("v1_validation_goal_generator_state")
             validation_task_state = checkpoint.get("v1_validation_task_generator_state")
             validation_goal_epoch_state = checkpoint.get(
@@ -590,9 +768,19 @@ def _build_v1_training_module(
                 or validation_task_epoch_state is None
             ):
                 raise RuntimeError("V1 resume checkpoint is missing RNG state.")
+            if self.candidate_generator is not None and candidate_state is None:
+                raise RuntimeError(
+                    "V1-C2 resume checkpoint is missing candidate RNG state."
+                )
+            if self.candidate_generator is None and candidate_state is not None:
+                raise RuntimeError(
+                    "A non-C2 V1 checkpoint contains C2 candidate RNG state."
+                )
             self.data_generator.set_state(data_state.cpu())
             self.goal_generator.set_state(goal_state.cpu())
             self.task_generator.set_state(task_state.cpu())
+            if self.candidate_generator is not None:
+                self.candidate_generator.set_state(candidate_state.cpu())
             self.validation_goal_generator.set_state(validation_goal_state.cpu())
             self.validation_task_generator.set_state(validation_task_state.cpu())
             self._validation_goal_epoch_state = (
@@ -690,7 +878,7 @@ def _build_v1_training_module(
         ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
             objective = protocol["joint_objective"]
             per_td = td_batch.per_transition_td_loss
-            if self.variant == "c":
+            if self.variant in {"c", C2_VARIANT}:
                 output = goal_projected_v1_loss(
                     td_batch.prediction,
                     td_batch.target,
@@ -790,6 +978,111 @@ def _build_v1_training_module(
                 f"{stage}/{metric_name}": _mean_or_zero(output.advantage, output.loss),
                 f"{stage}/weight_mean": output.weights.mean(),
                 f"{stage}/weight_std": output.weights.std(unbiased=False),
+            }
+
+        def _first_q_alignment_loss(
+            self,
+            batch: dict[str, Any],
+            matched_goals: torch.Tensor,
+            task: torch.Tensor,
+            goal_mask: torch.Tensor,
+        ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+            if self.variant != C2_VARIANT or self.candidate_generator is None:
+                raise RuntimeError("First-Q alignment is exclusive to V1-C2.")
+            batch_size = int(task.shape[0])
+            expected_shapes = {
+                "alignment_state_history": (batch_size, 3, V1_STATE_DIM),
+                "alignment_action_history": (batch_size, 2, V1_RAW_ACTION_DIM),
+                "alignment_action_sequence": (batch_size, 5, V1_RAW_ACTION_DIM),
+            }
+            alignment_tensors: dict[str, torch.Tensor] = {}
+            for name, expected_shape in expected_shapes.items():
+                value = batch.get(name)
+                if (
+                    not isinstance(value, torch.Tensor)
+                    or value.shape != expected_shape
+                    or not value.is_floating_point()
+                    or not bool(torch.isfinite(value).all())
+                ):
+                    raise RuntimeError(
+                        f"V1-C2 {name} must be a finite float tensor with "
+                        f"shape {expected_shape}."
+                    )
+                alignment_tensors[name] = value
+            rollout_valid = batch.get("alignment_rollout_valid")
+            if (
+                not isinstance(rollout_valid, torch.Tensor)
+                or rollout_valid.shape != (batch_size,)
+                or rollout_valid.dtype != torch.bool
+            ):
+                raise RuntimeError(
+                    "V1-C2 alignment_rollout_valid must be a boolean [B] tensor."
+                )
+
+            config = protocol["joint_objective"]["first_q_alignment"]
+            eligible = goal_mask & rollout_valid
+            eligible_indices = torch.nonzero(eligible, as_tuple=False).flatten()
+            limit = int(config["max_goal_examples_per_batch"])
+            selected = eligible_indices[:limit]
+            if selected.numel() == 0:
+                zero = next(self.predictor.parameters()).sum() * 0.0
+                return zero, {
+                    "train/first_q_alignment_examples": zero.detach(),
+                    "train/first_q_alignment_top1_agreement": zero.detach(),
+                }
+
+            state_history = alignment_tensors["alignment_state_history"].index_select(
+                0, selected
+            )
+            action_history = alignment_tensors["alignment_action_history"].index_select(
+                0, selected
+            )
+            # Reading this field above is deliberate: its validity check binds
+            # the five-block replay context even though C2 samples fresh CEM
+            # candidates rather than training on the logged action sequence.
+            candidates = sample_first_q_candidates_v1_c2(
+                state_history[:, -1, :],
+                candidate_count=int(config["candidate_count"]),
+                rollout_horizon=int(config["rollout_horizon"]),
+                initial_variance=float(config["initial_variance"]),
+                generator=self.candidate_generator,
+            )
+            selected_count = int(selected.numel())
+            output = first_q_alignment_v1_c2_loss(
+                self.predictor,
+                self.model,
+                state_history,
+                action_history,
+                candidates,
+                matched_goals.index_select(0, selected),
+                task.index_select(0, selected),
+                torch.ones(
+                    selected_count,
+                    dtype=torch.bool,
+                    device=task.device,
+                ),
+                torch.ones(
+                    selected_count,
+                    dtype=torch.bool,
+                    device=task.device,
+                ),
+                teacher_temperature=float(config["teacher_temperature"]),
+                student_temperature=float(config["student_temperature"]),
+                standardization_epsilon=float(config["standardization_epsilon"]),
+            )
+            return output.loss, {
+                "train/first_q_alignment_examples": output.loss.new_tensor(
+                    float(selected_count)
+                ),
+                "train/first_q_alignment_top1_agreement": output.top1_agreement,
+                "train/first_q_teacher_cost_mean": output.teacher_cost.mean(),
+                "train/first_q_teacher_cost_std": output.teacher_cost.std(
+                    unbiased=False
+                ),
+                "train/first_q_student_score_mean": output.student_score.mean(),
+                "train/first_q_student_score_std": output.student_score.std(
+                    unbiased=False
+                ),
             }
 
         def _forward_loss(self, batch: dict[str, Any], stage: str) -> torch.Tensor:
@@ -912,6 +1205,32 @@ def _build_v1_training_module(
                 global_rows,
                 stage=stage,
             )
+            if self.variant == C2_VARIANT:
+                method_metrics[f"{stage}/c2_base_c_loss"] = method_loss.detach()
+                if stage == "train":
+                    alignment_loss, alignment_metrics = self._first_q_alignment_loss(
+                        batch,
+                        matched_goals,
+                        task,
+                        goal_mask,
+                    )
+                    alignment_weight = float(
+                        protocol["joint_objective"]["first_q_alignment"]["weight"]
+                    )
+                    method_loss = method_loss + alignment_weight * alignment_loss
+                    method_metrics.update(
+                        {
+                            "train/first_q_alignment_loss": (alignment_loss.detach()),
+                            "train/first_q_alignment_weighted_loss": (
+                                alignment_weight * alignment_loss.detach()
+                            ),
+                            **alignment_metrics,
+                        }
+                    )
+                else:
+                    method_metrics["validation/first_q_alignment_evaluated"] = (
+                        method_loss.new_zeros(())
+                    )
             # The common base TD is the primary validation metric for all six
             # variants.  Method-specific objectives remain diagnostics where
             # they are evaluable; G1 cannot query every fixed validation anchor
@@ -991,7 +1310,7 @@ def _predictor_config(
     spec: ActorFreeTDLeWMV1Spec,
 ) -> dict[str, Any]:
     predictor = protocol["predictor"]
-    return {
+    config = {
         "method": spec.method,
         "method_family": METHOD_FAMILY,
         "variant": spec.variant,
@@ -1003,6 +1322,9 @@ def _predictor_config(
         "joint_objective": copy.deepcopy(protocol["joint_objective"]),
         "pretrained_world_model": copy.deepcopy(protocol["pretrained_world_model"]),
     }
+    if spec.variant == C2_VARIANT:
+        config["source_v1_c"] = copy.deepcopy(protocol["source_v1_c"])
+    return config
 
 
 def _deployment_payload(
@@ -1118,6 +1440,7 @@ def train_actor_free_td_lewm_v1(
     max_steps: int | None = None,
     skip_validation: bool = False,
     initial_world_model_checkpoint_path: str | Path | None = None,
+    initial_v1_c_checkpoint_path: str | Path | None = None,
     frozen_latent_store_path: str | Path | None = None,
     split_indices_path: str | Path | None = None,
     neighbor_index_path: str | Path | None = None,
@@ -1135,6 +1458,10 @@ def train_actor_free_td_lewm_v1(
         raise ValueError("max_steps and skip_validation are smoke-only.")
     if initial_world_model_checkpoint_path is None:
         raise ValueError("V1 requires --initial-world-model-checkpoint.")
+    if spec.variant == C2_VARIANT and initial_v1_c_checkpoint_path is None:
+        raise ValueError("V1-C2 requires --initial-v1-c-checkpoint.")
+    if spec.variant != C2_VARIANT and initial_v1_c_checkpoint_path is not None:
+        raise ValueError("Only V1-C2 accepts --initial-v1-c-checkpoint.")
     if frozen_latent_store_path is None or split_indices_path is None:
         raise ValueError("V1 requires frozen latent store and split indices.")
     if spec.requires_neighbor_index != (neighbor_index_path is not None):
@@ -1192,7 +1519,12 @@ def train_actor_free_td_lewm_v1(
         train_fraction=float(protocol["split"]["train_fraction"]),
         validation_fraction=float(protocol["split"]["validation_fraction"]),
     )
-    train_set = FrozenActorFreeTDV1TransitionDataset(
+    train_dataset_type = (
+        FrozenActorFreeTDV1C2TransitionDataset
+        if spec.variant == C2_VARIANT
+        else FrozenActorFreeTDV1TransitionDataset
+    )
+    train_set = train_dataset_type(
         clip_dataset,
         train_indices,
         first_current_index=int(protocol["sequence"]["history_frames"]),
@@ -1292,7 +1624,7 @@ def train_actor_free_td_lewm_v1(
     )
     world_model = swm.wm.load_pretrained(source_name, cache_dir=str(source_cache))
     world_model.requires_grad_(False).eval()
-    initialization_info = {
+    pretrained_initialization_info = {
         "strategy": "frozen_pretrained_lewm",
         "source_method": "lewm",
         "source_seed": int(protocol["pretrained_world_model"]["source_seed"]),
@@ -1303,6 +1635,32 @@ def train_actor_free_td_lewm_v1(
         "frozen": True,
         **source_training,
     }
+    parent_payload: dict[str, Any] | None = None
+    if spec.variant == C2_VARIANT:
+        assert initial_v1_c_checkpoint_path is not None
+        parent_payload, parent_initialization_info = _load_v1_c_parent_payload(
+            initial_v1_c_checkpoint_path,
+            protocol=protocol,
+        )
+        official_world_hash = _state_dict_sha256(world_model.state_dict())
+        if (
+            parent_initialization_info["world_model_state_sha256"]
+            != official_world_hash
+        ):
+            raise ValueError(
+                "V1-C parent LeWM parameters differ from the audited frozen "
+                "pretrained LeWM."
+            )
+        world_model.load_state_dict(
+            parent_payload["world_model_state_dict"], strict=True
+        )
+        initialization_info = {
+            **pretrained_initialization_info,
+            **parent_initialization_info,
+            "strategy": "v1_c_deployment_parameter_initialization",
+        }
+    else:
+        initialization_info = pretrained_initialization_info
     model_config = build_model_config(protocol, CUBE_ACTION_DIM)
     parameter_count = sum(parameter.numel() for parameter in world_model.parameters())
     expected_parameters = protocol["model"].get("parameters")
@@ -1339,6 +1697,16 @@ def train_actor_free_td_lewm_v1(
     validation_task_generator = torch.Generator().manual_seed(
         seed + int(protocol["task_sampling"]["task_sampling_seed_offset"]) + 1
     )
+    candidate_generator = None
+    if spec.variant == C2_VARIANT:
+        candidate_generator = torch.Generator().manual_seed(
+            seed
+            + int(
+                protocol["joint_objective"]["first_q_alignment"][
+                    "candidate_sampling_seed_offset"
+                ]
+            )
+        )
     module = _build_v1_training_module(
         world_model,
         protocol,
@@ -1347,11 +1715,29 @@ def train_actor_free_td_lewm_v1(
         data_generator=data_generator,
         goal_generator=goal_generator,
         task_generator=task_generator,
+        candidate_generator=candidate_generator,
         validation_goal_generator=validation_goal_generator,
         validation_task_generator=validation_task_generator,
         neighbor_index=neighbor_index,
         latent_store=store,
     )
+    if parent_payload is not None:
+        module.predictor.load_state_dict(
+            parent_payload["predictor_state_dict"], strict=True
+        )
+        module.target_predictor.load_state_dict(
+            parent_payload["target_predictor_state_dict"], strict=True
+        )
+        if (
+            _state_dict_sha256(module.predictor.state_dict())
+            != (initialization_info["online_predictor_state_sha256"])
+        ):
+            raise RuntimeError("V1-C2 online G initialization was not exact.")
+        if (
+            _state_dict_sha256(module.target_predictor.state_dict())
+            != (initialization_info["target_predictor_state_sha256"])
+        ):
+            raise RuntimeError("V1-C2 target G initialization was not exact.")
 
     checkpoint_dir = run_dir / "checkpoints" / "lightning"
     checkpoint_callback = ModelCheckpoint(
@@ -1457,6 +1843,7 @@ def train_actor_free_td_lewm_v1(
             "transition_batch_size": transition_batch_size,
             "world_model_visual_encode_during_training": False,
             "shared_action_encoder_forward_during_training": True,
+            "first_q_alignment_training": spec.variant == C2_VARIANT,
         },
         "runtime": runtime,
     }
@@ -1520,6 +1907,10 @@ def train_actor_free_td_lewm_v1(
     }
     if neighbor_info is not None:
         result["neighbor_index_manifest_sha256"] = neighbor_info["manifest_sha256"]
+    if spec.variant == C2_VARIANT:
+        result["source_v1_c_checkpoint_sha256"] = initialization_info[
+            "parent_checkpoint_sha256"
+        ]
     _record_peak_cuda_memory(result, cuda_device)
     write_json(run_dir / "training_result.json", result)
     return result
@@ -1527,6 +1918,9 @@ def train_actor_free_td_lewm_v1(
 
 __all__ = [
     "ActorFreeTDLeWMV1Spec",
+    "C2_METHOD",
+    "C2_SPEC",
+    "C2_VARIANT",
     "DEPLOYMENT_CHECKPOINT_VERSION",
     "IMPLEMENTATION_VERSION",
     "METHOD_FAMILY",

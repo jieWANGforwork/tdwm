@@ -289,3 +289,133 @@ def test_all_18_cli_entrypoints_accept_and_forward_first_action_alpha(
     assert captured["g_first_weight"] == 0.5
     assert captured["output_dir"] == "results"
     assert '"ok": true' in capsys.readouterr().out
+
+
+def test_v1_first_q2_protocol_records_exact_candidate_normalization() -> None:
+    case = _version_case("v1")
+    configured = case["configure"](
+        case["protocol"],
+        smoke=False,
+        pilot=False,
+        score_mode=v1_common.FIRST_Q2_SCORE_MODE,
+        g_first_weight=0.25,
+    )
+
+    inference = configured["inference_objective"]
+    assert configured["planning"]["horizon"] == 5
+    assert inference["score_mode"] == "f_plus_g_first_q2"
+    assert inference["g_first_weight"] == 0.25
+    assert inference["score_definition"] == v1_common.FIRST_Q2_SCORE_DEFINITION
+    assert inference["score_definition"]["normalization"] == "population_z_score"
+    assert inference["score_definition"]["normalization_axis"] == (
+        "cem_candidate_sample_axis_dim_1_per_environment"
+    )
+    assert inference["score_definition"]["normalization_scope"] == (
+        "independent_per_get_cost_call"
+    )
+    assert inference["score_definition"]["normalization_epsilon"] == 1e-6
+    v1_common.validate_frozen_actor_free_td_v1_evaluation_protocol(
+        configured,
+        spec=case["common"].FrozenActorFreeTDV1MethodSpec(
+            method=configured["method"],
+            variant=configured["variant"],
+            display_name="test",
+            objective_keys=tuple(configured["joint_objective"]),
+            validate_method_config=lambda _: None,
+        ),
+    )
+
+
+def test_first_q2_is_v1_only_and_not_inherited_by_v0_or_v2() -> None:
+    assert v1_common.FIRST_Q2_SCORE_MODE in v1_common.SCORE_MODES
+    assert v1_common.FIRST_Q2_SCORE_MODE not in v0_common.SCORE_MODES
+    assert v1_common.FIRST_Q2_SCORE_MODE not in v2_common.V2_SCORE_MODES
+
+    for configure, protocol in (
+        (
+            v0_common.configure_frozen_actor_free_td_v0_evaluation_mode,
+            _version_case("v0")["protocol"],
+        ),
+        (
+            v2_common.configure_actor_free_td_v2_evaluation_mode,
+            _version_case("v2")["protocol"],
+        ),
+    ):
+        with pytest.raises(ValueError, match="incompatible"):
+            configure(
+                protocol,
+                smoke=False,
+                pilot=False,
+                score_mode=v1_common.FIRST_Q2_SCORE_MODE,
+                g_first_weight=0.25,
+            )
+
+
+def test_v1_first_q2_output_name_and_metadata_are_isolated_from_first_q() -> None:
+    case = _version_case("v1")
+    configured = case["configure"](
+        case["protocol"],
+        smoke=False,
+        pilot=False,
+        score_mode=v1_common.FIRST_Q2_SCORE_MODE,
+        g_first_weight=0.5,
+    )
+
+    assert case["output_name"](
+        case["protocol"],
+        smoke=False,
+        pilot=False,
+        score_mode=v1_common.FIRST_Q2_SCORE_MODE,
+        g_first_weight=0.5,
+    ) == ("actor_free_td_lewm_v1_c_cube_o50_f_plus_g_first_q2_alpha_0p5_formal")
+    metadata = case["metadata"](configured, configured["planning"])
+    assert metadata["g_first_weight"] == 0.5
+    assert metadata["planning"] == {"horizon": 5}
+    assert metadata["score_definition"] == v1_common.FIRST_Q2_SCORE_DEFINITION
+    assert metadata["score_definition"] != v1_common.FIRST_ACTION_SCORE_DEFINITION
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_all_v1_cli_entrypoints_accept_and_forward_first_q2(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    variant: str,
+) -> None:
+    module = _load_cli("v1", variant)
+    captured: dict[str, Any] = {}
+
+    def fake_evaluate(**kwargs: Any) -> dict[str, bool]:
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        module,
+        f"evaluate_actor_free_td_lewm_v1_{variant}",
+        fake_evaluate,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(module.__file__),
+            "--config",
+            "protocol.yaml",
+            "--dataset",
+            "dataset.npz",
+            "--checkpoint-path",
+            "checkpoint.pt",
+            "--output-dir",
+            "results",
+            "--score-mode",
+            v1_common.FIRST_Q2_SCORE_MODE,
+            "--g-first-weight",
+            "0.25",
+        ],
+    )
+
+    module.main()
+
+    assert captured["score_mode"] == v1_common.FIRST_Q2_SCORE_MODE
+    assert captured["g_first_weight"] == 0.25
+    assert captured["output_dir"] == "results"
+    assert '"ok": true' in capsys.readouterr().out

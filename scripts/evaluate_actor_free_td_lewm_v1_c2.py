@@ -6,9 +6,9 @@ import json
 import os
 from pathlib import Path
 
-from tdwm.evaluation.actor_free_td_lewm_v1_g3 import (
-    evaluate_actor_free_td_lewm_v1_g3,
-    load_actor_free_td_lewm_v1_g3_evaluation_protocol,
+from tdwm.evaluation.actor_free_td_lewm_v1_c2 import (
+    evaluate_actor_free_td_lewm_v1_c2,
+    load_actor_free_td_lewm_v1_c2_evaluation_protocol,
 )
 from tdwm.evaluation.frozen_actor_free_td_v1_common import (
     actor_free_td_v1_output_directory_name,
@@ -17,7 +17,7 @@ from tdwm.evaluation.frozen_actor_free_td_v1_common import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate Actor-Free TD-LeWM V1 G3 with policy-free CEM."
+        description="Evaluate Actor-Free TD-LeWM V1 C2 with policy-free CEM."
     )
     parser.add_argument("--config", required=True)
     parser.add_argument("--dataset", default=os.environ.get("TDWM_CUBE_DATASET"))
@@ -49,7 +49,7 @@ def main() -> None:
         raise SystemExit("Pass --dataset or set TDWM_CUBE_DATASET.")
     output_dir = args.output_dir
     if output_dir is None:
-        protocol = load_actor_free_td_lewm_v1_g3_evaluation_protocol(args.config)
+        protocol = load_actor_free_td_lewm_v1_c2_evaluation_protocol(args.config)
         output_dir = Path(os.environ.get("TDWM_RUN_ROOT", "outputs")) / (
             actor_free_td_v1_output_directory_name(
                 protocol,
@@ -59,7 +59,7 @@ def main() -> None:
                 g_first_weight=args.g_first_weight,
             )
         )
-    result = evaluate_actor_free_td_lewm_v1_g3(
+    result = evaluate_actor_free_td_lewm_v1_c2(
         protocol_path=args.config,
         dataset_path=args.dataset,
         output_dir=output_dir,

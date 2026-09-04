@@ -32,6 +32,9 @@ from tdwm.training.frozen_latent_store import (
 
 V1_STATE_DIM = 192
 V1_FIRST_CURRENT_INDEX = 3
+V1_C2_ALIGNMENT_STATE_HISTORY = 3
+V1_C2_ALIGNMENT_ACTION_HISTORY = 2
+V1_C2_ALIGNMENT_ROLLOUT_HORIZON = 5
 
 if CUBE_ACTION_BLOCK_DIM != V1_RAW_ACTION_DIM:
     raise RuntimeError("Cube raw action blocks must remain 25-dimensional in V1.")
@@ -413,6 +416,143 @@ class FrozenActorFreeTDV1TransitionDataset:
         ]
 
 
+class FrozenActorFreeTDV1C2TransitionDataset(FrozenActorFreeTDV1TransitionDataset):
+    """Add frozen-F rollout context without changing the V1 replay population.
+
+    C2 uses the same unique transition rows and every original sample field as
+    :class:`FrozenActorFreeTDV1TransitionDataset`.  For a transition at global
+    row ``r``, it additionally exposes the three LeWM state-history rows
+    ``[r-2*fs, r-fs, r]``, the two preceding raw action blocks
+    ``[r-2*fs, r-fs]``, and the five logged rollout action blocks
+    ``[r, ..., r+4*fs]``.  These tensors are usable only when every requested
+    row, including the resulting terminal state at ``r+5*fs``, stays inside
+    the same episode and every exposed value is finite.  An unusable context
+    is explicitly marked and zero-filled, so expected terminal transitions
+    never leak NaNs into a batched training step.
+    """
+
+    def __getitems__(
+        self,
+        indices: Sequence[int],
+    ) -> list[dict[str, torch.Tensor]]:
+        records = super().__getitems__(indices)
+        if not records:
+            return records
+
+        self.store._assert_immutable()
+        rows = np.fromiter(
+            (int(record["global_row"].item()) for record in records),
+            dtype=np.int64,
+            count=len(records),
+        )
+        batch_size = int(rows.size)
+        state_histories = np.zeros(
+            (batch_size, V1_C2_ALIGNMENT_STATE_HISTORY, V1_STATE_DIM),
+            dtype=np.float32,
+        )
+        action_histories = np.zeros(
+            (batch_size, V1_C2_ALIGNMENT_ACTION_HISTORY, V1_RAW_ACTION_DIM),
+            dtype=np.float32,
+        )
+        action_sequences = np.zeros(
+            (batch_size, V1_C2_ALIGNMENT_ROLLOUT_HORIZON, V1_RAW_ACTION_DIM),
+            dtype=np.float32,
+        )
+        rollout_valid = np.zeros(batch_size, dtype=np.bool_)
+
+        frame_skip = int(self.frame_skip)
+        state_offsets = frame_skip * np.arange(
+            -(V1_C2_ALIGNMENT_STATE_HISTORY - 1),
+            1,
+            dtype=np.int64,
+        )
+        history_action_offsets = state_offsets[:-1]
+        rollout_action_offsets = frame_skip * np.arange(
+            V1_C2_ALIGNMENT_ROLLOUT_HORIZON,
+            dtype=np.int64,
+        )
+        state_rows = rows[:, None] + state_offsets[None, :]
+        history_action_rows = rows[:, None] + history_action_offsets[None, :]
+        rollout_action_rows = rows[:, None] + rollout_action_offsets[None, :]
+        rollout_terminal_rows = rows[:, None] + (
+            V1_C2_ALIGNMENT_ROLLOUT_HORIZON * frame_skip
+        )
+        requested_rows = np.concatenate(
+            (
+                state_rows,
+                history_action_rows,
+                rollout_action_rows,
+                rollout_terminal_rows,
+            ),
+            axis=1,
+        )
+        in_bounds = np.logical_and(
+            requested_rows >= 0,
+            requested_rows < int(self.store.total_rows),
+        ).all(axis=1)
+
+        bounded_positions = np.flatnonzero(in_bounds)
+        if bounded_positions.size:
+            bounded_rows = requested_rows[bounded_positions]
+            anchor_episodes = np.asarray(
+                self.store.episode_ids[rows[bounded_positions]],
+                dtype=np.int64,
+            )
+            requested_episodes = np.asarray(
+                self.store.episode_ids[bounded_rows],
+                dtype=np.int64,
+            )
+            same_episode = (requested_episodes == anchor_episodes[:, None]).all(axis=1)
+            episode_positions = bounded_positions[same_episode]
+            if episode_positions.size:
+                candidate_states = np.array(
+                    self.store.latents[state_rows[episode_positions]],
+                    dtype=np.float32,
+                    copy=True,
+                )
+                candidate_history_actions = np.array(
+                    self.store.actions[history_action_rows[episode_positions]],
+                    dtype=np.float32,
+                    copy=True,
+                )
+                candidate_rollout_actions = np.array(
+                    self.store.actions[rollout_action_rows[episode_positions]],
+                    dtype=np.float32,
+                    copy=True,
+                )
+                finite = (
+                    np.isfinite(candidate_states).all(axis=(1, 2))
+                    & np.isfinite(candidate_history_actions).all(axis=(1, 2))
+                    & np.isfinite(candidate_rollout_actions).all(axis=(1, 2))
+                )
+                valid_positions = episode_positions[finite]
+                if valid_positions.size:
+                    state_histories[valid_positions] = candidate_states[finite]
+                    action_histories[valid_positions] = candidate_history_actions[
+                        finite
+                    ]
+                    action_sequences[valid_positions] = candidate_rollout_actions[
+                        finite
+                    ]
+                    rollout_valid[valid_positions] = True
+
+        for position, record in enumerate(records):
+            record["alignment_state_history"] = torch.from_numpy(
+                state_histories[position]
+            )
+            record["alignment_action_history"] = torch.from_numpy(
+                action_histories[position]
+            )
+            record["alignment_action_sequence"] = torch.from_numpy(
+                action_sequences[position]
+            )
+            record["alignment_rollout_valid"] = torch.tensor(
+                bool(rollout_valid[position]),
+                dtype=torch.bool,
+            )
+        return records
+
+
 def sample_reachable_future_latents_v1(
     store: FrozenLatentStore,
     global_rows: Sequence[int] | np.ndarray | torch.Tensor,
@@ -479,7 +619,11 @@ def sample_reachable_future_latents_v1(
 
 __all__ = [
     "FrozenActorFreeTDV1TransitionDataset",
+    "FrozenActorFreeTDV1C2TransitionDataset",
     "ReachableFutureLatentsV1",
+    "V1_C2_ALIGNMENT_ACTION_HISTORY",
+    "V1_C2_ALIGNMENT_ROLLOUT_HORIZON",
+    "V1_C2_ALIGNMENT_STATE_HISTORY",
     "V1_FIRST_CURRENT_INDEX",
     "V1_RAW_ACTION_DIM",
     "V1_STATE_DIM",

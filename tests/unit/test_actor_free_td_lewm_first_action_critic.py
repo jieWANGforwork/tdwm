@@ -9,7 +9,12 @@ from torch import nn
 
 from tdwm.adapters.actor_free_td_lewm_v2_common import ActorFreeTDLeWMV2
 from tdwm.adapters.frozen_actor_free_td_v0_common import ActorFreeTDLeWMV0
-from tdwm.adapters.frozen_actor_free_td_v1_common import ActorFreeTDLeWMV1
+from tdwm.adapters.frozen_actor_free_td_v1_common import (
+    FIRST_Q2_SCORE_MODE,
+    FIRST_Q2_STD_EPSILON,
+    ActorFreeTDLeWMV1,
+    _normalize_cem_candidate_scores,
+)
 
 FIRST_ACTION_MODE = "f_plus_g_first"
 
@@ -375,4 +380,121 @@ def test_first_action_mode_requires_exactly_five_blocks(
 
     with pytest.raises(ValueError, match="horizon=5"):
         adapter.get_cost(info, actions)  # type: ignore[attr-defined]
+    assert world.rollout_calls == 0
+
+
+def _population_zscore(values: torch.Tensor) -> torch.Tensor:
+    centered = values - values.mean(dim=1, keepdim=True)
+    return centered / centered.square().mean(dim=1, keepdim=True).sqrt()
+
+
+def test_first_q2_normalizes_f_and_q_independently_per_cem_candidate_set() -> None:
+    batch, samples = 2, 3
+    terminal_axis = torch.tensor([[0.0, 2.0, 4.0], [1.0, 3.0, 7.0]])
+    first_actions = torch.tensor([[1.0, 2.0, 10.0], [100.0, 110.0, 130.0]])
+    predicted = torch.zeros(batch, samples, 6, 192)
+    predicted[..., -1, 7] = terminal_axis
+    actions = torch.zeros(batch, samples, 5, 25)
+    actions[..., 0, 0] = first_actions
+    current = torch.zeros(batch, samples, 1, 192)
+    current[..., 0, 11] = torch.tensor([[7.0, 8.0, 9.0], [17.0, 18.0, 19.0]])
+    goal = _one_axis_goal(batch)
+    alpha = 0.25
+
+    world = RecordingWorld(predicted, mutate_info_on_rollout=True)
+    predictor = EmbeddedActionScorePredictor()
+    adapter = ActorFreeTDLeWMV1(
+        world,
+        predictor,  # type: ignore[arg-type]
+        gamma=0.5,
+        score_mode=FIRST_Q2_SCORE_MODE,
+        g_first_weight=alpha,
+    )
+    cost = adapter.get_cost(
+        {"emb": current, "goal_emb": goal},
+        actions,
+    )
+
+    f_cost = 1.0 + terminal_axis.square()
+    q_first = math.sqrt(192.0) * first_actions
+    expected = _population_zscore(f_cost) - alpha * _population_zscore(q_first)
+    torch.testing.assert_close(cost, expected)
+    torch.testing.assert_close(cost.mean(dim=1), torch.zeros(batch), atol=1e-6, rtol=0)
+    assert world.rollout_horizons == [5]
+    assert torch.equal(world.rollout_actions[0], actions)
+    assert predictor.calls == 1
+    assert predictor.last_state is not None
+    assert torch.equal(predictor.last_state, current[..., -1, :])
+    _assert_action_path(
+        VERSION_CASES[1],
+        world=world,
+        predictor=predictor,
+        expected_raw_action=actions[..., 0, :],
+    )
+
+
+def test_first_q2_constant_and_singleton_candidate_signals_are_zero_not_nan() -> None:
+    constant = torch.tensor([[3.0, 3.0, 3.0], [7.0, 7.0, 7.0]])
+    singleton = torch.tensor([[4.0], [-2.0]])
+
+    assert torch.equal(
+        _normalize_cem_candidate_scores(constant), torch.zeros_like(constant)
+    )
+    assert torch.equal(
+        _normalize_cem_candidate_scores(singleton),
+        torch.zeros_like(singleton),
+    )
+
+    almost_constant = torch.tensor([[1.0, 1.0 + FIRST_Q2_STD_EPSILON / 4.0]])
+    assert torch.equal(
+        _normalize_cem_candidate_scores(almost_constant),
+        torch.zeros_like(almost_constant),
+    )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    (
+        torch.tensor([1.0]),
+        torch.ones(1, 0),
+        torch.ones(1, 2, dtype=torch.int64),
+        torch.tensor([[1.0, math.inf]]),
+    ),
+)
+def test_first_q2_normalization_rejects_invalid_cem_scores(bad: torch.Tensor) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _normalize_cem_candidate_scores(bad)
+
+
+@pytest.mark.parametrize("bad_weight", (None, True, -0.01, math.nan, math.inf))
+def test_first_q2_requires_explicit_finite_nonnegative_weight(
+    bad_weight: float | bool | None,
+) -> None:
+    with pytest.raises((TypeError, ValueError), match="g_first_weight"):
+        ActorFreeTDLeWMV1(
+            RecordingWorld(),
+            EmbeddedActionScorePredictor(),  # type: ignore[arg-type]
+            gamma=0.5,
+            score_mode=FIRST_Q2_SCORE_MODE,
+            g_first_weight=bad_weight,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize("horizon", (1, 4, 6))
+def test_first_q2_requires_exactly_five_action_blocks(horizon: int) -> None:
+    world = RecordingWorld()
+    adapter = ActorFreeTDLeWMV1(
+        world,
+        EmbeddedActionScorePredictor(),  # type: ignore[arg-type]
+        gamma=0.5,
+        score_mode=FIRST_Q2_SCORE_MODE,
+        g_first_weight=0.25,
+    )
+    actions = torch.zeros(1, 2, horizon, 25)
+
+    with pytest.raises(ValueError, match="horizon=5"):
+        adapter.get_cost(
+            {"emb": _current_state(2), "goal_emb": _one_axis_goal()},
+            actions,
+        )
     assert world.rollout_calls == 0
