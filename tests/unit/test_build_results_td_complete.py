@@ -268,6 +268,7 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     expected_header = [
         "Version",
         "Method",
+        "Training loss",
         "F-only",
         "G-only",
         "F+G tail",
@@ -288,8 +289,14 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     ]
     master = document.tables[table_headers.index(expected_header)]
     assert len(master.rows) == 25
-    assert all(len(row.cells) == 7 for row in master.rows)
+    assert all(len(row.cells) == 8 for row in master.rows)
     assert all(cell.text for row in master.rows[1:] for cell in row.cells[2:])
+    expected_losses = tuple(
+        report.METHOD_LOSS_LABELS[variant]
+        for _version in report.VERSIONS
+        for variant in report.VARIANTS
+    )
+    assert tuple(row.cells[2].text for row in master.rows[1:]) == expected_losses
     master_text = "\n".join(cell.text for row in master.rows for cell in row.cells)
     assert "—" not in master_text
     assert "–" not in master_text
@@ -300,7 +307,7 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     for row_index, (row, counts) in enumerate(zip(master.rows[1:], count_rows)):
         version_index = row_index // len(report.VARIANTS)
         row_maximum = max(counts)
-        for score_index, (cell, count) in enumerate(zip(row.cells[2:], counts)):
+        for score_index, (cell, count) in enumerate(zip(row.cells[3:], counts)):
             shading = cell._tc.tcPr.find(qn("w:shd"))
             fill = "" if shading is None else (shading.get(qn("w:fill")) or "").upper()
             row_best = count == row_maximum
@@ -338,7 +345,7 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
         "Complete companion ledgers",
         "How the five evaluation methods are run",
         "C-G3 fixed E10 comparison and color legend",
-        "Complete 24 by 5 fixed E10 matrix",
+        "Complete 24 by 5 fixed E10 matrix with training losses",
         "Best training method and evaluation score",
         "Causes and next objectives",
         "Coverage map",

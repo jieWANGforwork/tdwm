@@ -86,6 +86,17 @@ VERSION_LABELS = {
     "v2": "V2",
     "v2_ema_sg": "V2-EMA",
 }
+# Compact method objectives for the fixed results matrix.  The exact stopped
+# signals, weighting normalization and branch definitions remain in the
+# detailed loss table later in the report.
+METHOD_LOSS_LABELS = {
+    "c": "L_C=mean(l)+mean_goal(q-qY)^2",
+    "d": "L_D=mean_i w_i[sg(qY)]l_i",
+    "f": "L_F=mean_i w_i(A_goal)l_i",
+    "g1": "L_G1=mean_i w_i(A_neighbor)l_i",
+    "g2": "L_G2=mean_i w_i(A_prefix-mean)l_i",
+    "g3": "L_G3=mean_i w_i(A_prefix-gain)l_i",
+}
 ORIGINAL_MODES = ("f_only", "g_only", "f_plus_g")
 NEW_MODES = ("f_plus_g_first", "g_only_f_rollout_mean")
 ALL_CONTROLLED_MODES = ORIGINAL_MODES + NEW_MODES
@@ -897,7 +908,10 @@ def _fixed_master_markdown_rows(
             if count == version_column_maxima[version_index][index]:
                 text = f"◆ {text}"
             scores.append(text)
-        formatted.append((*display_row[:2], *scores))
+        method = display_row[1].lower()
+        formatted.append(
+            (*display_row[:2], METHOD_LOSS_LABELS[method], *scores)
+        )
     return tuple(formatted)
 
 
@@ -1345,11 +1359,22 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
         "",
         "## C–G3 固定 E10 主结果矩阵",
         "",
-        "横向读每一行，可以比较同一个训练方法最适合哪一种评分；纵向读每一列时，以版本为边界，只比较该版本的 C/D/F/G1/G2/G3。Markdown 中 **粗体**是行最佳，`◆` 是同版本列最佳；并列全部标记。DOCX 使用黄底表示行最佳、蓝底表示同版本列最佳、青色底表示两者同时成立。",
+        "横向读每一行，可以同时看到训练 loss，并比较同一个训练方法最适合哪一种评分；纵向读每一列时，以版本为边界，只比较该版本的 C/D/F/G1/G2/G3。Markdown 中 **粗体**是行最佳，`◆` 是同版本列最佳；并列全部标记。DOCX 使用黄底表示行最佳、蓝底表示同版本列最佳、青色底表示两者同时成立。",
+        "",
+        "Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`；D–G3 的 `w_i(·)` 是由括号内 stop-gradient 信号形成的归一化样本权重。V0/V1 只有 real 分支；V2/V2-EMA 的总目标为 `L_pred+0.09L_SIGReg+ρ(L_method^real+L_method^pred)`。精确信号、goal 子集和权重定义见前面的“方法、网络和训练 loss”表。",
         "",
     ]
     lines += _markdown_table(
-        ("版本", "训练方法", "F-only", "G-only", "F+G tail", "First-Q", "Mean-Q"),
+        (
+            "版本",
+            "训练方法",
+            "训练 loss",
+            "F-only",
+            "G-only",
+            "F+G tail",
+            "First-Q",
+            "Mean-Q",
+        ),
         _fixed_master_markdown_rows(cells),
     )
     lines += [
@@ -1553,15 +1578,28 @@ def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
     display_rows = _fixed_master_rows(cells)
     count_rows = _fixed_master_counts(cells)
     version_column_maxima = _fixed_master_version_column_maxima(count_rows)
+    table_rows = tuple(
+        (*row[:2], METHOD_LOSS_LABELS[row[1].lower()], *row[2:])
+        for row in display_rows
+    )
     table = _add_table(
         document,
-        ("Version", "Method", "F-only", "G-only", "F+G tail", "First-Q", "Mean-Q"),
-        display_rows,
-        (1200, 900, 2460, 2460, 2460, 2460, 2460),
+        (
+            "Version",
+            "Method",
+            "Training loss",
+            "F-only",
+            "G-only",
+            "F+G tail",
+            "First-Q",
+            "Mean-Q",
+        ),
+        table_rows,
+        (1200, 900, 3000, 1860, 1860, 1860, 1860, 1860),
     )
     for column, cell in enumerate(table.rows[0].cells):
         cell.paragraphs[0].alignment = (
-            WD_ALIGN_PARAGRAPH.LEFT if column < 2 else WD_ALIGN_PARAGRAPH.CENTER
+            WD_ALIGN_PARAGRAPH.LEFT if column < 3 else WD_ALIGN_PARAGRAPH.CENTER
         )
     for row in table.rows:
         for cell in row.cells:
@@ -1592,8 +1630,12 @@ def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
         row_maximum = max(value for value in counts if value is not None)
         v2_report._v1._shade_cell(row.cells[0], group_fill)
         v2_report._v1._shade_cell(row.cells[1], "F8FAFC")
+        v2_report._v1._shade_cell(row.cells[2], "F8FAFC")
         row.cells[0].paragraphs[0].runs[0].bold = True
         row.cells[1].paragraphs[0].runs[0].bold = True
+        loss_paragraph = row.cells[2].paragraphs[0]
+        loss_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        loss_paragraph.runs[0].font.size = Pt(7.5)
         if row_index % len(VARIANTS) == 0:
             for cell in row.cells:
                 _set_cell_border(
@@ -1605,7 +1647,7 @@ def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
                     cell, edges=("bottom",), color=group_accent, size=24
                 )
         for score_index, count in enumerate(counts):
-            cell = row.cells[score_index + 2]
+            cell = row.cells[score_index + 3]
             paragraph = cell.paragraphs[0]
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = paragraph.runs[0]
@@ -1938,9 +1980,18 @@ def build_docx(
         bold=True,
     )
     _add_fixed_master_legend(document)
+    _add_body(
+        document,
+        "The Training loss column shows the method-specific G objective: l_i is "
+        "the per-sample successor TD residual; qY = Y^T m; and w_i(.) is the normalized "
+        "sample weight formed from a stopped signal. V0/V1 use the real branch. "
+        "V2/V2-EMA optimize L_pred + 0.09 L_SIGReg + rho(L_method^real + "
+        "L_method^pred). Exact C-G3 signals and weighting rules appear in "
+        "V2 / V2-EMA network, target and loss.",
+    )
     _add_heading(
         document,
-        "Complete 24 by 5 fixed E10 matrix",
+        "Complete 24 by 5 fixed E10 matrix with training losses",
         level=2,
         page_break=True,
     )
