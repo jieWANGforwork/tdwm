@@ -1,0 +1,124 @@
+extends: actor_free_td_lewm_v1_c_cube_checkpoint_o50.yaml
+id: actor_free_td_lewm_v1_c3_cube_checkpoint_o50
+method: actor_free_td_lewm_v1_c3
+method_family: actor_free_td_lewm_v1
+variant: c3
+display_name: Actor-Free TD-JEPA V1-C3 RP1 State-Value TD
+implementation_version: v1
+objective_version: 1
+
+checkpoint:
+  source: actor_free_td_lewm_v1_c3_deployment_export
+  checkpoint_path: required_cli_argument
+  contains_world_model: true
+  contains_parent_predictor_pair: true
+  contains_state_critic_pair: true
+  deployment_checkpoint_version: 1
+  formal_epoch: 12
+  formal_logical_epoch: 12
+  formal_global_step: 12000
+
+source_v1_c:
+  method: actor_free_td_lewm_v1_c
+  method_family: actor_free_td_lewm_v1
+  variant: c
+  implementation_version: v1
+  objective_version: 0
+  deployment_checkpoint_version: 1
+  source_seed: 3072
+  source_epoch: 10
+  source_global_step: 127960
+  checkpoint_sha256: 88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3
+  parameter_state: strict_all_model_parameters_frozen
+  optimizer_state: not_loaded
+  scheduler_state: not_loaded
+  epoch_and_global_step: reset
+
+state_critic:
+  architecture: rp1_mrn_quasimetric
+  input: current_and_goal_frozen_lewm_latents
+  state_dim: 192
+  hidden_dim: 256
+  embedding_dim: 128
+  depth: 2
+  output: nonnegative_primitive_temporal_cost_to_go
+  action_input: none
+  actor: none
+  goal_identity_value: exact_zero_by_architecture
+  block_primitive_steps: 5
+  backup_horizon_primitive_steps: 50
+  gamma_per_primitive_step: 0.98
+  expectile: 0.03
+  huber_beta: 1.0
+  huber_beta_source: local_prelock_paper_does_not_report
+  target_ema_update_rate: 0.005
+  target_ema_source: nearest_documented_rp1_co_trained_critic_value
+
+goal_sampling:
+  source: same_episode_reachable_future_frozen_latent
+  distribution: uniform_temporal_offset_over_available_horizon
+  cross_episode_probability: 0.0
+  cross_episode_reason: omitted_because_paper_does_not_specify_unreachable_label
+  goal_sampling_seed_offset: 470003
+
+objective:
+  name: rp1_state_value_n_step_expectile_huber_td
+  exact_goal_branch: delta_if_goal_inside_n_step_backup
+  bootstrap_branch: discounted_primitive_step_cost_plus_ema_state_value
+  target_gradient: stop_gradient
+  trainable_modules: [state_critic]
+  frozen_modules: [lewm_encoder, lewm_predictor, lewm_action_encoder, online_g, target_g]
+
+evaluation:
+  episodes: 50
+  goal_offset: 50
+  start_goal_source: same_dataset_episode
+  selection_sha256: e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7
+
+planning:
+  solver: CEM
+  horizon: 5
+  candidates: 300
+  iterations: 30
+  elites: 30
+  initial_variance: 1.0
+  action_block: 5
+  frame_skip: 5
+  receding_horizon: 1
+  episode_budget: 100
+  planning_seed: 42
+  solver_batch_size: 1
+  history_len: 1
+  warm_start: true
+  initial_distribution: cem_gaussian_no_actor
+
+inference_objective:
+  score_mode: state_v_terminal
+  score_definition:
+    formula: target_state_v(F_frozen_rollout_5(z0,A1:A5),z_goal)
+    optimization: cem_minimize
+    f_rollout: full_five_action_blocks_A1_through_A5
+    state_input: terminal_imagined_frozen_lewm_latent
+    goal_input: frozen_lewm_encoded_goal_latent
+    critic: ema_target_state_value
+    online_critic_used: false
+    parent_online_g_used: false
+    parent_target_g_used: false
+    terminal_latent_l2_used: false
+    constant_shift_sanity: 25_plus_value_has_identical_ranking_and_action
+    constant_shift: 25.0
+    executed_action_block: first_block_only
+    replanning: every_action_block
+  learned_actor: false
+  parent_g_used: false
+  terminal_goal_distance_used: false
+  critic: ema_target
+  replanning: every_action_block
+
+provenance:
+  training_protocol: configs/experiment/actor_free_td_lewm_v1_c3_cube_train.yaml
+  initialization_method: actor_free_td_lewm_v1_c
+  initialization_checkpoint_sha256: 88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3
+  comparison_protocol: configs/experiment/lewm_cube_seed3072_o50.yaml
+  status: implementation_ready_checkpoint_pending
+  note: C3 planning uses only the EMA State-V at the terminal latent of a full frozen-F five-block rollout; both retained G copies and terminal latent L2 are excluded.

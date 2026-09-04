@@ -1,0 +1,191 @@
+schema_version: 1
+id: actor_free_td_lewm_v1_c3_cube_v1
+method: actor_free_td_lewm_v1_c3
+method_family: actor_free_td_lewm_v1
+variant: c3
+display_name: Actor-Free TD-JEPA V1-C3 RP1 State-Value TD
+implementation_version: v1
+objective_version: 1
+environment: cube
+stage: full_training
+initialization: v1_c_deployment_frozen_parent_plus_new_state_value
+
+pretrained_world_model:
+  source_method: lewm
+  source_seed: 3072
+  source_epoch: 10
+  checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
+  frozen: true
+
+source_v1_c:
+  method: actor_free_td_lewm_v1_c
+  method_family: actor_free_td_lewm_v1
+  variant: c
+  implementation_version: v1
+  objective_version: 0
+  deployment_checkpoint_version: 1
+  source_seed: 3072
+  source_epoch: 10
+  source_global_step: 127960
+  checkpoint_sha256: 88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3
+  parameter_state: strict_all_model_parameters_frozen
+  optimizer_state: not_loaded
+  scheduler_state: not_loaded
+  epoch_and_global_step: reset
+
+runtime:
+  stable_worldmodel_version: 0.1.1
+  import: import stable_worldmodel as swm
+
+seeds: [3072]
+
+dataset:
+  identifier: quentinll/lewm-cube
+  file: ogbench/cube_single_expert.h5
+  expected_size_bytes: 101942558720
+  accepted_size_bytes: [101942558720, 74104077358]
+  optimized_layout:
+    file: cube_single_expert_chunk1.h5
+    pixels_chunk_frames: 1
+    lossless: true
+    sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  lance:
+    suffix: .lance
+    manifest_suffix: .manifest.json
+    stable_worldmodel_version: 0.1.1
+    image_codec: jpeg
+    jpeg_quality: 100
+    minimum_pixel_verification_samples: 128
+    numeric_verification:
+      action: exact
+      observation: float32_cast_exact
+    source:
+      file: cube_single_expert_chunk1.h5
+      size_bytes: 74104077358
+      sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  expected_episodes: 10000
+  expected_transitions: 2010000
+  keys_to_load: [action]
+  keys_to_cache: []
+  keys_to_merge: {}
+
+split:
+  unit: sequence_clip
+  implementation: inherited_v1_c_exact_split_artifact
+  train_fraction: 0.9
+  validation_fraction: 0.1
+  seed_source: training_seed
+  exact_indices_artifact: split_indices.npz
+
+sequence:
+  frame_skip: 5
+  history_frames: 3
+  prediction_frames: 1
+  num_steps: 19
+
+image_preprocessing:
+  source: stable_pretraining.data.dataset_stats.ImageNet
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+model:
+  parameters: 18034628
+  encoder_size: tiny
+  patch_size: 14
+  embed_dim: 192
+  predictor_depth: 6
+  predictor_heads: 16
+  predictor_mlp_dim: 2048
+  predictor_dim_head: 64
+  predictor_dropout: 0.1
+  predictor_embedding_dropout: 0.0
+  projector_hidden_dim: 2048
+
+state_critic:
+  architecture: rp1_mrn_quasimetric
+  input: current_and_goal_frozen_lewm_latents
+  state_dim: 192
+  hidden_dim: 256
+  embedding_dim: 128
+  depth: 2
+  output: nonnegative_primitive_temporal_cost_to_go
+  action_input: none
+  actor: none
+  goal_identity_value: exact_zero_by_architecture
+  block_primitive_steps: 5
+  backup_horizon_primitive_steps: 50
+  gamma_per_primitive_step: 0.98
+  expectile: 0.03
+  huber_beta: 1.0
+  huber_beta_source: local_prelock_paper_does_not_report
+  target_ema_update_rate: 0.005
+  target_ema_source: nearest_documented_rp1_co_trained_critic_value
+
+goal_sampling:
+  source: same_episode_reachable_future_frozen_latent
+  distribution: uniform_temporal_offset_over_available_horizon
+  cross_episode_probability: 0.0
+  cross_episode_reason: omitted_because_paper_does_not_specify_unreachable_label
+  goal_sampling_seed_offset: 470003
+
+objective:
+  name: rp1_state_value_n_step_expectile_huber_td
+  exact_goal_branch: delta_if_goal_inside_n_step_backup
+  bootstrap_branch: discounted_primitive_step_cost_plus_ema_state_value
+  target_gradient: stop_gradient
+  trainable_modules: [state_critic]
+  frozen_modules: [lewm_encoder, lewm_predictor, lewm_action_encoder, online_g, target_g]
+
+loader:
+  batch_size: 1024
+  sampling_unit: block_boundary_anchor
+  transition_population: unique_legal_td_rows_from_exact_v1_c_clip_split
+  train_sampling: random_with_replacement
+  validation_sampling: sequential_without_replacement
+  frozen_latent_mmap: true
+  workers: 6
+  prefetch_factor: 2
+  validation_workers: 2
+  train_drop_last: true
+  validation_drop_last: false
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  critic_learning_rate: 0.001
+  final_learning_rate: 0.0001
+  weight_decay: 0.0001
+  learning_rate_source: local_prelock_from_documented_rp1_critic_schedule
+
+scheduler:
+  type: cosine_annealing
+  interval: optimizer_step
+
+training:
+  epochs: 12
+  scheduler_epochs: 12
+  optimizer_steps_per_epoch: 1000
+  total_optimizer_steps: 12000
+  precision: bf16-mixed
+  model_compile: false
+  gradient_clip_norm: 1.0
+  checkpoint_every_epochs: 1
+  resume: true
+
+validation:
+  mc_target: exact_same_episode_primitive_temporal_offset
+  metrics:
+    - mc_mse
+    - mc_mae
+    - spearman
+    - delta_binned_calibration
+    - td_residual
+    - goal_identity_value
+    - monotonic_ranking_accuracy
+    - finite_fraction
+  delta_bins_primitive_steps: [0, 10, 25, 50, 75]
+
+logging:
+  type: csv
+  flush_every_n_steps: 50
