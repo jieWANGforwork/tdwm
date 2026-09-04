@@ -326,7 +326,7 @@ def case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Case:
         selection=selection,
         action=action,
         evaluation_commit=c3_commit,
-        successes=8,
+        successes=26,
     )
     return Case(
         root=root,
@@ -348,6 +348,39 @@ def _reconcile(case: Case) -> results.ValidatedEndpointStudy:
         c2_launcher_manifest=case.launcher_manifest,
         c3_output_dir=case.c3_output,
     )
+
+
+def _write_c3_epoch3_output(
+    case: Case, root: Path, *, successes: int = 28
+) -> Path:
+    output = root / "c3-epoch3-output"
+    output.mkdir()
+    for name in results.REQUIRED_OUTPUT_FILES:
+        (output / name).write_bytes((case.c3_output / name).read_bytes())
+    checkpoint = root / "v1_c3_epoch3.pt"
+    checkpoint.write_bytes(b"v1-c3-epoch3-checkpoint")
+    checkpoint_sha = _file_sha(checkpoint)
+    result = json.loads((output / "results.json").read_text())
+    result["metrics"]["episode_successes"] = [True] * successes + [False] * (
+        results.EPISODES - successes
+    )
+    result["checkpoint_epoch"] = 3
+    result["checkpoint_role"] = "intermediate_epoch_o50"
+    result["formal_completion_required"] = False
+    _write_json(output / "results.json", result)
+    manifest = json.loads((output / "protocol_manifest.json").read_text())
+    manifest["checkpoint"].update(
+        path=str(checkpoint.resolve()),
+        sha256=checkpoint_sha,
+        epoch=3,
+        logical_epoch=3,
+        global_step=3_000,
+        formal_completion_required=False,
+        requested_checkpoint_epoch=3,
+        checkpoint_role="intermediate_epoch_o50",
+    )
+    _write_json(output / "protocol_manifest.json", manifest)
+    return output
 
 
 def _write_training_run(
@@ -462,6 +495,144 @@ def test_optionally_archives_c2_c3_training_metrics(case: Case, tmp_path: Path) 
     assert (archive / "training/v1_c2/metrics.csv").is_file()
     assert (archive / "training/v1_c3/validation_offline_metrics.json").is_file()
     assert len(results.load_endpoint_extension_ledger(archive)) == 8
+
+
+def test_epoch3_diagnostic_is_archived_outside_strict_eight_cell_ledger(
+    case: Case, tmp_path: Path
+) -> None:
+    epoch3_output = _write_c3_epoch3_output(case, tmp_path)
+    study = results.reconcile_endpoint_results(
+        c2_launcher_root=case.root,
+        c2_launcher_manifest=case.launcher_manifest,
+        c3_output_dir=case.c3_output,
+        c3_epoch3_output_dir=epoch3_output,
+    )
+    assert len(study.cells) == 8
+    assert sum(len(cell.outcomes) for cell in study.cells) == 400
+    assert study.c3_epoch3_diagnostic is not None
+    assert study.c3_epoch3_diagnostic.checkpoint_epoch == 3
+    assert study.c3_epoch3_diagnostic.checkpoint_global_step == 3_000
+    assert study.c3_epoch3_diagnostic.success_count == 28
+
+    ledger = results.build_ledger(study)
+    assert ledger["cell_count"] == 8
+    assert ledger["outcome_count"] == 400
+    diagnostic = ledger["diagnostics"]["v1_c3_epoch3_state_v"]
+    assert diagnostic["excluded_from_endpoint_cell_count"] is True
+    assert diagnostic["cell"]["success_count"] == 28
+    assert len(diagnostic["cell"]["outcomes"]) == 50
+    comparison = diagnostic["paired_comparison_to_v1_c3_epoch12"]
+    assert comparison == {
+        "pair_count": 50,
+        "epoch3_success_count": 28,
+        "epoch12_success_count": 26,
+        "both_success": 26,
+        "epoch3_only": 2,
+        "epoch12_only": 0,
+        "both_failure": 22,
+        "discordant_pairs": 2,
+        "exact_mcnemar_p_two_sided": 0.5,
+    }
+
+    archive = tmp_path / "archive-with-diagnostic"
+    results.write_archive(study, artifact_dir=archive)
+    assert (
+        archive
+        / results.C3_EPOCH3_DIAGNOSTIC_DIRECTORY
+        / "results.json"
+    ).is_file()
+    loaded = results.load_endpoint_extension(archive)
+    assert len(loaded.cells) == 8
+    assert loaded.c3_epoch3_diagnostic is not None
+    assert loaded.c3_epoch3_diagnostic.success_count == 28
+    assert len(results.load_endpoint_extension_ledger(archive)) == 8
+    summary = json.loads((archive / "summary.json").read_text())
+    assert summary["cell_count"] == 8
+    assert summary["outcome_count"] == 400
+    assert (
+        summary["diagnostics"]["v1_c3_epoch3_state_v"]
+        ["paired_comparison_to_v1_c3_epoch12"]
+        == comparison
+    )
+    results.write_archive(study, artifact_dir=archive, check=True)
+
+
+def test_epoch3_diagnostic_rejects_wrong_epoch_or_non_o50_outcomes(
+    case: Case, tmp_path: Path
+) -> None:
+    epoch3_output = _write_c3_epoch3_output(case, tmp_path)
+    manifest_path = epoch3_output / "protocol_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["checkpoint"]["logical_epoch"] = 4
+    _write_json(manifest_path, manifest)
+    with pytest.raises(results.EndpointReconciliationError, match="logical_epoch"):
+        results.reconcile_endpoint_results(
+            c2_launcher_root=case.root,
+            c2_launcher_manifest=case.launcher_manifest,
+            c3_output_dir=case.c3_output,
+            c3_epoch3_output_dir=epoch3_output,
+        )
+
+    manifest["checkpoint"]["logical_epoch"] = 3
+    _write_json(manifest_path, manifest)
+    result_path = epoch3_output / "results.json"
+    result = json.loads(result_path.read_text())
+    result["metrics"]["episode_successes"] = [True] * 49
+    _write_json(result_path, result)
+    with pytest.raises(results.EndpointReconciliationError, match="exactly 50"):
+        results.reconcile_endpoint_results(
+            c2_launcher_root=case.root,
+            c2_launcher_manifest=case.launcher_manifest,
+            c3_output_dir=case.c3_output,
+            c3_epoch3_output_dir=epoch3_output,
+        )
+
+
+def test_epoch3_diagnostic_archive_rejects_statistic_or_source_tamper(
+    case: Case, tmp_path: Path
+) -> None:
+    epoch3_output = _write_c3_epoch3_output(case, tmp_path)
+    study = results.reconcile_endpoint_results(
+        c2_launcher_root=case.root,
+        c2_launcher_manifest=case.launcher_manifest,
+        c3_output_dir=case.c3_output,
+        c3_epoch3_output_dir=epoch3_output,
+    )
+    archive = tmp_path / "archive-with-diagnostic"
+    results.write_archive(study, artifact_dir=archive)
+    ledger_path = archive / "reconciliation_ledger.json"
+    original_ledger = ledger_path.read_bytes()
+    ledger = json.loads(original_ledger)
+    comparison = ledger["diagnostics"]["v1_c3_epoch3_state_v"][
+        "paired_comparison_to_v1_c3_epoch12"
+    ]
+    comparison["exact_mcnemar_p_two_sided"] = 1.0
+    _write_json(ledger_path, ledger)
+    with pytest.raises(results.EndpointReconciliationError, match="comparison"):
+        results.load_endpoint_extension(archive)
+
+    ledger_path.write_bytes(original_ledger)
+    summary_path = archive / "summary.json"
+    original_summary = summary_path.read_bytes()
+    for path in (ledger_path, summary_path):
+        document = json.loads(path.read_text())
+        document["diagnostics"]["v1_c3_epoch3_state_v"]["cell"][
+            "raw_score_mode"
+        ] = "state_v"
+        _write_json(path, document)
+    with pytest.raises(results.EndpointReconciliationError, match="raw_score_mode"):
+        results.load_endpoint_extension(archive)
+
+    ledger_path.write_bytes(original_ledger)
+    summary_path.write_bytes(original_summary)
+    diagnostic_result = (
+        archive / results.C3_EPOCH3_DIAGNOSTIC_DIRECTORY / "results.json"
+    )
+    diagnostic_result.write_text(diagnostic_result.read_text() + " ")
+    with pytest.raises(
+        results.EndpointReconciliationError, match="source_files_sha256"
+    ):
+        results.load_endpoint_extension(archive)
 
 
 def test_rejects_non_exact_launcher_grid_and_nonformal_output(case: Case) -> None:

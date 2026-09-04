@@ -96,6 +96,33 @@ def _endpoint_cells() -> tuple[dict[str, Any], ...]:
     )
 
 
+def _endpoint_cells_with_c3_outcomes(
+    *, c3_count: int = 26
+) -> tuple[dict[str, Any], ...]:
+    cells = [dict(cell) for cell in _endpoint_cells()]
+    c3 = next(
+        cell
+        for cell in cells
+        if (cell["method_key"], cell["score_mode"]) == ("v1_c3", "state_v")
+    )
+    c3["success_count"] = c3_count
+    c3["success_rate_percent"] = c3_count * 2.0
+    c3["outcomes"] = [True] * c3_count + [False] * (50 - c3_count)
+    return tuple(cells)
+
+
+def _c3_epoch3_diagnostic(*, count: int = 28) -> dict[str, Any]:
+    return {
+        "method_key": "v1_c3",
+        "score_mode": "state_v",
+        "checkpoint_epoch": 3,
+        "checkpoint_global_step": 3_000,
+        "success_count": count,
+        "success_rate_percent": count * 2.0,
+        "outcomes": [True] * count + [False] * (50 - count),
+    }
+
+
 def _tiny_png() -> bytes:
     return base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
@@ -227,6 +254,51 @@ def test_missing_endpoint_ledger_produces_neutral_placeholders_only() -> None:
 def test_partial_endpoint_extension_is_rejected() -> None:
     with pytest.raises(report.CompleteResultsError, match="exactly 8 cells"):
         report._fixed_master_rows(_cells(), _endpoint_cells()[:-1])
+
+
+def test_c3_epoch3_diagnostic_is_analyzed_but_never_added_to_master_table() -> None:
+    endpoint_cells = _endpoint_cells_with_c3_outcomes()
+    diagnostic = _c3_epoch3_diagnostic()
+    analysis = report._endpoint_analysis(_cells(), endpoint_cells, diagnostic)
+
+    assert analysis.cell_count == 8
+    assert analysis.state_v_c3_count == 26
+    assert analysis.state_v_c3_epoch3_count == 28
+    assert analysis.state_v_c3_epoch3_vs_epoch12_contingency == {
+        "both_success": 26,
+        "epoch3_only": 2,
+        "epoch12_only": 0,
+        "both_failure": 22,
+    }
+    assert analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p == 0.5
+
+    matrix = report._fixed_master_rows(_cells(), endpoint_cells)
+    assert len(matrix) == 26
+    assert next(row for row in matrix if row[:2] == ("V1", "C3"))[-1] == (
+        "26/50 (52%)"
+    )
+    markdown = report.build_markdown(
+        _cells(),
+        _ledger_evidence(),
+        endpoint_cells,
+        diagnostic,
+    )
+    assert "E3 28/50 (56%)" in markdown
+    assert "E12 26/50 (52%)" in markdown
+    assert "exact McNemar 双侧 p=0.5" in markdown
+    assert "不进入 8-cell 主表" in markdown
+
+
+def test_c3_epoch3_diagnostic_requires_strict_endpoint_and_exact_identity() -> None:
+    with pytest.raises(report.CompleteResultsError, match="without the strict"):
+        report._endpoint_analysis(_cells(), None, _c3_epoch3_diagnostic())
+
+    diagnostic = _c3_epoch3_diagnostic()
+    diagnostic["checkpoint_global_step"] = 2_999
+    with pytest.raises(report.CompleteResultsError, match="global-step 3000"):
+        report._endpoint_analysis(
+            _cells(), _endpoint_cells_with_c3_outcomes(), diagnostic
+        )
 
 
 def test_four_version_mean_rows_include_mean_q_for_v0_and_v1() -> None:

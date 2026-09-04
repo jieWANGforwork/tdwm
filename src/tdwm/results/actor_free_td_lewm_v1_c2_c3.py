@@ -5,6 +5,8 @@ historical result ledger.  It accepts the seven-job V1-C2 launcher (which also
 contains the V1-C First-Q2 reference) and one standalone V1-C3 State-V output.
 Every accepted scalar is recomputed from the copied 50-episode boolean
 outcomes, and every copied source file is bound by SHA-256 in the ledger.
+An optional V1-C3 epoch-3 run is preserved as an early diagnostic, never as a
+ninth endpoint cell.
 """
 
 from __future__ import annotations
@@ -51,6 +53,8 @@ ARCHIVE_FILENAMES = (
     "reconciliation_ledger.json",
     "summary.json",
 )
+C3_EPOCH3_DIAGNOSTIC_ID = "v1__c3__state_v_terminal__e03_diagnostic"
+C3_EPOCH3_DIAGNOSTIC_DIRECTORY = f"diagnostics/{C3_EPOCH3_DIAGNOSTIC_ID}"
 
 # These are the two columns added to the historical master table.  C2's five
 # existing score modes retain the historical column names below.
@@ -148,6 +152,15 @@ class ValidatedEndpointStudy:
     c2_evaluation_commit: str
     c3_evaluation_commit: str
     training_artifacts: tuple[TrainingArtifactSet, ...] = ()
+    c3_epoch3_diagnostic: EndpointResultCell | None = None
+
+
+@dataclass(frozen=True)
+class LoadedEndpointExtension:
+    """Eight endpoint cells plus an optional non-endpoint C3 early diagnostic."""
+
+    cells: tuple[EndpointResultCell, ...]
+    c3_epoch3_diagnostic: EndpointResultCell | None = None
 
 
 def _error(context: str, message: str) -> EndpointReconciliationError:
@@ -444,8 +457,12 @@ def _validate_output_dir(
     require_checkpoint_file: bool,
     expected_checkpoint_sha256: str | None = None,
     expected_evaluation_commit: str | None = None,
+    expected_checkpoint_epoch: int | None = None,
+    expected_checkpoint_global_step: int | None = None,
+    expected_formal_completion_required: bool = True,
+    cell_id: str | None = None,
 ) -> EndpointResultCell:
-    context = _cell_id(method_key, raw_score_mode)
+    context = cell_id or _cell_id(method_key, raw_score_mode)
     if not output_dir.is_dir():
         raise _error(context, f"missing output directory {output_dir}")
     hashes = _source_hashes(output_dir, context=context)
@@ -556,8 +573,20 @@ def _validate_output_dir(
         )
 
     checkpoint = _mapping(manifest.get("checkpoint"), context=f"{context}.checkpoint")
-    expected_epoch = 12 if method_key == "v1_c3" else 10
-    expected_step = 12_000 if method_key == "v1_c3" else 127_960
+    expected_epoch = (
+        expected_checkpoint_epoch
+        if expected_checkpoint_epoch is not None
+        else 12
+        if method_key == "v1_c3"
+        else 10
+    )
+    expected_step = (
+        expected_checkpoint_global_step
+        if expected_checkpoint_global_step is not None
+        else 12_000
+        if method_key == "v1_c3"
+        else 127_960
+    )
     _expect(
         checkpoint.get("epoch"), expected_epoch, context=f"{context}.checkpoint.epoch"
     )
@@ -574,9 +603,35 @@ def _validate_output_dir(
     )
     _expect(
         checkpoint.get("formal_completion_required"),
-        True,
+        expected_formal_completion_required,
         context=f"{context}.checkpoint.formal_completion_required",
     )
+    if method_key == "v1_c3" and expected_epoch != 12:
+        _expect(
+            checkpoint.get("requested_checkpoint_epoch"),
+            expected_epoch,
+            context=f"{context}.checkpoint.requested_checkpoint_epoch",
+        )
+        _expect(
+            checkpoint.get("checkpoint_role"),
+            "intermediate_epoch_o50",
+            context=f"{context}.checkpoint.checkpoint_role",
+        )
+        _expect(
+            results.get("checkpoint_epoch"),
+            expected_epoch,
+            context=f"{context}.results.checkpoint_epoch",
+        )
+        _expect(
+            results.get("checkpoint_role"),
+            "intermediate_epoch_o50",
+            context=f"{context}.results.checkpoint_role",
+        )
+        _expect(
+            results.get("formal_completion_required"),
+            False,
+            context=f"{context}.results.formal_completion_required",
+        )
     checkpoint_path = checkpoint.get("path")
     if not isinstance(checkpoint_path, str) or not checkpoint_path:
         raise _error(context, "checkpoint.path must be a nonempty path")
@@ -1071,6 +1126,7 @@ def reconcile_endpoint_results(
     c2_launcher_root: str | Path,
     c2_launcher_manifest: str | Path,
     c3_output_dir: str | Path,
+    c3_epoch3_output_dir: str | Path | None = None,
     c2_training_run: str | Path | None = None,
     c3_training_run: str | Path | None = None,
 ) -> ValidatedEndpointStudy:
@@ -1088,6 +1144,18 @@ def reconcile_endpoint_results(
         raw_score_mode="state_v_terminal",
         require_checkpoint_file=True,
     )
+    c3_epoch3_diagnostic = None
+    if c3_epoch3_output_dir is not None:
+        c3_epoch3_diagnostic = _validate_output_dir(
+            Path(c3_epoch3_output_dir).expanduser().resolve(),
+            method_key="v1_c3",
+            raw_score_mode="state_v_terminal",
+            require_checkpoint_file=True,
+            expected_checkpoint_epoch=3,
+            expected_checkpoint_global_step=3_000,
+            expected_formal_completion_required=False,
+            cell_id=C3_EPOCH3_DIAGNOSTIC_ID,
+        )
     cells = c2_cells + (c3_cell,)
     identities = tuple(cell.identity for cell in cells)
     _expect(
@@ -1099,6 +1167,22 @@ def reconcile_endpoint_results(
         raise _error("endpoint_study", "selection files differ across cells")
     if len({cell.action_normalization_sha256 for cell in cells}) != 1:
         raise _error("endpoint_study", "action normalization differs across cells")
+    if c3_epoch3_diagnostic is not None:
+        _expect(
+            c3_epoch3_diagnostic.selection_sha256,
+            c3_cell.selection_sha256,
+            context="c3_epoch3_diagnostic.selection_sha256",
+        )
+        _expect(
+            c3_epoch3_diagnostic.selection_ranks_sha256,
+            c3_cell.selection_ranks_sha256,
+            context="c3_epoch3_diagnostic.selection_ranks_sha256",
+        )
+        _expect(
+            c3_epoch3_diagnostic.action_normalization_sha256,
+            c3_cell.action_normalization_sha256,
+            context="c3_epoch3_diagnostic.action_normalization_sha256",
+        )
     training_artifacts: list[TrainingArtifactSet] = []
     c2_checkpoint_sha = next(
         cell.checkpoint_sha256 for cell in cells if cell.method_key == "v1_c2"
@@ -1130,11 +1214,15 @@ def reconcile_endpoint_results(
         c2_evaluation_commit=c2_commit,
         c3_evaluation_commit=c3_cell.evaluation_commit,
         training_artifacts=tuple(training_artifacts),
+        c3_epoch3_diagnostic=c3_epoch3_diagnostic,
     )
 
 
-def _cell_document(cell: EndpointResultCell) -> dict[str, Any]:
-    source_directory = f"sources/{cell.cell_id}"
+def _cell_document(
+    cell: EndpointResultCell, *, source_directory: str | None = None
+) -> dict[str, Any]:
+    if source_directory is None:
+        source_directory = f"sources/{cell.cell_id}"
     return {
         "cell_id": cell.cell_id,
         "method_key": cell.method_key,
@@ -1162,10 +1250,72 @@ def _cell_document(cell: EndpointResultCell) -> dict[str, Any]:
     }
 
 
+def _exact_mcnemar_p_two_sided(epoch3_only: int, epoch12_only: int) -> float:
+    """Return the exact two-sided McNemar/binomial p-value for paired outcomes."""
+
+    discordant = epoch3_only + epoch12_only
+    if discordant == 0:
+        return 1.0
+    tail = sum(
+        math.comb(discordant, successes)
+        for successes in range(min(epoch3_only, epoch12_only) + 1)
+    ) / (2**discordant)
+    return min(1.0, 2.0 * tail)
+
+
+def _c3_epoch_comparison(
+    epoch3: EndpointResultCell, epoch12: EndpointResultCell
+) -> dict[str, Any]:
+    both_success = sum(a and b for a, b in zip(epoch3.outcomes, epoch12.outcomes))
+    epoch3_only = sum(a and not b for a, b in zip(epoch3.outcomes, epoch12.outcomes))
+    epoch12_only = sum(not a and b for a, b in zip(epoch3.outcomes, epoch12.outcomes))
+    both_failure = sum(
+        not a and not b for a, b in zip(epoch3.outcomes, epoch12.outcomes)
+    )
+    return {
+        "pair_count": EPISODES,
+        "epoch3_success_count": epoch3.success_count,
+        "epoch12_success_count": epoch12.success_count,
+        "both_success": both_success,
+        "epoch3_only": epoch3_only,
+        "epoch12_only": epoch12_only,
+        "both_failure": both_failure,
+        "discordant_pairs": epoch3_only + epoch12_only,
+        "exact_mcnemar_p_two_sided": _exact_mcnemar_p_two_sided(
+            epoch3_only, epoch12_only
+        ),
+    }
+
+
+def _diagnostics_document(
+    cells: Sequence[EndpointResultCell],
+    diagnostic: EndpointResultCell | None,
+) -> dict[str, Any]:
+    if diagnostic is None:
+        return {}
+    epoch12 = next(
+        cell
+        for cell in cells
+        if cell.identity == ("v1_c3", "state_v")
+    )
+    return {
+        "v1_c3_epoch3_state_v": {
+            "purpose": "early_epoch_diagnostic_not_endpoint",
+            "excluded_from_endpoint_cell_count": True,
+            "cell": _cell_document(
+                diagnostic, source_directory=C3_EPOCH3_DIAGNOSTIC_DIRECTORY
+            ),
+            "paired_comparison_to_v1_c3_epoch12": _c3_epoch_comparison(
+                diagnostic, epoch12
+            ),
+        }
+    }
+
+
 def build_ledger(study: ValidatedEndpointStudy) -> dict[str, Any]:
     """Build the deterministic eight-cell, 400-outcome reconciliation ledger."""
 
-    return {
+    ledger = {
         "schema_version": SCHEMA_VERSION,
         "source": SOURCE,
         "cell_count": len(study.cells),
@@ -1207,6 +1357,10 @@ def build_ledger(study: ValidatedEndpointStudy) -> dict[str, Any]:
         },
         "cells": [_cell_document(cell) for cell in study.cells],
     }
+    diagnostics = _diagnostics_document(study.cells, study.c3_epoch3_diagnostic)
+    if diagnostics:
+        ledger["diagnostics"] = diagnostics
+    return ledger
 
 
 _CSV_FIELDS = (
@@ -1257,7 +1411,10 @@ def _csv_bytes(cells: Sequence[EndpointResultCell]) -> bytes:
     return stream.getvalue().encode()
 
 
-def _summary_document(cells: Sequence[EndpointResultCell]) -> dict[str, Any]:
+def _summary_document(
+    cells: Sequence[EndpointResultCell],
+    c3_epoch3_diagnostic: EndpointResultCell | None = None,
+) -> dict[str, Any]:
     matrix: dict[str, dict[str, Any]] = {}
     for cell in cells:
         matrix.setdefault(cell.method_key, {})[cell.score_mode] = {
@@ -1266,7 +1423,7 @@ def _summary_document(cells: Sequence[EndpointResultCell]) -> dict[str, Any]:
             "success_rate": cell.success_rate,
             "success_rate_percent": cell.success_rate_percent,
         }
-    return {
+    summary = {
         "schema_version": SCHEMA_VERSION,
         "source": SOURCE,
         "cell_count": len(cells),
@@ -1275,6 +1432,10 @@ def _summary_document(cells: Sequence[EndpointResultCell]) -> dict[str, Any]:
         "score_modes": list(ALL_ENDPOINT_CELL_SCORE_MODES),
         "matrix": matrix,
     }
+    diagnostics = _diagnostics_document(cells, c3_epoch3_diagnostic)
+    if diagnostics:
+        summary["diagnostics"] = diagnostics
+    return summary
 
 
 def _json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -1285,13 +1446,16 @@ def _generated_payloads(study: ValidatedEndpointStudy) -> Mapping[str, bytes]:
     return {
         "all_o50_results.csv": _csv_bytes(study.cells),
         "reconciliation_ledger.json": _json_bytes(build_ledger(study)),
-        "summary.json": _json_bytes(_summary_document(study.cells)),
+        "summary.json": _json_bytes(
+            _summary_document(study.cells, study.c3_epoch3_diagnostic)
+        ),
     }
 
 
 def _expected_archive_file_set(
     cells: Sequence[EndpointResultCell],
     training_artifacts: Sequence[TrainingArtifactSet] = (),
+    c3_epoch3_diagnostic: EndpointResultCell | None = None,
 ) -> set[str]:
     expected = set(ARCHIVE_FILENAMES)
     for cell in cells:
@@ -1301,6 +1465,11 @@ def _expected_archive_file_set(
     for artifact in training_artifacts:
         expected.update(
             f"training/{artifact.method_key}/{name}" for name in artifact.files
+        )
+    if c3_epoch3_diagnostic is not None:
+        expected.update(
+            f"{C3_EPOCH3_DIAGNOSTIC_DIRECTORY}/{name}"
+            for name in REQUIRED_OUTPUT_FILES
         )
     return expected
 
@@ -1321,7 +1490,11 @@ def write_archive(
 
     root = Path(artifact_dir).expanduser().resolve()
     payloads = _generated_payloads(study)
-    expected_files = _expected_archive_file_set(study.cells, study.training_artifacts)
+    expected_files = _expected_archive_file_set(
+        study.cells,
+        study.training_artifacts,
+        study.c3_epoch3_diagnostic,
+    )
     if check:
         if not root.is_dir():
             raise _error("archive", f"missing artifact directory {root}")
@@ -1338,6 +1511,14 @@ def write_archive(
                 if archived.read_bytes() != source.read_bytes():
                     raise _error(
                         "archive", f"copied training source differs: {archived}"
+                    )
+        if study.c3_epoch3_diagnostic is not None:
+            source = Path(study.c3_epoch3_diagnostic.source_directory)
+            for name in REQUIRED_OUTPUT_FILES:
+                archived = root / C3_EPOCH3_DIAGNOSTIC_DIRECTORY / name
+                if archived.read_bytes() != (source / name).read_bytes():
+                    raise _error(
+                        "archive", f"copied diagnostic source differs: {archived}"
                     )
         for name, payload in payloads.items():
             if (root / name).read_bytes() != payload:
@@ -1360,6 +1541,12 @@ def write_archive(
             destination.mkdir(parents=True, exist_ok=False)
             for name, source in artifact.files.items():
                 shutil.copyfile(source, destination / name)
+        if study.c3_epoch3_diagnostic is not None:
+            destination = temporary / C3_EPOCH3_DIAGNOSTIC_DIRECTORY
+            destination.mkdir(parents=True, exist_ok=False)
+            source = Path(study.c3_epoch3_diagnostic.source_directory)
+            for name in REQUIRED_OUTPUT_FILES:
+                shutil.copyfile(source / name, destination / name)
         for name, payload in payloads.items():
             path = temporary / name
             path.write_bytes(payload)
@@ -1372,7 +1559,15 @@ def write_archive(
     return tuple(root / name for name in ARCHIVE_FILENAMES)
 
 
-def _cell_from_document(raw: Mapping[str, Any], *, context: str) -> EndpointResultCell:
+def _cell_from_document(
+    raw: Mapping[str, Any],
+    *,
+    context: str,
+    expected_cell_id: str | None = None,
+    expected_raw_score_mode: str | None = None,
+    expected_checkpoint_epoch: int | None = None,
+    expected_checkpoint_global_step: int | None = None,
+) -> EndpointResultCell:
     expected_keys = {
         "cell_id",
         "method_key",
@@ -1426,8 +1621,14 @@ def _cell_from_document(raw: Mapping[str, Any], *, context: str) -> EndpointResu
         or not isinstance(raw_mode, str)
     ):
         raise _error(context, "method and score identities must be strings")
-    expected_cell_id = _cell_id(method_key, raw_mode)
-    _expect(raw.get("cell_id"), expected_cell_id, context=f"{context}.cell_id")
+    resolved_cell_id = expected_cell_id or _cell_id(method_key, raw_mode)
+    _expect(raw.get("cell_id"), resolved_cell_id, context=f"{context}.cell_id")
+    if expected_raw_score_mode is not None:
+        _expect(
+            raw_mode,
+            expected_raw_score_mode,
+            context=f"{context}.raw_score_mode",
+        )
     _expect(
         score_mode,
         _normalized_score_mode(raw_mode),
@@ -1459,8 +1660,20 @@ def _cell_from_document(raw: Mapping[str, Any], *, context: str) -> EndpointResu
         f"actor_free_td_lewm_v1_{variant}",
         context=f"{context}.method",
     )
-    expected_epoch = 12 if method_key == "v1_c3" else 10
-    expected_step = 12_000 if method_key == "v1_c3" else 127_960
+    expected_epoch = (
+        expected_checkpoint_epoch
+        if expected_checkpoint_epoch is not None
+        else 12
+        if method_key == "v1_c3"
+        else 10
+    )
+    expected_step = (
+        expected_checkpoint_global_step
+        if expected_checkpoint_global_step is not None
+        else 12_000
+        if method_key == "v1_c3"
+        else 127_960
+    )
     for key, expected in (
         ("checkpoint_epoch", expected_epoch),
         ("checkpoint_global_step", expected_step),
@@ -1482,7 +1695,7 @@ def _cell_from_document(raw: Mapping[str, Any], *, context: str) -> EndpointResu
             context=f"{context}.checkpoint_sha256",
         )
     return EndpointResultCell(
-        cell_id=expected_cell_id,
+        cell_id=resolved_cell_id,
         method_key=method_key,
         method=str(raw.get("method")),
         variant=variant,
@@ -1508,10 +1721,10 @@ def _cell_from_document(raw: Mapping[str, Any], *, context: str) -> EndpointResu
     )
 
 
-def load_endpoint_extension_ledger(
+def load_endpoint_extension(
     path: str | Path,
-) -> tuple[EndpointResultCell, ...]:
-    """Load and revalidate all eight cells from a self-contained archive.
+) -> LoadedEndpointExtension:
+    """Load eight endpoint cells and an optional C3 early diagnostic.
 
     ``path`` may name the artifact directory or its
     ``reconciliation_ledger.json`` file.  Partial ledgers are never returned.
@@ -1523,9 +1736,7 @@ def load_endpoint_extension_ledger(
     )
     root = ledger_path.parent
     ledger, _ = _read_json(ledger_path, context="endpoint_ledger")
-    _expect(
-        set(ledger),
-        {
+    required_ledger_keys = {
             "schema_version",
             "source",
             "cell_count",
@@ -1544,9 +1755,17 @@ def load_endpoint_extension_ledger(
             "sources",
             "training_sources",
             "cells",
-        },
-        context="endpoint_ledger.keys",
-    )
+    }
+    ledger_keys = set(ledger)
+    if ledger_keys not in (
+        required_ledger_keys,
+        required_ledger_keys | {"diagnostics"},
+    ):
+        raise _error(
+            "endpoint_ledger.keys",
+            f"found {sorted(ledger_keys)!r}, expected the strict endpoint keys "
+            "with at most one diagnostics section",
+        )
     header = {
         "schema_version": SCHEMA_VERSION,
         "source": SOURCE,
@@ -1589,6 +1808,74 @@ def load_endpoint_extension_ledger(
         expected_commits,
         context="endpoint_ledger.evaluation_commits",
     )
+    c3_epoch3_diagnostic: EndpointResultCell | None = None
+    if "diagnostics" in ledger:
+        diagnostics = _mapping(
+            ledger.get("diagnostics"), context="endpoint_ledger.diagnostics"
+        )
+        _expect(
+            set(diagnostics),
+            {"v1_c3_epoch3_state_v"},
+            context="endpoint_ledger.diagnostics.keys",
+        )
+        raw_diagnostic = _mapping(
+            diagnostics["v1_c3_epoch3_state_v"],
+            context="endpoint_ledger.diagnostics.v1_c3_epoch3_state_v",
+        )
+        _expect(
+            set(raw_diagnostic),
+            {
+                "purpose",
+                "excluded_from_endpoint_cell_count",
+                "cell",
+                "paired_comparison_to_v1_c3_epoch12",
+            },
+            context="endpoint_ledger.diagnostics.v1_c3_epoch3_state_v.keys",
+        )
+        _expect(
+            raw_diagnostic.get("purpose"),
+            "early_epoch_diagnostic_not_endpoint",
+            context="endpoint_ledger.diagnostics.v1_c3_epoch3_state_v.purpose",
+        )
+        _expect(
+            raw_diagnostic.get("excluded_from_endpoint_cell_count"),
+            True,
+            context=(
+                "endpoint_ledger.diagnostics.v1_c3_epoch3_state_v."
+                "excluded_from_endpoint_cell_count"
+            ),
+        )
+        c3_epoch3_diagnostic = _cell_from_document(
+            _mapping(
+                raw_diagnostic.get("cell"),
+                context="endpoint_ledger.diagnostics.v1_c3_epoch3_state_v.cell",
+            ),
+            context="endpoint_ledger.diagnostics.v1_c3_epoch3_state_v.cell",
+            expected_cell_id=C3_EPOCH3_DIAGNOSTIC_ID,
+            expected_raw_score_mode="state_v_terminal",
+            expected_checkpoint_epoch=3,
+            expected_checkpoint_global_step=3_000,
+        )
+        _expect(
+            c3_epoch3_diagnostic.identity,
+            ("v1_c3", "state_v"),
+            context="endpoint_ledger.diagnostics.v1_c3_epoch3_state_v.identity",
+        )
+        epoch12 = next(
+            cell for cell in cells if cell.identity == ("v1_c3", "state_v")
+        )
+        comparison = _mapping(
+            raw_diagnostic.get("paired_comparison_to_v1_c3_epoch12"),
+            context=(
+                "endpoint_ledger.diagnostics.v1_c3_epoch3_state_v."
+                "paired_comparison_to_v1_c3_epoch12"
+            ),
+        )
+        _expect(
+            dict(comparison),
+            _c3_epoch_comparison(c3_epoch3_diagnostic, epoch12),
+            context="endpoint_ledger.diagnostics.v1_c3_epoch3_state_v.comparison",
+        )
     sources = _mapping(ledger.get("sources"), context="endpoint_ledger.sources")
     _expect(
         set(sources),
@@ -1670,7 +1957,9 @@ def load_endpoint_extension_ledger(
         )
     _expect(
         _archive_file_set(root),
-        _expected_archive_file_set(cells, archived_training),
+        _expected_archive_file_set(
+            cells, archived_training, c3_epoch3_diagnostic
+        ),
         context="endpoint_archive.file_set",
     )
     for artifact in archived_training:
@@ -1683,6 +1972,65 @@ def load_endpoint_extension_ledger(
                 _file_sha256(path_value),
                 artifact.files_sha256[name],
                 context=f"endpoint_archive.training.{artifact.method_key}.{name}",
+            )
+
+    if c3_epoch3_diagnostic is not None:
+        diagnostic_source = root / c3_epoch3_diagnostic.source_directory
+        if not _path_is_within(diagnostic_source, root / "diagnostics"):
+            raise _error(
+                C3_EPOCH3_DIAGNOSTIC_ID,
+                "diagnostic source directory escapes archive diagnostics",
+            )
+        _expect(
+            diagnostic_source.resolve(),
+            (root / C3_EPOCH3_DIAGNOSTIC_DIRECTORY).resolve(),
+            context=f"{C3_EPOCH3_DIAGNOSTIC_ID}.source_directory",
+        )
+        actual_hashes = _source_hashes(
+            diagnostic_source, context=C3_EPOCH3_DIAGNOSTIC_ID
+        )
+        _expect(
+            actual_hashes,
+            dict(c3_epoch3_diagnostic.source_files_sha256),
+            context=f"{C3_EPOCH3_DIAGNOSTIC_ID}.source_files_sha256",
+        )
+        actual_diagnostic = _validate_output_dir(
+            diagnostic_source,
+            method_key="v1_c3",
+            raw_score_mode="state_v_terminal",
+            require_checkpoint_file=False,
+            expected_checkpoint_sha256=c3_epoch3_diagnostic.checkpoint_sha256,
+            expected_evaluation_commit=c3_epoch3_diagnostic.evaluation_commit,
+            expected_checkpoint_epoch=3,
+            expected_checkpoint_global_step=3_000,
+            expected_formal_completion_required=False,
+            cell_id=C3_EPOCH3_DIAGNOSTIC_ID,
+        )
+        for field in (
+            "cell_id",
+            "method_key",
+            "method",
+            "variant",
+            "score_mode",
+            "raw_score_mode",
+            "outcomes",
+            "success_count",
+            "success_rate",
+            "success_rate_percent",
+            "checkpoint_epoch",
+            "checkpoint_global_step",
+            "checkpoint_path",
+            "parent_v1_c_checkpoint_sha256",
+            "training_seed",
+            "planning_seed",
+            "selection_sha256",
+            "selection_ranks_sha256",
+            "action_normalization_sha256",
+        ):
+            _expect(
+                getattr(actual_diagnostic, field),
+                getattr(c3_epoch3_diagnostic, field),
+                context=f"{C3_EPOCH3_DIAGNOSTIC_ID}.{field}",
             )
 
     validated: list[EndpointResultCell] = []
@@ -1738,19 +2086,33 @@ def load_endpoint_extension_ledger(
     if (root / "all_o50_results.csv").read_bytes() != _csv_bytes(validated_tuple):
         raise _error("endpoint_archive", "all_o50_results.csv differs from ledger")
     if (root / "summary.json").read_bytes() != _json_bytes(
-        _summary_document(validated_tuple)
+        _summary_document(validated_tuple, c3_epoch3_diagnostic)
     ):
         raise _error("endpoint_archive", "summary.json differs from ledger")
-    return validated_tuple
+    return LoadedEndpointExtension(
+        cells=validated_tuple,
+        c3_epoch3_diagnostic=c3_epoch3_diagnostic,
+    )
+
+
+def load_endpoint_extension_ledger(
+    path: str | Path,
+) -> tuple[EndpointResultCell, ...]:
+    """Load the strict eight-cell endpoint tuple, excluding diagnostics."""
+
+    return load_endpoint_extension(path).cells
 
 
 __all__ = [
     "ACTION_NORMALIZATION_SHA256",
     "ALL_ENDPOINT_CELL_SCORE_MODES",
+    "C3_EPOCH3_DIAGNOSTIC_DIRECTORY",
+    "C3_EPOCH3_DIAGNOSTIC_ID",
     "ENDPOINT_SCORE_MODES",
     "EXPECTED_ENDPOINT_IDENTITIES",
     "EndpointReconciliationError",
     "EndpointResultCell",
+    "LoadedEndpointExtension",
     "PARENT_V1_C_CHECKPOINT_SHA256",
     "SELECTION_RANKS_SHA256",
     "SELECTION_SHA256",
@@ -1758,6 +2120,7 @@ __all__ = [
     "ValidatedEndpointStudy",
     "build_ledger",
     "load_endpoint_extension_ledger",
+    "load_endpoint_extension",
     "reconcile_endpoint_results",
     "write_archive",
 ]

@@ -36,6 +36,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Standalone formal V1-C3 State-V O50 output directory.",
     )
     parser.add_argument(
+        "--c3-epoch3-output-dir",
+        help=(
+            "Optional V1-C3 epoch-3 State-V O50 diagnostic. It is archived "
+            "separately and never changes the strict eight-cell endpoint count."
+        ),
+    )
+    parser.add_argument(
         "--c2-training-run",
         help="Optional completed formal V1-C2 run to preserve its loss metrics.",
     )
@@ -68,6 +75,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         c2_launcher_root=args.c2_launcher_root,
         c2_launcher_manifest=args.c2_launcher_manifest,
         c3_output_dir=args.c3_output_dir,
+        c3_epoch3_output_dir=args.c3_epoch3_output_dir,
         c2_training_run=args.c2_training_run,
         c3_training_run=args.c3_training_run,
     )

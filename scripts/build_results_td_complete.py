@@ -310,6 +310,9 @@ class EndpointAnalysis:
     first_q2_parent_count: int | None
     first_q2_c2_count: int | None
     state_v_c3_count: int | None
+    state_v_c3_epoch3_count: int | None
+    state_v_c3_epoch3_vs_epoch12_contingency: Mapping[str, int] | None
+    state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p: float | None
 
 
 def _sha(value: str, *, context: str, allow_empty: bool = False) -> str:
@@ -905,6 +908,47 @@ def _endpoint_index(endpoint_cells: Sequence[Any] | None) -> dict[tuple[str, str
     return indexed
 
 
+def _c3_epoch3_diagnostic_outcomes(diagnostic: Any | None) -> tuple[bool, ...] | None:
+    if diagnostic is None:
+        return None
+    method = str(_endpoint_field(diagnostic, "method_key"))
+    raw_mode = str(_endpoint_field(diagnostic, "score_mode"))
+    mode = _ENDPOINT_MODE_ALIASES.get(raw_mode, raw_mode)
+    epoch = int(_endpoint_field(diagnostic, "checkpoint_epoch"))
+    step = int(_endpoint_field(diagnostic, "checkpoint_global_step"))
+    if (method, mode, epoch, step) != ("v1_c3", STATE_V_MODE, 3, 3_000):
+        raise CompleteResultsError(
+            "C3 early diagnostic must be V1-C3 State-V at E3/global-step 3000."
+        )
+    outcomes = _endpoint_field(diagnostic, "outcomes")
+    if (
+        not isinstance(outcomes, (list, tuple))
+        or len(outcomes) != EPISODES
+        or any(not isinstance(value, bool) for value in outcomes)
+    ):
+        raise CompleteResultsError(
+            "C3 early diagnostic must contain exactly 50 Boolean outcomes."
+        )
+    outcome_tuple = tuple(outcomes)
+    count = int(_endpoint_field(diagnostic, "success_count"))
+    if count != sum(outcome_tuple):
+        raise CompleteResultsError(
+            "C3 early diagnostic success_count differs from its outcomes."
+        )
+    return outcome_tuple
+
+
+def _exact_mcnemar_p_two_sided(left_only: int, right_only: int) -> float:
+    discordant = left_only + right_only
+    if discordant == 0:
+        return 1.0
+    tail = sum(
+        math.comb(discordant, successes)
+        for successes in range(min(left_only, right_only) + 1)
+    ) / (2**discordant)
+    return min(1.0, 2.0 * tail)
+
+
 def _master_row_metadata() -> tuple[tuple[str, str], ...]:
     return tuple(
         (version, variant)
@@ -1082,11 +1126,31 @@ def _fixed_version_winner_rows(
 
 
 def _endpoint_analysis(
-    cells: Sequence[ResultCell], endpoint_cells: Sequence[Any] | None
+    cells: Sequence[ResultCell],
+    endpoint_cells: Sequence[Any] | None,
+    c3_epoch3_diagnostic: Any | None = None,
 ) -> EndpointAnalysis:
     endpoint = _endpoint_index(endpoint_cells)
     if not endpoint:
-        return EndpointAnalysis(False, 0, {}, 0, 0, 0, None, None, None, None)
+        if c3_epoch3_diagnostic is not None:
+            raise CompleteResultsError(
+                "C3 E3 diagnostic cannot be reported without the strict endpoint ledger."
+            )
+        return EndpointAnalysis(
+            False,
+            0,
+            {},
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
     deltas: dict[str, int] = {}
     for mode in ALL_CONTROLLED_MODES:
         parent = int(
@@ -1104,6 +1168,37 @@ def _endpoint_analysis(
     )
     deltas[FIRST_Q2_MODE] = c2_first - parent_first
     values = tuple(deltas.values())
+    epoch12_cell = endpoint[("v1_c3", STATE_V_MODE)]
+    epoch12_count = int(_endpoint_field(epoch12_cell, "success_count"))
+    epoch3_outcomes = _c3_epoch3_diagnostic_outcomes(c3_epoch3_diagnostic)
+    epoch3_count: int | None = None
+    contingency: Mapping[str, int] | None = None
+    mcnemar_p: float | None = None
+    if epoch3_outcomes is not None:
+        epoch12_outcomes = _endpoint_field(epoch12_cell, "outcomes")
+        if (
+            not isinstance(epoch12_outcomes, (list, tuple))
+            or len(epoch12_outcomes) != EPISODES
+            or any(not isinstance(value, bool) for value in epoch12_outcomes)
+        ):
+            raise CompleteResultsError(
+                "C3 E12 endpoint must expose 50 Boolean outcomes for paired E3 analysis."
+            )
+        epoch12_outcomes = tuple(epoch12_outcomes)
+        epoch3_count = sum(epoch3_outcomes)
+        both_success = sum(a and b for a, b in zip(epoch3_outcomes, epoch12_outcomes))
+        epoch3_only = sum(a and not b for a, b in zip(epoch3_outcomes, epoch12_outcomes))
+        epoch12_only = sum(not a and b for a, b in zip(epoch3_outcomes, epoch12_outcomes))
+        both_failure = sum(
+            not a and not b for a, b in zip(epoch3_outcomes, epoch12_outcomes)
+        )
+        contingency = {
+            "both_success": both_success,
+            "epoch3_only": epoch3_only,
+            "epoch12_only": epoch12_only,
+            "both_failure": both_failure,
+        }
+        mcnemar_p = _exact_mcnemar_p_two_sided(epoch3_only, epoch12_only)
     return EndpointAnalysis(
         available=True,
         cell_count=len(endpoint),
@@ -1114,9 +1209,10 @@ def _endpoint_analysis(
         c2_mean_delta_percent=2.0 * sum(values) / len(values),
         first_q2_parent_count=parent_first,
         first_q2_c2_count=c2_first,
-        state_v_c3_count=int(
-            _endpoint_field(endpoint[("v1_c3", STATE_V_MODE)], "success_count")
-        ),
+        state_v_c3_count=epoch12_count,
+        state_v_c3_epoch3_count=epoch3_count,
+        state_v_c3_epoch3_vs_epoch12_contingency=contingency,
+        state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p=mcnemar_p,
     )
 
 
@@ -1389,9 +1485,12 @@ def build_markdown(
     cells: Sequence[ResultCell],
     ledger_evidence: LedgerEvidence,
     endpoint_cells: Sequence[Any] | None = None,
+    c3_epoch3_diagnostic: Any | None = None,
 ) -> str:
     analysis = _fixed_analysis(cells)
-    endpoint_analysis = _endpoint_analysis(cells, endpoint_cells)
+    endpoint_analysis = _endpoint_analysis(
+        cells, endpoint_cells, c3_epoch3_diagnostic
+    )
     f_plus_g_winner = _winner_result(analysis, "f_plus_g")
     overall_winner = (
         f"{_compact_join(analysis.overall_winners)}: {analysis.overall_best_count}/50 "
@@ -1642,6 +1741,15 @@ def build_markdown(
             f"C2 在 6 个可比评分上为 {endpoint_analysis.c2_improved} 升 / {endpoint_analysis.c2_tied} 平 / {endpoint_analysis.c2_harmed} 降，平均变化 {endpoint_analysis.c2_mean_delta_percent:+.1f} pp。C3 的独立 State-V endpoint 为 {endpoint_analysis.state_v_c3_count}/50 ({endpoint_analysis.state_v_c3_count * 2}%)。这些结论只在严格 8-cell ledger 到齐后由实际 outcome 生成。",
             "",
         ]
+        if endpoint_analysis.state_v_c3_epoch3_count is not None:
+            contingency = (
+                endpoint_analysis.state_v_c3_epoch3_vs_epoch12_contingency
+            )
+            assert contingency is not None
+            lines += [
+                f"C3 的同一组 50 个 pair 早期诊断为 E3 {endpoint_analysis.state_v_c3_epoch3_count}/50 ({endpoint_analysis.state_v_c3_epoch3_count * 2}%)，最终 endpoint 为 E12 {endpoint_analysis.state_v_c3_count}/50 ({endpoint_analysis.state_v_c3_count * 2}%)。配对列联为：两者均成功 {contingency['both_success']}、仅 E3 成功 {contingency['epoch3_only']}、仅 E12 成功 {contingency['epoch12_only']}、两者均失败 {contingency['both_failure']}；exact McNemar 双侧 p={endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p:.6g}。E3 只作为诊断，不进入 8-cell 主表或 endpoint 计数。",
+                "",
+            ]
     else:
         lines += [
             "V1-C First-Q2、V1-C2 的六种评分和 V1-C3 State-V 共 8 格尚未提供严格 endpoint ledger；主矩阵保留中性 `—`，本节不生成数值比较或改写原 477-cell 结论。",
@@ -2028,6 +2136,7 @@ def build_docx(
     ledger_evidence: LedgerEvidence,
     endpoint_cells: Sequence[Any] | None = None,
     *,
+    c3_epoch3_diagnostic: Any | None = None,
     v0_training_chart: bytes,
     v2_training_chart: bytes,
     training_chart: bytes,
@@ -2043,7 +2152,9 @@ def build_docx(
         ) from exc
 
     analysis = _fixed_analysis(cells)
-    endpoint_analysis = _endpoint_analysis(cells, endpoint_cells)
+    endpoint_analysis = _endpoint_analysis(
+        cells, endpoint_cells, c3_epoch3_diagnostic
+    )
     f_plus_g_winner = _winner_result(analysis, "f_plus_g")
     overall_winner = (
         f"{_compact_join(analysis.overall_winners)}: {analysis.overall_best_count}/50 "
@@ -2370,6 +2481,25 @@ def build_docx(
             f"({endpoint_analysis.state_v_c3_count * 2}%).",
             bold=True,
         )
+        if endpoint_analysis.state_v_c3_epoch3_count is not None:
+            contingency = (
+                endpoint_analysis.state_v_c3_epoch3_vs_epoch12_contingency
+            )
+            assert contingency is not None
+            _add_body(
+                document,
+                f"On the identical 50 pairs, the C3 early diagnostic is E3 "
+                f"{endpoint_analysis.state_v_c3_epoch3_count}/50 "
+                f"({endpoint_analysis.state_v_c3_epoch3_count * 2}%) versus the "
+                f"final E12 endpoint {endpoint_analysis.state_v_c3_count}/50 "
+                f"({endpoint_analysis.state_v_c3_count * 2}%). Paired outcomes: "
+                f"both success {contingency['both_success']}, E3 only "
+                f"{contingency['epoch3_only']}, E12 only "
+                f"{contingency['epoch12_only']}, both failure "
+                f"{contingency['both_failure']}; exact two-sided McNemar "
+                f"p={endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p:.6g}. "
+                "E3 is diagnostic only and is excluded from the eight-cell master table.",
+            )
     else:
         _add_body(
             document,
@@ -2832,12 +2962,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     cells = load_complete_ledger(args.ledger)
     ledger_evidence = load_ledger_evidence(args.ledger, args.reconciliation_ledger)
     endpoint_cells: Sequence[Any] | None = None
+    c3_epoch3_diagnostic: Any | None = None
     if args.endpoint_extension_ledger is not None:
         from tdwm.results.actor_free_td_lewm_v1_c2_c3 import (
-            load_endpoint_extension_ledger,
+            load_endpoint_extension,
         )
 
-        endpoint_cells = load_endpoint_extension_ledger(args.endpoint_extension_ledger)
+        endpoint_extension = load_endpoint_extension(args.endpoint_extension_ledger)
+        endpoint_cells = endpoint_extension.cells
+        c3_epoch3_diagnostic = endpoint_extension.c3_epoch3_diagnostic
     if args.validate_only:
         endpoint_message = (
             " and 8 strict endpoint cells"
@@ -2866,11 +2999,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     training_chart = v2_report.build_training_loss_chart(base_inputs)
     score_chart = v2_report.build_new_score_chart(base_inputs)
-    markdown = build_markdown(cells, ledger_evidence, endpoint_cells)
+    markdown = build_markdown(
+        cells,
+        ledger_evidence,
+        endpoint_cells,
+        c3_epoch3_diagnostic,
+    )
     document = build_docx(
         cells,
         ledger_evidence,
         endpoint_cells,
+        c3_epoch3_diagnostic=c3_epoch3_diagnostic,
         v0_training_chart=v0_training_chart,
         v2_training_chart=v2_training_chart,
         training_chart=training_chart,
