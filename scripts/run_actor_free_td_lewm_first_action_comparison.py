@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the isolated first-action and V2 rollout-mean inference comparison.
+"""Run the isolated first-action and rollout-mean inference comparison.
 
 This launcher owns evaluation orchestration only.  It never trains a model,
 selects an alpha, or writes into the historical V0/V1/V2 result bundles.
@@ -36,6 +36,19 @@ ROLLOUT_MEAN_METADATA = {
     "state_source_for_q2_to_q5": "online_lewm_rollout_predicted_states",
     "f_goal_distance_used": False,
 }
+ROLLOUT_MEAN_METADATA_BY_VERSION = {
+    "v0": {
+        **ROLLOUT_MEAN_METADATA,
+        "state_source_for_q1": "current_frozen_lewm_encoder_state",
+        "state_source_for_q2_to_q5": "frozen_lewm_rollout_predicted_states",
+    },
+    "v1": {
+        **ROLLOUT_MEAN_METADATA,
+        "state_source_for_q1": "current_frozen_lewm_encoder_state",
+        "state_source_for_q2_to_q5": "frozen_lewm_rollout_predicted_states",
+    },
+    "v2": ROLLOUT_MEAN_METADATA,
+}
 ROLLOUT_MEAN_INFERENCE_METADATA = {
     "f_transition_used": True,
     "f_goal_distance_used": False,
@@ -43,6 +56,20 @@ ROLLOUT_MEAN_INFERENCE_METADATA = {
     "rollout_horizon": 5,
     "executed_action_block": "first_block_only",
     "replanning": "every_action_block",
+}
+ROLLOUT_MEAN_INFERENCE_METADATA_BY_VERSION = {
+    version: {
+        **ROLLOUT_MEAN_INFERENCE_METADATA,
+        "state_source_for_q1": metadata["state_source_for_q1"],
+        "state_source_for_q2_to_q5": metadata["state_source_for_q2_to_q5"],
+        "g_aggregation": "mean_over_5_blocks",
+    }
+    for version, metadata in ROLLOUT_MEAN_METADATA_BY_VERSION.items()
+}
+ROLLOUT_MEAN_ACTION_PROCESSING_BY_VERSION = {
+    "v0": "normalized_raw_25d_action_block",
+    "v1": "frozen_shared_lewm_action_encoder_to_192d",
+    "v2": "online_shared_lewm_action_encoder_to_192d",
 }
 REQUIRED_OUTPUT_FILES = (
     "results.json",
@@ -84,6 +111,24 @@ def canonical_json_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def file_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_optional_sha256(value: str | None, *, label: str) -> str | None:
+    if value is None:
+        return None
+    if len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ValueError(f"{label} must be a lowercase SHA-256 digest.")
+    return value
+
+
 def normalize_alpha(value: float) -> float:
     if isinstance(value, bool):
         raise ValueError("alpha must be finite and non-negative.")
@@ -109,6 +154,7 @@ def _unique_alphas(values: Sequence[float]) -> tuple[float, ...]:
 @dataclass(frozen=True)
 class StagePlan:
     stage: str
+    versions: tuple[str, ...]
     variants: tuple[str, ...]
     score_modes: tuple[str, ...]
     v2_only_score_modes: tuple[str, ...]
@@ -118,12 +164,19 @@ class StagePlan:
 def resolve_stage_plan(
     *,
     stage: str,
+    versions: Sequence[str] | None = None,
     variants: Sequence[str] | None,
     score_modes: Sequence[str] | None,
     alphas: Sequence[float] | None,
 ) -> StagePlan:
     if stage not in {"smoke", "development", "formal"}:
         raise ValueError(f"Unsupported stage {stage!r}.")
+    selected_versions = tuple(versions or VERSIONS)
+    if not selected_versions or len(set(selected_versions)) != len(selected_versions):
+        raise ValueError("versions must be a non-empty unique list.")
+    unsupported_versions = set(selected_versions) - set(VERSIONS)
+    if unsupported_versions:
+        raise ValueError(f"Unsupported versions: {sorted(unsupported_versions)}")
     selected_variants = tuple(variants or (("c",) if stage == "smoke" else VARIANTS))
     if not selected_variants or len(set(selected_variants)) != len(selected_variants):
         raise ValueError("variants must be a non-empty unique list.")
@@ -140,18 +193,27 @@ def resolve_stage_plan(
             raise ValueError(
                 f"Unsupported formal score modes: {sorted(unsupported_modes)}"
             )
-        selected_modes = tuple(
-            mode for mode in requested_modes if mode in FORMAL_SCORE_MODES
-        )
-        selected_v2_only_modes = tuple(
-            mode for mode in requested_modes if mode in V2_ONLY_FORMAL_SCORE_MODES
-        )
-        if alphas is None or len(alphas) != 1:
-            raise ValueError(
-                "formal comparison requires exactly one explicit --alpha; "
-                "this launcher never selects alpha."
-            )
-        selected_alphas = _unique_alphas(alphas)
+        if score_modes is None:
+            # Preserve the historical default 66-cell comparison.  Explicit
+            # score selection opts into newly supported cross-version modes.
+            selected_modes = FORMAL_SCORE_MODES
+            selected_v2_only_modes = V2_ONLY_FORMAL_SCORE_MODES
+        else:
+            selected_modes = requested_modes
+            selected_v2_only_modes = ()
+        if FIRST_ACTION_MODE in selected_modes:
+            if alphas is None or len(alphas) != 1:
+                raise ValueError(
+                    "formal comparison containing f_plus_g_first requires "
+                    "exactly one explicit --alpha; this launcher never selects alpha."
+                )
+            selected_alphas = _unique_alphas(alphas)
+        else:
+            if alphas not in (None, (), []):
+                raise ValueError(
+                    "--alpha is only valid when f_plus_g_first is selected."
+                )
+            selected_alphas = ()
     elif stage == "development":
         if score_modes not in (None, (), [FIRST_ACTION_MODE], (FIRST_ACTION_MODE,)):
             raise ValueError("development runs only f_plus_g_first.")
@@ -169,6 +231,7 @@ def resolve_stage_plan(
 
     return StagePlan(
         stage=stage,
+        versions=selected_versions,
         variants=selected_variants,
         score_modes=selected_modes,
         v2_only_score_modes=selected_v2_only_modes,
@@ -252,10 +315,8 @@ def evaluation_config_path(
 ) -> Path:
     repository_path = Path(repository).expanduser().resolve()
     if score_mode == ROLLOUT_MEAN_MODE:
-        if version != "v2":
-            raise ValueError(f"{ROLLOUT_MEAN_MODE} is V2-only.")
         filename = (
-            f"actor_free_td_lewm_v2_{variant}_cube_checkpoint_o50_"
+            f"actor_free_td_lewm_{version}_{variant}_cube_checkpoint_o50_"
             "g_only_f_rollout_mean.yaml"
         )
     else:
@@ -276,7 +337,7 @@ def build_jobs(
     dataset_path = Path(dataset).expanduser().resolve()
     stage_root = Path(output_root).expanduser().resolve() / plan.stage
     jobs: list[Job] = []
-    for version in VERSIONS:
+    for version in plan.versions:
         for variant in plan.variants:
             checkpoint = Path(checkpoints[version][variant]).resolve()
             evaluator = (
@@ -423,7 +484,11 @@ def load_selection(path: str | Path) -> tuple[int, ...]:
     raise ValueError("Formal selection JSON has no valid_row_ranks selection.")
 
 
-def validate_job_output(job: Job) -> dict[str, Any]:
+def validate_job_output(
+    job: Job,
+    *,
+    expected_selection_file_sha256: str | None = None,
+) -> dict[str, Any]:
     output = Path(job.output_dir)
     missing = [name for name in REQUIRED_OUTPUT_FILES if not (output / name).is_file()]
     if missing:
@@ -496,10 +561,9 @@ def validate_job_output(job: Job) -> dict[str, Any]:
             if not isinstance(definition, Mapping) or not definition:
                 raise ValueError(f"{job.job_id} {label}.score_definition is missing.")
     elif job.score_mode == ROLLOUT_MEAN_MODE:
-        if job.version != "v2":
-            raise ValueError(f"{job.job_id} assigns the V2-only mode to {job.version}.")
+        expected_metadata = ROLLOUT_MEAN_METADATA_BY_VERSION[job.version]
         for values, label in ((results, "results"), (manifest, "manifest")):
-            for key, expected in ROLLOUT_MEAN_METADATA.items():
+            for key, expected in expected_metadata.items():
                 if values.get(key) != expected:
                     raise ValueError(
                         f"{job.job_id} {label}.{key}={values.get(key)!r}, "
@@ -508,11 +572,21 @@ def validate_job_output(job: Job) -> dict[str, Any]:
             definition = values.get("score_definition")
             if not isinstance(definition, Mapping) or not definition:
                 raise ValueError(f"{job.job_id} {label}.score_definition is missing.")
+            expected_action_processing = ROLLOUT_MEAN_ACTION_PROCESSING_BY_VERSION[
+                job.version
+            ]
+            if definition.get("action_processing") != expected_action_processing:
+                raise ValueError(
+                    f"{job.job_id} {label}.score_definition.action_processing "
+                    f"must be {expected_action_processing!r}."
+                )
             if "g_first_weight" in values:
                 raise ValueError(
                     f"{job.job_id} rollout-mean {label} contains first-action alpha."
                 )
-        for key, expected in ROLLOUT_MEAN_INFERENCE_METADATA.items():
+        for key, expected in ROLLOUT_MEAN_INFERENCE_METADATA_BY_VERSION[
+            job.version
+        ].items():
             if inference.get(key) != expected:
                 raise ValueError(
                     f"{job.job_id} inference.{key}={inference.get(key)!r}, "
@@ -521,6 +595,14 @@ def validate_job_output(job: Job) -> dict[str, Any]:
         definition = inference.get("score_definition")
         if not isinstance(definition, Mapping) or not definition:
             raise ValueError(f"{job.job_id} inference.score_definition is missing.")
+        expected_action_processing = ROLLOUT_MEAN_ACTION_PROCESSING_BY_VERSION[
+            job.version
+        ]
+        if definition.get("action_processing") != expected_action_processing:
+            raise ValueError(
+                f"{job.job_id} inference.score_definition.action_processing must "
+                f"be {expected_action_processing!r}."
+            )
         if "g_first_weight" in inference:
             raise ValueError(
                 f"{job.job_id} rollout-mean inference contains first-action alpha."
@@ -548,19 +630,39 @@ def validate_job_output(job: Job) -> dict[str, Any]:
         Path(recorded_checkpoint).resolve() != Path(job.checkpoint).resolve()
     ):
         raise ValueError(f"{job.job_id} manifest binds a different checkpoint.")
-    selection = read_json(output / "episode_selection.json")
+    selection_path = output / "episode_selection.json"
+    selection_file_sha256 = file_sha256(selection_path)
+    expected_selection_sha = validate_optional_sha256(
+        expected_selection_file_sha256,
+        label="expected_selection_file_sha256",
+    )
+    if (
+        expected_selection_sha is not None
+        and selection_file_sha256 != expected_selection_sha
+    ):
+        raise ValueError(
+            f"{job.job_id} episode_selection.json SHA-256 "
+            f"{selection_file_sha256} does not match expected "
+            f"{expected_selection_sha}."
+        )
+    selection = read_json(selection_path)
     ranks = _selection_ranks(selection, label=f"{job.job_id}.selection")
     if len(ranks) != expected_episodes:
         raise ValueError(
             f"{job.job_id} selection must contain exactly "
             f"{expected_episodes} valid row ranks."
         )
+    ranks_sha256 = canonical_json_sha256(list(ranks))
     return {
         "results_path": str(output / "results.json"),
         "manifest_path": str(output / "protocol_manifest.json"),
-        "selection_path": str(output / "episode_selection.json"),
+        "selection_path": str(selection_path),
+        "selection_file_sha256": selection_file_sha256,
         "valid_row_ranks": list(ranks),
-        "selection_sha256": canonical_json_sha256(list(ranks)),
+        "valid_row_ranks_sha256": ranks_sha256,
+        # Backward-compatible legacy field: this has always meant the
+        # canonical rank-list digest, not the raw selection-file digest.
+        "selection_sha256": ranks_sha256,
     }
 
 
@@ -628,6 +730,7 @@ def _launcher_payload(
     jobs: Sequence[Job],
     gpus: Sequence[str],
     max_concurrency: int,
+    expected_selection_file_sha256: str | None = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -636,14 +739,15 @@ def _launcher_payload(
         "training_performed": False,
         "alpha_selection_performed": False,
         "stage": plan.stage,
-        "versions": list(VERSIONS),
+        "versions": list(plan.versions),
         "variants": list(plan.variants),
         "shared_score_modes": list(plan.score_modes),
         "v2_only_score_modes": list(plan.v2_only_score_modes),
         "score_modes_by_version": {
-            "v0": list(plan.score_modes),
-            "v1": list(plan.score_modes),
-            "v2": list(plan.score_modes + plan.v2_only_score_modes),
+            version: list(
+                plan.score_modes + (plan.v2_only_score_modes if version == "v2" else ())
+            )
+            for version in plan.versions
         },
         "alphas": list(plan.alphas),
         "repository": str(repository),
@@ -652,6 +756,7 @@ def _launcher_payload(
         "output_root": str(output_root),
         "gpus": list(gpus),
         "max_concurrency": max_concurrency,
+        "expected_selection_file_sha256": expected_selection_file_sha256,
         "formal_disjointness_verified": False,
         "created_at": utc_now(),
         "updated_at": utc_now(),
@@ -674,6 +779,7 @@ def run_jobs(
     gpus: Sequence[str],
     max_concurrency: int,
     formal_selection: str | Path | None,
+    expected_selection_file_sha256: str | None = None,
     poll_seconds: float,
     popen: Callable[..., Any] = subprocess.Popen,
     sleeper: Callable[[float], None] = time.sleep,
@@ -684,6 +790,14 @@ def run_jobs(
         raise ValueError("poll_seconds must be non-negative.")
     if formal_selection is not None and plan.stage != "development":
         raise ValueError("--formal-selection is only valid for development.")
+    expected_selection_sha = validate_optional_sha256(
+        expected_selection_file_sha256,
+        label="expected_selection_file_sha256",
+    )
+    if expected_selection_sha is not None and plan.stage != "formal":
+        raise ValueError(
+            "--expected-selection-file-sha256 is only valid for formal runs."
+        )
     repository_path = Path(repository).expanduser().resolve()
     dataset_path = Path(dataset).expanduser().resolve()
     checkpoint_manifest_path = Path(checkpoint_manifest).expanduser().resolve()
@@ -708,6 +822,7 @@ def run_jobs(
         jobs=jobs,
         gpus=gpus,
         max_concurrency=max_concurrency,
+        expected_selection_file_sha256=expected_selection_sha,
     )
     payload["status"] = "RUNNING"
     atomic_write_json(manifest_path, payload)
@@ -780,7 +895,10 @@ def run_jobs(
                     failed = True
                     continue
                 try:
-                    job_evidence = validate_job_output(running.job)
+                    job_evidence = validate_job_output(
+                        running.job,
+                        expected_selection_file_sha256=expected_selection_sha,
+                    )
                 except Exception as error:
                     state.update({"state": "FAILED_VALIDATION", "error": str(error)})
                     failed = True
@@ -804,6 +922,17 @@ def run_jobs(
                 payload["selection"] = {
                     "valid_row_ranks": list(ranks),
                     "sha256": canonical_json_sha256(list(ranks)),
+                    "valid_row_ranks_sha256": canonical_json_sha256(list(ranks)),
+                    "selection_file_sha256": (
+                        next(iter(evidence.values()))["selection_file_sha256"]
+                    ),
+                    "selection_file_identical_across_all_jobs": len(
+                        {
+                            values["selection_file_sha256"]
+                            for values in evidence.values()
+                        }
+                    )
+                    == 1,
                     "identical_across_all_jobs": True,
                 }
                 if plan.stage == "development":
@@ -831,7 +960,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run an inference-only V0/V1/V2 first-action critic comparison, "
-            "including the V2 rollout-mean G-only ablation, without touching "
+            "including rollout-mean G-only ablations, without touching "
             "historical result bundles."
         )
     )
@@ -845,10 +974,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--repository", default=str(Path(__file__).resolve().parents[1])
     )
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--versions", nargs="+", choices=VERSIONS)
     parser.add_argument("--variants", nargs="+", choices=VARIANTS)
     parser.add_argument("--score-modes", nargs="+", choices=ALL_FORMAL_SCORE_MODES)
     parser.add_argument("--alpha", action="append", type=float, dest="alphas")
     parser.add_argument("--formal-selection")
+    parser.add_argument("--expected-selection-file-sha256")
     parser.add_argument("--gpus", nargs="*", default=())
     parser.add_argument("--max-concurrency", type=int, default=1)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
@@ -867,6 +998,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise FileNotFoundError(repository)
     plan = resolve_stage_plan(
         stage=args.stage,
+        versions=args.versions,
         variants=args.variants,
         score_modes=args.score_modes,
         alphas=args.alphas,
@@ -890,6 +1022,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         gpus=args.gpus,
         max_concurrency=args.max_concurrency,
         formal_selection=args.formal_selection,
+        expected_selection_file_sha256=args.expected_selection_file_sha256,
         poll_seconds=args.poll_seconds,
     )
 

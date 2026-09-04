@@ -33,7 +33,10 @@ OBJECTIVE_VERSION = 0
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 ACTION_BLOCK_STEPS = 5
 LEWM_HISTORY_SIZE = 3
-SCORE_MODES = frozenset({"f_only", "g_only", "f_plus_g", "f_plus_g_first"})
+ROLLOUT_MEAN_SCORE_MODE = "g_only_f_rollout_mean"
+SCORE_MODES = frozenset(
+    {"f_only", "g_only", "f_plus_g", "f_plus_g_first", ROLLOUT_MEAN_SCORE_MODE}
+)
 
 
 @dataclass(frozen=True)
@@ -58,9 +61,7 @@ def require_exact_values(
             raise ValueError(f"{label}.{key} must be {expected_value!r}.")
 
 
-def require_positive_float(
-    values: Mapping[str, Any], key: str, *, label: str
-) -> float:
+def require_positive_float(values: Mapping[str, Any], key: str, *, label: str) -> float:
     try:
         value = float(values.get(key))
     except (TypeError, ValueError) as error:
@@ -140,7 +141,9 @@ def validate_frozen_actor_free_td_v0_payload(
     }
     missing = required - payload.keys()
     if missing:
-        raise ValueError(f"{spec.display_name} checkpoint is missing {sorted(missing)}.")
+        raise ValueError(
+            f"{spec.display_name} checkpoint is missing {sorted(missing)}."
+        )
 
     config_value = payload["predictor_config"]
     if not isinstance(config_value, Mapping):
@@ -393,6 +396,12 @@ class ActorFreeTDLeWMV0(nn.Module):
             raise ValueError("V0 g_only requires CEM planning horizon=1.")
         if self.score_mode == "f_plus_g_first" and horizon != 5:
             raise ValueError("V0 f_plus_g_first requires CEM planning horizon=5.")
+        if self.score_mode == ROLLOUT_MEAN_SCORE_MODE:
+            if horizon != 5:
+                raise ValueError(
+                    "V0 g_only_f_rollout_mean requires CEM planning horizon=5."
+                )
+            return self._g_only_f_rollout_mean_cost(info_dict, action_candidates)
 
         goal = self._goal_for_samples(
             info_dict,
@@ -483,6 +492,67 @@ class ActorFreeTDLeWMV0(nn.Module):
         # G is a value, so CEM receives its negative as a cost.  V0 deliberately
         # does not clamp this term.
         return explicit_cost - (self.gamma ** (horizon - 1)) * final_score
+
+    def _g_only_f_rollout_mean_cost(
+        self,
+        info_dict: dict[str, Any],
+        action_candidates: torch.Tensor,
+    ) -> torch.Tensor:
+        """Average G over aligned ``(z_(k-1), raw_A_k)`` rollout pairs."""
+
+        if "goal" not in info_dict and "goal_emb" not in info_dict:
+            raise AssertionError("goal not in info_dict")
+        if action_candidates.ndim != 4:
+            raise ValueError(
+                "action_candidates must have shape (batch, samples, horizon, 25)."
+            )
+        if action_candidates.shape[-1] != V0_ACTION_DIM:
+            raise ValueError("V0 expects normalized raw 25D action blocks.")
+        if not action_candidates.is_floating_point():
+            raise TypeError("action_candidates must have a floating-point dtype.")
+        if not bool(torch.isfinite(action_candidates).all()):
+            raise ValueError("action_candidates must contain only finite values.")
+        batch, samples, horizon = action_candidates.shape[:3]
+        if horizon <= 0:
+            raise ValueError("The planning horizon must be positive.")
+
+        current = self._current_state_for_samples(
+            dict(info_dict),
+            batch=batch,
+            samples=samples,
+            reference=action_candidates,
+        )
+        goal = self._goal_for_samples(
+            info_dict,
+            batch=batch,
+            samples=samples,
+            reference=action_candidates,
+        )
+        task = project_tasks_to_sphere_v0(goal)
+        future = self._rollout_future(
+            info_dict,
+            action_candidates,
+            batch=batch,
+            samples=samples,
+            horizon=horizon,
+        )
+        predecessors = torch.cat(
+            (current.unsqueeze(-2), future[..., :-1, :]),
+            dim=-2,
+        )
+        expected_shape = (batch, samples, horizon, V0_STATE_DIM)
+        if predecessors.shape != expected_shape:
+            raise ValueError(
+                "V0 rollout-mean predecessor states must align one-to-one with "
+                "candidate action blocks."
+            )
+        step_tasks = task.unsqueeze(-2).expand(expected_shape)
+        scores = self._goal_score(predecessors, action_candidates, step_tasks)
+        if scores.shape != (batch, samples, horizon):
+            raise ValueError(
+                "V0 rollout-mean G scores must have shape (batch, samples, horizon)."
+            )
+        return -scores.mean(dim=-1)
 
     def _goal_score(
         self,
@@ -590,9 +660,7 @@ class ActorFreeTDLeWMV0(nn.Module):
             if not torch.is_tensor(embedding):
                 raise ValueError("LeWM encode must return a tensor under 'emb'.")
             if embedding.ndim == 3:
-                info["emb"] = embedding.unsqueeze(1).expand(
-                    batch, samples, -1, -1
-                )
+                info["emb"] = embedding.unsqueeze(1).expand(batch, samples, -1, -1)
             elif embedding.ndim == 2:
                 info["emb"] = embedding.unsqueeze(1).expand(batch, samples, -1)
 
@@ -664,9 +732,7 @@ class ActorFreeTDLeWMV0(nn.Module):
         while goal.ndim > 2:
             goal = goal.select(dim=-2, index=goal.shape[-2] - 1)
         if goal.shape != (batch, V0_TASK_DIM):
-            raise ValueError(
-                "goal_emb must collapse to one 192D goal per environment."
-            )
+            raise ValueError("goal_emb must collapse to one 192D goal per environment.")
         return goal.unsqueeze(1).expand(batch, samples, V0_TASK_DIM)
 
 
@@ -693,6 +759,8 @@ def make_frozen_actor_free_td_v0_policy(
         raise ValueError("V0 g_only requires planning.horizon=1.")
     if resolved_mode == "f_plus_g_first" and int(planning["horizon"]) != 5:
         raise ValueError("V0 f_plus_g_first requires planning.horizon=5.")
+    if resolved_mode == ROLLOUT_MEAN_SCORE_MODE and int(planning["horizon"]) != 5:
+        raise ValueError("V0 g_only_f_rollout_mean requires planning.horizon=5.")
     resolved_g_first_weight = _resolve_g_first_weight(
         resolved_mode,
         g_first_weight,
@@ -744,6 +812,7 @@ __all__ = [
     "LEWM_HISTORY_SIZE",
     "METHOD_FAMILY",
     "OBJECTIVE_VERSION",
+    "ROLLOUT_MEAN_SCORE_MODE",
     "SCORE_MODES",
     "load_frozen_actor_free_td_v0_checkpoint",
     "make_frozen_actor_free_td_v0_policy",

@@ -25,7 +25,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(
         "--score-mode",
-        choices=("f_only", "g_only", "f_plus_g", "f_plus_g_first"),
+        choices=(
+            "f_only",
+            "g_only",
+            "f_plus_g",
+            "f_plus_g_first",
+            "g_only_f_rollout_mean",
+        ),
         default=None,
     )
     parser.add_argument("--g-first-weight", type=float, default=None)

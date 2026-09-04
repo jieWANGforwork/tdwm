@@ -320,32 +320,42 @@ def test_v2_runtime_records_exact_rollout_mean_fields_in_manifest_and_results(
     assert inference["replanning"] == "every_action_block"
 
 
-def test_v0_v1_reject_but_v2_ema_supports_rollout_mean_mode() -> None:
+def test_v0_v1_and_v2_ema_support_rollout_mean_mode() -> None:
     v0_module = _evaluation_module("v0", "c")
     v0_protocol = getattr(
         v0_module,
         "load_actor_free_td_lewm_v0_c_evaluation_protocol",
     )(_base_config("v0", "c"))
-    with pytest.raises(ValueError, match="incompatible with V0"):
-        v0_common.configure_frozen_actor_free_td_v0_evaluation_mode(
-            v0_protocol,
-            smoke=False,
-            pilot=False,
-            score_mode=MODE,
-        )
+    configured_v0 = v0_common.configure_frozen_actor_free_td_v0_evaluation_mode(
+        v0_protocol,
+        smoke=False,
+        pilot=False,
+        score_mode=MODE,
+    )
+    assert configured_v0["planning"]["horizon"] == 5
+    assert configured_v0["inference_objective"]["f_goal_distance_used"] is False
+    assert (
+        configured_v0["inference_objective"]["score_definition"]["action_processing"]
+        == "normalized_raw_25d_action_block"
+    )
 
     v1_module = _evaluation_module("v1", "c")
     v1_protocol = getattr(
         v1_module,
         "load_actor_free_td_lewm_v1_c_evaluation_protocol",
     )(_base_config("v1", "c"))
-    with pytest.raises(ValueError, match="incompatible with V1"):
-        v1_common.configure_frozen_actor_free_td_v1_evaluation_mode(
-            v1_protocol,
-            smoke=False,
-            pilot=False,
-            score_mode=MODE,
-        )
+    configured_v1 = v1_common.configure_frozen_actor_free_td_v1_evaluation_mode(
+        v1_protocol,
+        smoke=False,
+        pilot=False,
+        score_mode=MODE,
+    )
+    assert configured_v1["planning"]["horizon"] == 5
+    assert configured_v1["inference_objective"]["f_goal_distance_used"] is False
+    assert (
+        configured_v1["inference_objective"]["score_definition"]["action_processing"]
+        == "frozen_shared_lewm_action_encoder_to_192d"
+    )
 
     ema_module = importlib.import_module(
         "tdwm.evaluation.actor_free_td_lewm_v2_ema_sg_c"

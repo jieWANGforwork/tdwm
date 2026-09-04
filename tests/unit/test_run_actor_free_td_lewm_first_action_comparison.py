@@ -41,6 +41,7 @@ def _jobs(
     tmp_path: Path,
     *,
     stage: str,
+    versions: tuple[str, ...] | None = None,
     variants: tuple[str, ...] | None = None,
     score_modes: tuple[str, ...] | None = None,
     alphas: tuple[float, ...] | None = None,
@@ -49,6 +50,7 @@ def _jobs(
     checkpoints = COMPARISON.load_checkpoint_manifest(checkpoint_manifest)
     plan = COMPARISON.resolve_stage_plan(
         stage=stage,
+        versions=versions,
         variants=variants,
         score_modes=score_modes,
         alphas=alphas,
@@ -99,11 +101,19 @@ def _write_job_output(job, *, ranks: list[int] | None = None) -> None:
             values["g_first_weight"] = job.alpha
             values["score_definition"] = definition
     elif job.score_mode == COMPARISON.ROLLOUT_MEAN_MODE:
-        definition = {"formula": "mean(q_1, q_2, q_3, q_4, q_5)"}
+        definition = {
+            "formula": "cost = -mean(q1, q2, q3, q4, q5)",
+            "action_processing": (
+                COMPARISON.ROLLOUT_MEAN_ACTION_PROCESSING_BY_VERSION[job.version]
+            ),
+        }
+        metadata = COMPARISON.ROLLOUT_MEAN_METADATA_BY_VERSION[job.version]
         for values in (result, manifest):
-            values.update(COMPARISON.ROLLOUT_MEAN_METADATA)
+            values.update(metadata)
             values["score_definition"] = definition
-        inference.update(COMPARISON.ROLLOUT_MEAN_INFERENCE_METADATA)
+        inference.update(
+            COMPARISON.ROLLOUT_MEAN_INFERENCE_METADATA_BY_VERSION[job.version]
+        )
         inference["score_definition"] = definition
     (output / "results.json").write_text(json.dumps(result))
     (output / "protocol_manifest.json").write_text(json.dumps(manifest))
@@ -117,6 +127,7 @@ def test_stage_contracts_are_explicit_and_formal_never_selects_alpha() -> None:
         stage="smoke", variants=None, score_modes=None, alphas=None
     )
     assert smoke.variants == ("c",)
+    assert smoke.versions == COMPARISON.VERSIONS
     assert smoke.score_modes == ("f_plus_g_first",)
     assert smoke.v2_only_score_modes == ()
     assert smoke.alphas == (1.0,)
@@ -223,6 +234,80 @@ def test_formal_adds_v2_only_g_modes_without_sending_them_to_v0_or_v1(
             assert job.argv[job.argv.index("--score-mode") + 1] == job.score_mode
 
 
+def test_explicit_v0_v1_rollout_mean_builds_exactly_twelve_jobs_and_manifest(
+    tmp_path: Path,
+) -> None:
+    checkpoint_manifest, plan, jobs = _jobs(
+        tmp_path,
+        stage="formal",
+        versions=("v0", "v1"),
+        score_modes=(COMPARISON.ROLLOUT_MEAN_MODE,),
+    )
+
+    assert plan.versions == ("v0", "v1")
+    assert plan.score_modes == (COMPARISON.ROLLOUT_MEAN_MODE,)
+    assert plan.v2_only_score_modes == ()
+    assert plan.alphas == ()
+    assert len(jobs) == 12
+    assert {(job.version, job.variant, job.score_mode) for job in jobs} == {
+        (version, variant, COMPARISON.ROLLOUT_MEAN_MODE)
+        for version in ("v0", "v1")
+        for variant in COMPARISON.VARIANTS
+    }
+    assert all("--g-first-weight" not in job.argv for job in jobs)
+    assert all("v2" not in Path(job.config_path).name for job in jobs)
+    assert all(Path(job.config_path).is_file() for job in jobs)
+
+    expected_selection_file_sha256 = (
+        "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7"
+    )
+    payload = COMPARISON._launcher_payload(
+        plan=plan,
+        repository=COMPARISON.ROOT if hasattr(COMPARISON, "ROOT") else ROOT,
+        dataset=tmp_path / "cube.lance",
+        checkpoint_manifest=checkpoint_manifest,
+        output_root=tmp_path / "comparison",
+        jobs=jobs,
+        gpus=(),
+        max_concurrency=12,
+        expected_selection_file_sha256=expected_selection_file_sha256,
+    )
+    assert payload["versions"] == ["v0", "v1"]
+    assert set(payload["score_modes_by_version"]) == {"v0", "v1"}
+    assert len(payload["jobs"]) == 12
+    assert payload["expected_selection_file_sha256"] == expected_selection_file_sha256
+
+
+def test_formal_selection_file_sha_is_distinct_from_rank_sha_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    _, _, jobs = _jobs(
+        tmp_path,
+        stage="formal",
+        versions=("v0",),
+        variants=("c",),
+        score_modes=(COMPARISON.ROLLOUT_MEAN_MODE,),
+    )
+    job = jobs[0]
+    _write_job_output(job)
+    selection_path = Path(job.output_dir) / "episode_selection.json"
+    expected_file_sha = COMPARISON.file_sha256(selection_path)
+
+    evidence = COMPARISON.validate_job_output(
+        job,
+        expected_selection_file_sha256=expected_file_sha,
+    )
+
+    assert evidence["selection_file_sha256"] == expected_file_sha
+    assert evidence["valid_row_ranks_sha256"] == evidence["selection_sha256"]
+    assert evidence["selection_file_sha256"] != evidence["valid_row_ranks_sha256"]
+    with pytest.raises(ValueError, match="does not match expected"):
+        COMPARISON.validate_job_output(
+            job,
+            expected_selection_file_sha256="0" * 64,
+        )
+
+
 def test_smoke_defaults_to_c_for_all_three_versions_and_supports_variants(
     tmp_path: Path,
 ) -> None:
@@ -290,7 +375,7 @@ def test_output_validation_locks_identity_horizon_alpha_and_selection(
         COMPARISON.validate_job_output(jobs[0])
 
 
-def test_v2_g_only_and_rollout_mean_outputs_have_mode_specific_contracts(
+def test_g_only_and_rollout_mean_outputs_have_mode_specific_contracts(
     tmp_path: Path,
 ) -> None:
     _, _, jobs = _jobs(
@@ -321,16 +406,18 @@ def test_v2_g_only_and_rollout_mean_outputs_have_mode_specific_contracts(
     mean_result_path = Path(rollout_mean.output_dir) / "results.json"
     mean_result = json.loads(mean_result_path.read_text())
     assert mean_result["planning_horizon"] == 5
-    for key, expected in COMPARISON.ROLLOUT_MEAN_METADATA.items():
+    for key, expected in COMPARISON.ROLLOUT_MEAN_METADATA_BY_VERSION["v2"].items():
         assert mean_result[key] == expected
     assert mean_result["score_definition"]
 
     mean_manifest_path = Path(rollout_mean.output_dir) / "protocol_manifest.json"
     mean_manifest = json.loads(mean_manifest_path.read_text())
-    for key, expected in COMPARISON.ROLLOUT_MEAN_METADATA.items():
+    for key, expected in COMPARISON.ROLLOUT_MEAN_METADATA_BY_VERSION["v2"].items():
         assert mean_manifest[key] == expected
     mean_inference = mean_manifest["protocol"]["inference_objective"]
-    for key, expected in COMPARISON.ROLLOUT_MEAN_INFERENCE_METADATA.items():
+    for key, expected in COMPARISON.ROLLOUT_MEAN_INFERENCE_METADATA_BY_VERSION[
+        "v2"
+    ].items():
         assert mean_inference[key] == expected
     assert mean_inference["score_definition"]
 

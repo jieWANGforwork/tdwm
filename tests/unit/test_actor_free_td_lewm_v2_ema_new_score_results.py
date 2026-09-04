@@ -332,11 +332,16 @@ def _write_fixed_job_output(job: object, selection: dict[str, list[int]]) -> Non
             value["g_first_weight"] = job.alpha
             value["score_definition"] = definition
     else:
-        definition = {"formula": "mean(q_1, q_2, q_3, q_4, q_5)"}
+        definition = {
+            "formula": "mean(q_1, q_2, q_3, q_4, q_5)",
+            "action_processing": fixed.ROLLOUT_MEAN_ACTION_PROCESSING_BY_VERSION[
+                job.version
+            ],
+        }
         for value in (result, manifest):
-            value.update(fixed.ROLLOUT_MEAN_METADATA)
+            value.update(fixed.ROLLOUT_MEAN_METADATA_BY_VERSION[job.version])
             value["score_definition"] = definition
-        inference.update(fixed.ROLLOUT_MEAN_INFERENCE_METADATA)
+        inference.update(fixed.ROLLOUT_MEAN_INFERENCE_METADATA_BY_VERSION[job.version])
         inference["score_definition"] = definition
     _write_json(output / "results.json", result)
     _write_json(output / "protocol_manifest.json", manifest)

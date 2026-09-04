@@ -1,0 +1,38 @@
+extends: actor_free_td_lewm_v1_g3_cube_checkpoint_o50.yaml
+id: actor_free_td_lewm_v1_g3_cube_checkpoint_o50_g_only_f_rollout_mean
+
+planning:
+  horizon: 5
+
+inference_objective:
+  score_mode: g_only_f_rollout_mean
+  f_score: none
+  f_score_reducer: none
+  f_transition_used: true
+  f_goal_distance_used: false
+  g_score: mean_goal_projection_over_all_rollout_blocks
+  g_aggregation: mean_over_5_blocks
+  rollout_horizon: 5
+  state_source_for_q1: current_frozen_lewm_encoder_state
+  state_source_for_q2_to_q5: frozen_lewm_rollout_predicted_states
+  executed_action_block: first_block_only
+  replanning: every_action_block
+  score_definition:
+    formula: "cost = -mean(q1, q2, q3, q4, q5)"
+    score: negative_mean_goal_projection_over_f_rollout_aligned_predecessor_action_pairs
+    f_transition_used: true
+    f_goal_distance_used: false
+    g_score: mean_goal_projection_over_all_rollout_blocks
+    g_aggregation: mean_over_5_blocks
+    rollout_horizon: 5
+    state_source_for_q1: current_frozen_lewm_encoder_state
+    state_source_for_q2_to_q5: frozen_lewm_rollout_predicted_states
+    state_sequence: z0_and_first_h_minus_one_full_f_rollout_states
+    action_sequence: all_h_candidate_blocks_frozen_shared_lewm_action_encoder
+    action_alignment: qk_uses_same_candidate_action_block_Ak
+    action_processing: frozen_shared_lewm_action_encoder_to_192d
+    task: sqrt_dim_l2_normalized_goal_vector_broadcast_over_5_blocks
+    gamma: unused
+    terminal_f_cost: unused
+    executed_action_block: first_block_only
+    replanning: every_action_block
