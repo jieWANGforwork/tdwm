@@ -19,6 +19,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = REPOSITORY_ROOT.parents[1]
 REPORT_ARTIFACTS = REPOSITORY_ROOT / "reports/artifacts"
 EMA_ARCHIVE = REPORT_ARTIFACTS / "actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072"
+COMPLETE_ARCHIVE = REPORT_ARTIFACTS / "actor_free_td_lewm_complete_cube_seed3072"
 TEMP_EVIDENCE = Path("/private/tmp/td-results-full.y1qTdB")
 
 DEFAULTS = {
@@ -43,7 +44,10 @@ DEFAULTS = {
     "v1_paired_outcomes": (
         REPORT_ARTIFACTS / "actor_free_td_lewm_v1_cube_seed3072/paired_outcomes.csv"
     ),
-    "ema_new_ledger": EMA_ARCHIVE / "new_scores/reconciliation_ledger.json",
+    "ema_new_ledger": (
+        COMPLETE_ARCHIVE
+        / "sources/v2_ema_new_scores_96_plus_36/reconciliation_ledger.json"
+    ),
     "v2_root": TEMP_EVIDENCE / "v2",
     "v2_training_root": TEMP_EVIDENCE / "v2/formal_metadata",
     "v2_ema_root": TEMP_EVIDENCE / "v2_ema",
@@ -51,7 +55,7 @@ DEFAULTS = {
     "v2_ema_epoch10_paired_outcomes": (
         EMA_ARCHIVE / "original_scores/paired_outcomes.csv"
     ),
-    "artifact_dir": (REPORT_ARTIFACTS / "actor_free_td_lewm_complete_cube_seed3072"),
+    "artifact_dir": COMPLETE_ARCHIVE,
 }
 
 

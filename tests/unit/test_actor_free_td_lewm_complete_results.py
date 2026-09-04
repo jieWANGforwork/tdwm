@@ -466,6 +466,7 @@ def _real_source_arguments() -> dict[str, Path]:
     project = repository.parents[1]
     artifacts = repository / "reports/artifacts"
     ema = artifacts / "actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072"
+    complete = artifacts / "actor_free_td_lewm_complete_cube_seed3072"
     temporary = Path("/private/tmp/td-results-full.y1qTdB")
     return {
         "legacy_bundle_root": (
@@ -485,7 +486,9 @@ def _real_source_arguments() -> dict[str, Path]:
         "v1_paired_outcomes": (
             artifacts / "actor_free_td_lewm_v1_cube_seed3072/paired_outcomes.csv"
         ),
-        "ema_new_ledger": ema / "new_scores/reconciliation_ledger.json",
+        "ema_new_ledger": (
+            complete / "sources/v2_ema_new_scores_96_plus_36/reconciliation_ledger.json"
+        ),
         "v2_root": temporary / "v2",
         "v2_training_root": temporary / "v2/formal_metadata",
         "v2_ema_root": temporary / "v2_ema",

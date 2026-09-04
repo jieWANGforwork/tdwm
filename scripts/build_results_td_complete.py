@@ -185,6 +185,9 @@ class FixedAnalysis:
     best_mean_modes: tuple[str, ...]
     best_mean_percent: float
     version_mode_means: Mapping[tuple[str, str], float]
+    training_row_means: Mapping[tuple[str, str], float]
+    best_training_mean_percent: float
+    best_training_mean_winners: tuple[str, ...]
     ema_variant_means: Mapping[str, float]
     ema_best_variants: tuple[str, ...]
 
@@ -616,6 +619,21 @@ def _fixed_analysis(cells: Sequence[ResultCell]) -> FixedAnalysis:
     best_mean_modes = tuple(
         mode for mode in ALL_CONTROLLED_MODES if mode_means[mode] == best_mean
     )
+    training_row_means = {
+        (version, variant): _mean(
+            _find(cells, version=version, variant=variant, epoch=10, mode=mode)
+            for mode in ALL_CONTROLLED_MODES
+        )
+        for version in VERSIONS
+        for variant in VARIANTS
+    }
+    best_training_mean = max(training_row_means.values())
+    best_training_mean_winners = tuple(
+        f"{VERSION_LABELS[version]}-{variant.upper()}"
+        for version in VERSIONS
+        for variant in VARIANTS
+        if training_row_means[(version, variant)] == best_training_mean
+    )
     ema_variant_means = {
         variant: sum(
             _percent(
@@ -642,6 +660,9 @@ def _fixed_analysis(cells: Sequence[ResultCell]) -> FixedAnalysis:
         best_mean_modes=best_mean_modes,
         best_mean_percent=best_mean,
         version_mode_means=version_mode_means,
+        training_row_means=training_row_means,
+        best_training_mean_percent=best_training_mean,
+        best_training_mean_winners=best_training_mean_winners,
         ema_variant_means=ema_variant_means,
         ema_best_variants=tuple(
             variant
@@ -1080,6 +1101,7 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
     best_score_names = _joined(
         tuple(MODE_LABELS[mode] for mode in analysis.best_mean_modes)
     )
+    best_training_mean_names = _joined(analysis.best_training_mean_winners)
     ema_best_variants = _compact_join(
         tuple(variant.upper() for variant in analysis.ema_best_variants)
     )
@@ -1093,16 +1115,28 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
         for mode in ALL_CONTROLLED_MODES
     )
     mean_q_winner = _winner_result(analysis, "g_only_f_rollout_mean")
-    tail_harm_count = sum(
+    tail_deltas = tuple(
         _percent(
             _find(cells, version=version, variant=variant, epoch=10, mode="f_plus_g")
         )
-        < _percent(
+        - _percent(
             _find(cells, version=version, variant=variant, epoch=10, mode="f_only")
         )
         for version in VERSIONS
         for variant in VARIANTS
     )
+    tail_gain_count = sum(delta > 0 for delta in tail_deltas)
+    tail_tie_count = sum(delta == 0 for delta in tail_deltas)
+    tail_harm_count = sum(delta < 0 for delta in tail_deltas)
+    tail_mean_delta = sum(tail_deltas) / len(tail_deltas)
+    version_overall_means = {
+        version: sum(
+            analysis.version_mode_means[(version, mode)]
+            for mode in ALL_CONTROLLED_MODES
+        )
+        / len(ALL_CONTROLLED_MODES)
+        for version in VERSIONS
+    }
     lines = [
         "# Results TD — 全部 Actor-Free TD-LeWM 实验总账（Cube seed 3072）",
         "",
@@ -1113,6 +1147,8 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
         f"- **按原先固定的主评分列 F+G，描述性领先配置为 {f_plus_g_winner}。**",
         f"- **所有固定 E10 单格的最高结果为 {overall_winner}。**",
         f"- **按四版本、24 个训练配置的固定 E10 均值，描述性领先测试评分为 {best_score_names}（{analysis.best_mean_percent:.1f}%）。** 单 seed 下不把它表述为统计稳健最优。",
+        f"- **若把五种评分等权平均，描述性领先训练配置为 {best_training_mean_names}（并列 {analysis.best_training_mean_percent:.1f}%）。**",
+        f"- **按六个训练方法 × 五种评分的版本均值，V1 action encoder 最高（{version_overall_means['v1']:.1f}%）。**",
         f"- V1→V2 联合微调后，F-only 均值由 {v1_f:.1f}% 变为 {v2_f:.1f}%（{_signed_pp(v2_f - v1_f)}），F+G 由 {v1_tail:.1f}% 变为 {v2_tail:.1f}%（{_signed_pp(v2_tail - v1_tail)}）；这首先提示 world-model/control representation 变化，而不只是 G 的读出形式。",
         "",
         "## 完整全账伴随文件",
@@ -1232,11 +1268,12 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
         "",
         "### 1. 哪个训练方法最好",
         "",
-        f"不存在脱离测试评分的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 **{f_plus_g_winner}**；若按全部五种评分寻找最高单格，则为 **{overall_winner}**。在 V2-EMA E10 内，五评分均值最高的训练变体为 **{ema_best_variants}（{ema_best_mean:.1f}%）**。这些都是描述性单 seed 结果。",
+        f"不存在脱离测试评分定义的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 **{f_plus_g_winner}**；若把五种评分等权平均，则 **{best_training_mean_names} 并列领先（{analysis.best_training_mean_percent:.1f}%）**；若寻找最高单格，则为 **{overall_winner}**。在 V2-EMA E10 内，五评分均值最高的训练变体为 **{ema_best_variants}（{ema_best_mean:.1f}%）**。这些都是描述性单 seed 结果。",
+        f"从版本整体看，V1 action encoder 的六方法 × 五评分均值最高（{version_overall_means['v1']:.1f}%）。",
         "",
         "### 2. 哪个测试方法最好",
         "",
-        f"V2-EMA E10 六法均值为：{ema_mode_summary}。跨 V0/V1/V2/V2-EMA 的固定 E10，**{best_score_names}** 的 24 配置均值最高（{analysis.best_mean_percent:.1f}%），因此它是当前描述性默认主测试方式。Mean-Q 的最高固定配置为 {mean_q_winner}。",
+        f"V2-EMA E10 六个训练方法的均值为：{ema_mode_summary}。跨 V0/V1/V2/V2-EMA 的固定 E10，**{best_score_names}** 的 24 配置均值最高（{analysis.best_mean_percent:.1f}%），因此它是当前描述性默认主测试方式。Mean-Q 的最高固定配置为 {mean_q_winner}。",
         "",
         "### 3. 原因分析",
         "",
@@ -1266,9 +1303,9 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
                 "冻结或低 LR 微调 encoder/world",
             ),
             (
-                "tail 干扰",
-                f"{tail_harm_count}/24 个配置的 F+G 低于 F-only",
-                f"以 {best_score_names} 为默认；G readout 加 gate/校准",
+                "tail 效果异质",
+                f"F+G 对 F-only：{tail_gain_count} 升 / {tail_tie_count} 平 / {tail_harm_count} 降；均值 {_signed_pp(tail_mean_delta)}",
+                f"不能默认 tail 必然增益；以 {best_score_names} 为候选并校准 G",
             ),
             (
                 "Mean-Q 完整覆盖",
@@ -1481,6 +1518,7 @@ def build_docx(
     best_score_names = _joined(
         tuple(MODE_LABELS[mode] for mode in analysis.best_mean_modes)
     )
+    best_training_mean_names = _joined(analysis.best_training_mean_winners)
     ema_best_variants = _compact_join(
         tuple(variant.upper() for variant in analysis.ema_best_variants)
     )
@@ -1488,16 +1526,20 @@ def build_docx(
     v1_f = analysis.version_mode_means[("v1", "f_only")]
     v2_f = analysis.version_mode_means[("v2", "f_only")]
     mean_q_winner = _winner_result(analysis, "g_only_f_rollout_mean")
-    tail_harm_count = sum(
+    tail_deltas = tuple(
         _percent(
             _find(cells, version=version, variant=variant, epoch=10, mode="f_plus_g")
         )
-        < _percent(
+        - _percent(
             _find(cells, version=version, variant=variant, epoch=10, mode="f_only")
         )
         for version in VERSIONS
         for variant in VARIANTS
     )
+    tail_gain_count = sum(delta > 0 for delta in tail_deltas)
+    tail_tie_count = sum(delta == 0 for delta in tail_deltas)
+    tail_harm_count = sum(delta < 0 for delta in tail_deltas)
+    tail_mean_delta = sum(tail_deltas) / len(tail_deltas)
     document = Document()
     _configure_primary_document(document)
 
@@ -1542,6 +1584,12 @@ def build_docx(
                 _compact_join(analysis.overall_winners),
                 f"{analysis.overall_best_count}/50 ({analysis.overall_best_count * 2}%)",
                 "Primary fixed-E10 baseline",
+            ),
+            (
+                "Best equal-weight training average",
+                best_training_mean_names,
+                f"Five-score mean {analysis.best_training_mean_percent:.1f}%",
+                "Treat as candidates, not a seed-robust winner",
             ),
             (
                 "Best V2-EMA training variant",
@@ -1608,12 +1656,6 @@ def build_docx(
         bold=True,
     )
     _add_fixed_master_table(document, cells)
-    _add_body(
-        document,
-        "All five scores have formal E10 results for every one of the 24 training "
-        f"configurations. Column winners: {_column_winner_summary(analysis)}.",
-        color="5C6975",
-    )
 
     _add_heading(
         document,
@@ -1623,7 +1665,9 @@ def build_docx(
     _add_body(
         document,
         "There is no evaluation-independent training winner. The prespecified F+G "
-        f"leader is {f_plus_g_winner}; the highest fixed cell is {overall_winner}. "
+        f"leader is {f_plus_g_winner}; under an equal-weight five-score average, "
+        f"{best_training_mean_names} tie at {analysis.best_training_mean_percent:.1f}%; "
+        f"the highest fixed cell is {overall_winner}. "
         f"Across all 24 configurations, {best_score_names} has the largest descriptive "
         f"mean ({analysis.best_mean_percent:.1f}%). These are single-seed comparisons.",
         color="7A5A00",
@@ -1663,7 +1707,7 @@ def build_docx(
                 f"{analysis.version_mode_means[('v1', 'g_only')]:.1f}%; First-Q "
                 f"{analysis.version_mode_means[('v0', 'f_plus_g_first')]:.1f}→"
                 f"{analysis.version_mode_means[('v1', 'f_plus_g_first')]:.1f}%",
-                "Semantic action representation improves critic readout",
+                "Association is consistent with a better critic readout",
                 "Keep shared V1 Action Encoder",
             ),
             (
@@ -1686,9 +1730,10 @@ def build_docx(
                 "Use as default candidate; tune score parameters on dev",
             ),
             (
-                "Tail interference",
-                f"F+G is below F-only in {tail_harm_count}/24 fixed configurations",
-                "Final imagined-state G can add OOD or scale error",
+                "Tail effect is heterogeneous",
+                f"F+G vs F-only: {tail_gain_count} up / {tail_tie_count} tied / "
+                f"{tail_harm_count} down; mean {_signed_pp(tail_mean_delta)}",
+                "Final imagined-state G can help or add OOD/scale error",
                 "Gate/calibrate the tail on independent dev pairs",
             ),
             (

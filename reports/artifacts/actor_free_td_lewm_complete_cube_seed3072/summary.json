@@ -1,21 +1,21 @@
 {
   "action_normalization_sha256": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
-  "cell_count": 465,
+  "cell_count": 477,
   "cell_counts_by_comparison_role": {
     "epoch_sweep_new_scores": 96,
     "epoch_sweep_original_scores": 288,
-    "fixed_checkpoint_new_scores": 24,
+    "fixed_checkpoint_new_scores": 36,
     "fixed_checkpoint_original_scores": 57
   },
   "cell_counts_by_version": {
     "legacy": 21,
-    "v0": 24,
-    "v1": 24,
+    "v0": 30,
+    "v1": 30,
     "v2": 156,
     "v2_ema_sg": 240
   },
-  "outcome_cell_count": 465,
-  "outcome_count": 23250,
+  "outcome_cell_count": 477,
+  "outcome_count": 23850,
   "planning_seed": 42,
   "retry_attempt_02_cells": [
     {
@@ -36,11 +36,11 @@
   "source": "actor_free_td_lewm_complete_o50_summary",
   "sources": {
     "ema_new_scores": {
-      "cell_count": 120,
+      "cell_count": 132,
       "ema_epoch_sweep_cell_count": 96,
-      "fixed_checkpoint_cell_count": 24,
-      "ledger_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v2_ema_sg_new_scores_cube_seed3072/new_scores/reconciliation_ledger.json",
-      "ledger_sha256": "b3dc4c77468bca45a1fd2af886f39916c4795a82fcfdffe2d02d1119edb5db29"
+      "fixed_checkpoint_cell_count": 36,
+      "ledger_path": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_complete_cube_seed3072/sources/v2_ema_new_scores_96_plus_36/reconciliation_ledger.json",
+      "ledger_sha256": "fc4a133184a5c81fb13b15e6fe740de7bf6566b936ec8a65ae769505b394b26d"
     },
     "legacy": {
       "cell_count": 21,
@@ -300,6 +300,23 @@
       "minimum_success_rate_percent": 40.0,
       "population_sd_percentage_points": 3.605551275463989
     },
+    "fixed_checkpoint_new_scores|v0|g_only_f_rollout_mean": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_new_scores__v0__e10__d__g_only_f_rollout_mean",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v0_d",
+          "success_count": 26,
+          "success_rate_percent": 52.0,
+          "variant": "d"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 52.0,
+      "mean_success_rate_percent": 46.333333333333336,
+      "minimum_success_rate_percent": 40.0,
+      "population_sd_percentage_points": 3.7267799624996494
+    },
     "fixed_checkpoint_new_scores|v1|f_plus_g_first": {
       "best_cells": [
         {
@@ -316,6 +333,23 @@
       "mean_success_rate_percent": 52.0,
       "minimum_success_rate_percent": 50.0,
       "population_sd_percentage_points": 2.0
+    },
+    "fixed_checkpoint_new_scores|v1|g_only_f_rollout_mean": {
+      "best_cells": [
+        {
+          "cell_id": "fixed_checkpoint_new_scores__v1__e10__g3__g_only_f_rollout_mean",
+          "epoch": 10,
+          "method_id": "actor_free_td_lewm_v1_g3",
+          "success_count": 27,
+          "success_rate_percent": 54.0,
+          "variant": "g3"
+        }
+      ],
+      "cell_count": 6,
+      "maximum_success_rate_percent": 54.0,
+      "mean_success_rate_percent": 49.666666666666664,
+      "minimum_success_rate_percent": 42.0,
+      "population_sd_percentage_points": 3.9015666369065416
     },
     "fixed_checkpoint_new_scores|v2|f_plus_g_first": {
       "best_cells": [
