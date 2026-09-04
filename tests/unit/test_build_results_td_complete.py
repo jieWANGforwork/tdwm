@@ -74,6 +74,28 @@ def _ledger_evidence() -> Any:
     )
 
 
+def _endpoint_cells() -> tuple[dict[str, Any], ...]:
+    counts = {
+        ("v1_c", "first_q2"): 26,
+        ("v1_c2", "f_only"): 27,
+        ("v1_c2", "g_only"): 11,
+        ("v1_c2", "f_plus_g"): 18,
+        ("v1_c2", "f_plus_g_first"): 28,
+        ("v1_c2", "g_only_f_rollout_mean"): 14,
+        ("v1_c2", "first_q2"): 29,
+        ("v1_c3", "state_v"): 31,
+    }
+    return tuple(
+        {
+            "method_key": method,
+            "score_mode": mode,
+            "success_count": count,
+            "success_rate_percent": count * 2.0,
+        }
+        for (method, mode), count in counts.items()
+    )
+
+
 def _tiny_png() -> bytes:
     return base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
@@ -152,15 +174,27 @@ def test_complete_grid_requires_477_cells_and_24_fixed_mean_q(tmp_path: Path) ->
         report.load_complete_ledger(old_ledger)
 
 
-def test_mean_q_is_present_for_every_master_row_and_drives_dynamic_analysis() -> None:
+def test_base_analysis_stays_24_by_5_while_master_expands_to_26_by_7() -> None:
     cells = _cells()
 
-    matrix = report._fixed_master_rows(cells)
+    matrix = report._fixed_master_rows(cells, _endpoint_cells())
     analysis = report._fixed_analysis(cells)
-    markdown = report.build_markdown(cells, _ledger_evidence())
+    markdown = report.build_markdown(cells, _ledger_evidence(), _endpoint_cells())
 
-    assert len(matrix) == 24
-    assert all(len(row) == 7 and "—" not in row for row in matrix)
+    assert len(matrix) == 26
+    assert all(len(row) == 9 for row in matrix)
+    assert sum("—" in row for row in matrix) > 0
+    assert next(row for row in matrix if row[:2] == ("V1", "C2"))[2:8] == (
+        "27/50 (54%)",
+        "11/50 (22%)",
+        "18/50 (36%)",
+        "28/50 (56%)",
+        "14/50 (28%)",
+        "29/50 (58%)",
+    )
+    assert next(row for row in matrix if row[:2] == ("V1", "C3"))[-1] == (
+        "31/50 (62%)"
+    )
     assert analysis.best_mean_modes == ("g_only_f_rollout_mean",)
     assert analysis.mode_winners["g_only_f_rollout_mean"] == ("V0-D",)
     assert analysis.overall_winners == ("V0-D + Mean-Q rollout",)
@@ -171,6 +205,28 @@ def test_mean_q_is_present_for_every_master_row_and_drives_dynamic_analysis() ->
     assert "all_o50_results.csv" in markdown
     assert "reconciliation_ledger.json" in markdown
     assert "23,850" in markdown
+    assert "26 个方法 × 7 种评分" in markdown
+    assert "C2 在 6 个可比评分上" in markdown
+
+
+def test_missing_endpoint_ledger_produces_neutral_placeholders_only() -> None:
+    cells = _cells()
+
+    counts = report._fixed_master_counts(cells)
+    matrix = report._fixed_master_rows(cells)
+    markdown = report.build_markdown(cells, _ledger_evidence())
+
+    c2_index = report._master_row_metadata().index(("v1", "c2"))
+    c3_index = report._master_row_metadata().index(("v1", "c3"))
+    assert counts[c2_index] == (None,) * 7
+    assert counts[c3_index] == (None,) * 7
+    assert matrix[c2_index][2:] == ("—",) * 7
+    assert "尚未提供严格 endpoint ledger" in markdown
+
+
+def test_partial_endpoint_extension_is_rejected() -> None:
+    with pytest.raises(report.CompleteResultsError, match="exactly 8 cells"):
+        report._fixed_master_rows(_cells(), _endpoint_cells()[:-1])
 
 
 def test_four_version_mean_rows_include_mean_q_for_v0_and_v1() -> None:
@@ -232,22 +288,32 @@ def test_tied_winner_summaries_are_bounded() -> None:
 
 def test_master_column_maxima_reset_at_every_version_boundary() -> None:
     rows = []
-    for version_index in range(len(report.VERSIONS)):
-        for method_index in range(len(report.VARIANTS)):
+    for version_index, (_version, variants) in enumerate(report.MASTER_ROW_GROUPS):
+        for method_index in range(len(variants)):
             rows.append(
                 tuple(
                     100 * version_index + 10 * column_index + method_index
-                    for column_index in range(len(report.ALL_CONTROLLED_MODES))
+                    for column_index in range(len(report.MASTER_SCORE_MODES))
                 )
             )
 
     maxima = report._fixed_master_version_column_maxima(tuple(rows))
 
     assert len(maxima) == len(report.VERSIONS)
-    assert maxima[0] == (5, 15, 25, 35, 45)
-    assert maxima[1] == (105, 115, 125, 135, 145)
-    assert maxima[2] == (205, 215, 225, 235, 245)
-    assert maxima[3] == (305, 315, 325, 335, 345)
+    assert maxima[0] == (5, 15, 25, 35, 45, 55, 65)
+    assert maxima[1] == (107, 117, 127, 137, 147, 157, 167)
+    assert maxima[2] == (205, 215, 225, 235, 245, 255, 265)
+    assert maxima[3] == (305, 315, 325, 335, 345, 355, 365)
+
+
+def test_dynamic_maxima_ignore_missing_cells_and_empty_columns() -> None:
+    rows = [list(row) for row in report._fixed_master_counts(_cells())]
+    maxima = report._fixed_master_version_column_maxima(rows)
+
+    assert maxima[0][-2:] == (None, None)
+    assert maxima[1][-2:] == (None, None)
+    assert maxima[2][-2:] == (None, None)
+    assert maxima[3][-2:] == (None, None)
 
 
 def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() -> None:
@@ -259,6 +325,7 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     payload = report.build_docx(
         _cells(),
         evidence,
+        _endpoint_cells(),
         v0_training_chart=png,
         v2_training_chart=png,
         training_chart=png,
@@ -274,6 +341,8 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
         "F+G tail",
         "First-Q",
         "Mean-Q",
+        "First-Q2",
+        "State-V",
     ]
     table_headers = [
         [cell.text for cell in table.rows[0].cells] for table in document.tables
@@ -288,30 +357,38 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
         expected_header,
     ]
     master = document.tables[table_headers.index(expected_header)]
-    assert len(master.rows) == 25
-    assert all(len(row.cells) == 8 for row in master.rows)
+    assert len(master.rows) == 27
+    assert all(len(row.cells) == 10 for row in master.rows)
     assert all(cell.text for row in master.rows[1:] for cell in row.cells[2:])
     expected_losses = tuple(
         report.METHOD_LOSS_LABELS[variant]
-        for _version in report.VERSIONS
-        for variant in report.VARIANTS
+        for _version, variant in report._master_row_metadata()
     )
     assert tuple(row.cells[2].text for row in master.rows[1:]) == expected_losses
     master_text = "\n".join(cell.text for row in master.rows for cell in row.cells)
-    assert "—" not in master_text
+    assert "—" in master_text
     assert "–" not in master_text
 
-    count_rows = report._fixed_master_counts(_cells())
+    count_rows = report._fixed_master_counts(_cells(), _endpoint_cells())
     version_maxima = report._fixed_master_version_column_maxima(count_rows)
+    group_by_row = tuple(
+        group_index
+        for group_index, (_version, variants) in enumerate(report.MASTER_ROW_GROUPS)
+        for _variant in variants
+    )
     highlight_fills = {"FFF2CC", "DDEBF7", "B7DEE8"}
     for row_index, (row, counts) in enumerate(zip(master.rows[1:], count_rows)):
-        version_index = row_index // len(report.VARIANTS)
-        row_maximum = max(counts)
+        version_index = group_by_row[row_index]
+        row_maximum = max(count for count in counts if count is not None)
         for score_index, (cell, count) in enumerate(zip(row.cells[3:], counts)):
             shading = cell._tc.tcPr.find(qn("w:shd"))
             fill = "" if shading is None else (shading.get(qn("w:fill")) or "").upper()
-            row_best = count == row_maximum
-            column_best = count == version_maxima[version_index][score_index]
+            row_best = count is not None and count == row_maximum
+            column_best = (
+                count is not None
+                and version_maxima[version_index][score_index] is not None
+                and count == version_maxima[version_index][score_index]
+            )
             expected = (
                 "B7DEE8"
                 if row_best and column_best
@@ -343,9 +420,9 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     ordered_front_sections = [
         "Decision summary",
         "Complete companion ledgers",
-        "How the five evaluation methods are run",
-        "C-G3 fixed E10 comparison and color legend",
-        "Complete 24 by 5 fixed E10 matrix with training losses",
+        "How the seven evaluation methods are run",
+        "26-method, seven-score master comparison and color legend",
+        "One 26 by 7 master matrix with training losses",
         "Best training method and evaluation score",
         "Causes and next objectives",
         "Coverage map",
@@ -364,7 +441,7 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     assert "477" in evidence_text
     assert "23,850" in evidence_text
     assert "477" in document.core_properties.subject
-    assert "five-score" in document.core_properties.subject
+    assert "26-by-7" in document.core_properties.subject
 
     audit_text = "\n".join(
         cell.text
@@ -398,5 +475,5 @@ def test_docx_can_preserve_previous_reference_pages(tmp_path: Path) -> None:
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
 
     assert "PRESERVED PREVIOUS RESULTS TD CONTENT" in text
-    assert "Complete fixed E10 results, methods and analysis" in text
-    assert "How the five evaluation methods are run" in text
+    assert "Complete 26-method, seven-score results and analysis" in text
+    assert "How the seven evaluation methods are run" in text
