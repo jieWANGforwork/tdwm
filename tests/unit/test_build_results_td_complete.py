@@ -252,6 +252,7 @@ def test_master_column_maxima_reset_at_every_version_boundary() -> None:
 
 def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() -> None:
     from docx import Document
+    from docx.oxml.ns import qn
 
     png = _tiny_png()
     evidence = _ledger_evidence()
@@ -292,6 +293,44 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     master_text = "\n".join(cell.text for row in master.rows for cell in row.cells)
     assert "—" not in master_text
     assert "–" not in master_text
+
+    count_rows = report._fixed_master_counts(_cells())
+    version_maxima = report._fixed_master_version_column_maxima(count_rows)
+    highlight_fills = {"FFF2CC", "DDEBF7", "B7DEE8"}
+    for row_index, (row, counts) in enumerate(zip(master.rows[1:], count_rows)):
+        version_index = row_index // len(report.VARIANTS)
+        row_maximum = max(counts)
+        for score_index, (cell, count) in enumerate(zip(row.cells[2:], counts)):
+            shading = cell._tc.tcPr.find(qn("w:shd"))
+            fill = "" if shading is None else (shading.get(qn("w:fill")) or "").upper()
+            row_best = count == row_maximum
+            column_best = count == version_maxima[version_index][score_index]
+            expected = (
+                "B7DEE8"
+                if row_best and column_best
+                else "DDEBF7"
+                if column_best
+                else "FFF2CC"
+                if row_best
+                else None
+            )
+            if expected is None:
+                assert fill not in highlight_fills
+            else:
+                assert fill == expected
+
+            borders = cell._tc.tcPr.find(qn("w:tcBorders"))
+            assert borders is None or all(
+                (edge.get(qn("w:color")) or "").upper() != "2F75B5"
+                for edge in borders
+            )
+
+    legend = document.tables[4]
+    legend_fills = []
+    for row in legend.rows[1:4]:
+        shading = row.cells[0]._tc.tcPr.find(qn("w:shd"))
+        legend_fills.append((shading.get(qn("w:fill")) or "").upper())
+    assert legend_fills == ["FFF2CC", "DDEBF7", "B7DEE8"]
 
     paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text]
     ordered_front_sections = [

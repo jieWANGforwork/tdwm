@@ -1345,7 +1345,7 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
         "",
         "## C–G3 固定 E10 主结果矩阵",
         "",
-        "横向读每一行，可以比较同一个训练方法最适合哪一种评分；纵向读每一列时，以版本为边界，只比较该版本的 C/D/F/G1/G2/G3。Markdown 中 **粗体**是行最佳，`◆` 是同版本列最佳；并列全部标记。DOCX 使用黄色底色和蓝色粗框叠加表示这两种信息。",
+        "横向读每一行，可以比较同一个训练方法最适合哪一种评分；纵向读每一列时，以版本为边界，只比较该版本的 C/D/F/G1/G2/G3。Markdown 中 **粗体**是行最佳，`◆` 是同版本列最佳；并列全部标记。DOCX 使用黄底表示行最佳、蓝底表示同版本列最佳、青色底表示两者同时成立。",
         "",
     ]
     lines += _markdown_table(
@@ -1521,33 +1521,22 @@ def _set_cell_border(
 
 
 def _add_fixed_master_legend(document: Any) -> Any:
-    """Add a literal legend for the two independent winner encodings."""
+    """Add a literal legend for the background-fill winner encodings."""
 
     table = _add_table(
         document,
         ("Marker", "Meaning", "Comparison scope"),
         (
             ("Yellow fill", "Best value in this row", "Five scores for one training method; all ties are marked"),
-            ("Blue outline", "Best value in this column", "Six methods inside the same version only; all ties are marked"),
-            ("Yellow plus blue", "Both winner conditions", "Best in the row and best in the version-specific column"),
+            ("Blue fill", "Best value in this column", "Six methods inside the same version only; all ties are marked"),
+            ("Teal fill", "Both winner conditions", "Best in the row and best in the version-specific column"),
             ("Version band", "Version boundary", "Separates V0, V1, V2 and V2-EMA; it does not encode performance"),
         ),
         (2200, 5200, 7000),
     )
     v2_report._v1._shade_cell(table.rows[1].cells[0], "FFF2CC")
-    _set_cell_border(
-        table.rows[2].cells[0],
-        edges=("top", "bottom", "left", "right"),
-        color="2F75B5",
-        size=22,
-    )
-    v2_report._v1._shade_cell(table.rows[3].cells[0], "FFF2CC")
-    _set_cell_border(
-        table.rows[3].cells[0],
-        edges=("top", "bottom", "left", "right"),
-        color="2F75B5",
-        size=22,
-    )
+    v2_report._v1._shade_cell(table.rows[2].cells[0], "DDEBF7")
+    v2_report._v1._shade_cell(table.rows[3].cells[0], "B7DEE8")
     v2_report._v1._shade_cell(table.rows[4].cells[0], "EDE9FE")
     return table
 
@@ -1623,20 +1612,16 @@ def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
             run.font.size = Pt(8.5)
             row_best = count == row_maximum
             column_best = count == version_column_maxima[version_index][score_index]
-            if row_best:
+            if row_best and column_best:
+                v2_report._v1._shade_cell(cell, "B7DEE8")
+            elif column_best:
+                v2_report._v1._shade_cell(cell, "DDEBF7")
+            elif row_best:
                 v2_report._v1._shade_cell(cell, "FFF2CC")
-            if column_best:
-                _set_cell_border(
-                    cell,
-                    edges=("top", "bottom", "left", "right"),
-                    color="2F75B5",
-                    size=22,
-                )
-                run.font.color.rgb = RGBColor.from_string("1D4ED8")
             run.bold = row_best or column_best
 
     # Merge the repeated version labels into one colored band per six-method
-    # block.  This makes the scope of every blue column marker unambiguous.
+    # block.  This makes the scope of every blue column fill unambiguous.
     for version_index, version in enumerate(VERSIONS):
         first = 1 + version_index * len(VARIANTS)
         last = first + len(VARIANTS) - 1
@@ -1947,9 +1932,9 @@ def build_docx(
         document,
         "Read across a row to compare five evaluation scores for one training method; "
         "read down a column only inside one version block to compare C/D/F/G1/G2/G3. "
-        "Yellow fill marks the best value in that row. A blue outline marks the best "
-        "value in that score column within the same version. When both conditions hold, "
-        "the yellow fill and blue outline appear together; all ties are marked.",
+        "Yellow fill marks the best value in that row. Blue fill marks the best value "
+        "in that score column within the same version. Teal fill marks a value that "
+        "satisfies both conditions; all ties are marked.",
         bold=True,
     )
     _add_fixed_master_legend(document)
@@ -1986,7 +1971,7 @@ def build_docx(
     )
     _add_body(
         document,
-        "This table is the textual counterpart of the blue outlines in the master "
+        "This table is the textual counterpart of the blue fills in the master "
         "matrix. It deliberately resets the column comparison at every version boundary.",
     )
     _add_heading(document, "Fixed E10 means by training version", level=2)
