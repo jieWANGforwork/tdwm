@@ -230,6 +230,26 @@ def test_tied_winner_summaries_are_bounded() -> None:
     assert "V0-M3" not in summary
 
 
+def test_master_column_maxima_reset_at_every_version_boundary() -> None:
+    rows = []
+    for version_index in range(len(report.VERSIONS)):
+        for method_index in range(len(report.VARIANTS)):
+            rows.append(
+                tuple(
+                    100 * version_index + 10 * column_index + method_index
+                    for column_index in range(len(report.ALL_CONTROLLED_MODES))
+                )
+            )
+
+    maxima = report._fixed_master_version_column_maxima(tuple(rows))
+
+    assert len(maxima) == len(report.VERSIONS)
+    assert maxima[0] == (5, 15, 25, 35, 45)
+    assert maxima[1] == (105, 115, 125, 135, 145)
+    assert maxima[2] == (205, 215, 225, 235, 245)
+    assert maxima[3] == (305, 315, 325, 335, 345)
+
+
 def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() -> None:
     from docx import Document
 
@@ -241,6 +261,7 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
         v0_training_chart=png,
         v2_training_chart=png,
         training_chart=png,
+        score_chart=png,
     )
     document = Document(io.BytesIO(payload))
     expected_header = [
@@ -256,9 +277,12 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
         [cell.text for cell in table.rows[0].cells] for table in document.tables
     ]
 
-    assert table_headers[:3] == [
+    assert table_headers[:6] == [
         ["Question", "Answer", "Evidence", "Decision"],
         ["Artifact", "Coverage", "Repository-relative path", "SHA-256"],
+        ["Common protocol field", "Fixed setting"],
+        ["Score", "Actual F and G path", "Cost minimized by CEM", "What is used"],
+        ["Marker", "Meaning", "Comparison scope"],
         expected_header,
     ]
     master = document.tables[table_headers.index(expected_header)]
@@ -273,7 +297,9 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     ordered_front_sections = [
         "Decision summary",
         "Complete companion ledgers",
-        "C-G3 fixed E10 master matrix: 24 training configurations x five scores",
+        "How the five evaluation methods are run",
+        "C-G3 fixed E10 comparison and color legend",
+        "Complete 24 by 5 fixed E10 matrix",
         "Best training method and evaluation score",
         "Causes and next objectives",
         "Coverage map",
@@ -302,3 +328,29 @@ def test_docx_starts_with_complete_decision_view_and_has_full_master_matrix() ->
     )
     assert report.FIXED_SELECTION_RANKS_SHA256 in audit_text
     assert report.FIXED_SELECTION_RANKS_SHA256.startswith("88c204770")
+
+
+def test_docx_can_preserve_previous_reference_pages(tmp_path: Path) -> None:
+    from docx import Document
+
+    base = Document()
+    base.add_paragraph("PRESERVED PREVIOUS RESULTS TD CONTENT")
+    base_path = tmp_path / "base.docx"
+    base.save(base_path)
+    png = _tiny_png()
+
+    payload = report.build_docx(
+        _cells(),
+        _ledger_evidence(),
+        v0_training_chart=png,
+        v2_training_chart=png,
+        training_chart=png,
+        score_chart=png,
+        base_document=base_path,
+    )
+    document = Document(io.BytesIO(payload))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert "PRESERVED PREVIOUS RESULTS TD CONTENT" in text
+    assert "Complete fixed E10 results, methods and analysis" in text
+    assert "How the five evaluation methods are run" in text

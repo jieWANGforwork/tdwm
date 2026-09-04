@@ -117,6 +117,51 @@ MODE_LABELS = {
     "f_plus_g_first": "F + first-Q",
     "g_only_f_rollout_mean": "Mean-Q rollout",
 }
+
+# The five columns in the C-G3 decision matrix share one evaluation protocol.
+# Keep these definitions next to the display labels so the DOCX, Markdown and
+# tests cannot silently drift apart.
+COMMON_EVALUATION_PROTOCOL_ROWS = (
+    ("Environment", "swm/OGBCube-v0"),
+    ("Formal pairs", "The same 50 same-episode start-goal pairs; goal offset 50"),
+    ("CEM", "300 candidates, 30 iterations, 30 elites, planning seed 42, warm start"),
+    ("Execution", "Minimize candidate cost, execute only the first action block A1, then observe and replan"),
+    ("Episode success", "Object-to-goal distance <= 0.04 m within 100 environment steps"),
+    ("Checkpoint", "All five columns in one row use the same fixed epoch-10 checkpoint; no score-specific retraining"),
+)
+
+EVALUATION_METHOD_ROWS = (
+    (
+        "F-only",
+        "F rolls A1...A5 from real z0 and produces imagined z1^F...z5^F; G is not called.",
+        "J_F = ||z5^F - z_g||_2^2",
+        "Uses terminal goal distance at z5; no Q and no gamma.",
+    ),
+    (
+        "G-only",
+        "H=1. G scores the real z0 and first candidate action A1; F is not rolled out.",
+        "J_G = -Q_G(z0,A1,g)",
+        "No explicit goal distance and no gamma; minimizing -Q maximizes Q.",
+    ),
+    (
+        "F+G tail",
+        "F rolls only A1...A4 to z4^F; G evaluates the fifth transition from z4^F with A5.",
+        "J_tail = ||z4^F - z_g||_2^2 - gamma^4 Q_G(z4^F,A5,g)",
+        "Uses z4 goal distance and the deepest imagined-state Q; gamma=0.95.",
+    ),
+    (
+        "F + first-Q",
+        "F completes the five-step rollout; G is read only once at the real z0 with A1.",
+        "J_first = ||z5^F - z_g||_2^2 - 0.25 Q_G(z0,A1,g)",
+        "Uses terminal goal distance; the Q term is not multiplied by gamma^4.",
+    ),
+    (
+        "Mean-Q rollout",
+        "F generates predecessors z0,z1^F,...,z4^F; G scores each aligned pair (z{k-1}^F,Ak).",
+        "J_mean = -(1/5) sum[k=1..5] Q_G(z{k-1}^F,Ak,g)",
+        "No terminal goal distance; z5 is not read by G and gamma is unused.",
+    ),
+)
 LEDGER_SCORE_LABELS = {
     "f_only": "F-only",
     "g_only": "G-only",
@@ -802,6 +847,36 @@ def _fixed_master_counts(
     return tuple(counts)
 
 
+def _fixed_master_version_column_maxima(
+    count_rows: Sequence[Sequence[int]],
+) -> tuple[tuple[int, ...], ...]:
+    """Return five column maxima independently inside each six-method version.
+
+    The result matrix is ordered V0, V1, V2 and V2-EMA, with C/D/F/G1/G2/G3
+    inside every version.  Computing maxima per six-row block is deliberate:
+    the blue marker is a within-version comparison, never a global 24-row one.
+    """
+
+    expected_rows = len(VERSIONS) * len(VARIANTS)
+    if len(count_rows) != expected_rows:
+        raise CompleteResultsError(
+            f"Fixed master matrix must contain {expected_rows} rows."
+        )
+    maxima: list[tuple[int, ...]] = []
+    for version_index in range(len(VERSIONS)):
+        start = version_index * len(VARIANTS)
+        block = count_rows[start : start + len(VARIANTS)]
+        if any(len(row) != len(ALL_CONTROLLED_MODES) for row in block):
+            raise CompleteResultsError("Fixed master score width changed.")
+        maxima.append(
+            tuple(
+                max(int(row[column]) for row in block)
+                for column in range(len(ALL_CONTROLLED_MODES))
+            )
+        )
+    return tuple(maxima)
+
+
 def _fixed_master_markdown_rows(
     cells: Sequence[ResultCell], *, epoch: int = 10
 ) -> tuple[tuple[str, ...], ...]:
@@ -809,21 +884,51 @@ def _fixed_master_markdown_rows(
 
     display_rows = _fixed_master_rows(cells, epoch=epoch)
     count_rows = _fixed_master_counts(cells, epoch=epoch)
-    column_maxima = tuple(
-        max(row[index] for row in count_rows)
-        for index in range(len(ALL_CONTROLLED_MODES))
-    )
+    version_column_maxima = _fixed_master_version_column_maxima(count_rows)
     formatted: list[tuple[str, ...]] = []
-    for display_row, count_row in zip(display_rows, count_rows):
+    for row_index, (display_row, count_row) in enumerate(
+        zip(display_rows, count_rows)
+    ):
+        version_index = row_index // len(VARIANTS)
         row_maximum = max(value for value in count_row if value is not None)
         scores = []
         for index, (display, count) in enumerate(zip(display_row[2:], count_row)):
             text = f"**{display}**" if count == row_maximum else display
-            if count == column_maxima[index]:
-                text = f"★ {text}"
+            if count == version_column_maxima[version_index][index]:
+                text = f"◆ {text}"
             scores.append(text)
         formatted.append((*display_row[:2], *scores))
     return tuple(formatted)
+
+
+def _fixed_version_winner_rows(
+    cells: Sequence[ResultCell], *, epoch: int = 10
+) -> tuple[tuple[str, ...], ...]:
+    """Summarize the blue, within-version winners shown in the master matrix."""
+
+    rows: list[tuple[str, ...]] = []
+    for version in VERSIONS:
+        winners: list[str] = []
+        for mode in ALL_CONTROLLED_MODES:
+            selected = tuple(
+                _find(
+                    cells,
+                    version=version,
+                    variant=variant,
+                    epoch=epoch,
+                    mode=mode,
+                )
+                for variant in VARIANTS
+            )
+            best = max(int(cell["success_count"]) for cell in selected)
+            labels = "/".join(
+                str(cell["variant"]).upper()
+                for cell in selected
+                if int(cell["success_count"]) == best
+            )
+            winners.append(f"{labels} {best}/50")
+        rows.append((VERSION_LABELS[version], *winners))
+    return tuple(rows)
 
 
 def _trajectory_rows(
@@ -1192,7 +1297,7 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
         "",
         "## 方法、网络和训练 loss",
         "",
-        "旧结构消融比较 Successor/critic head 与 LeWM predictor 的连接方式：Serial Decoupled、Serial Coupled、Hybrid、Parallel Real、Goal Hybrid、Imaginary Hybrid、Direct Goal Critic Hybrid。其总目标均为 `L_LeWM + α_u L_TD`，区别在 real/predicted 支路、是否让 TD 梯度进入 LeWM、是否使用 goal projection/imaginary bootstrap/direct scalar critic。旧版阶段性页面不再置于新版决策视图之前；来源文档在历史附录中明确列出。",
+        "旧结构消融比较 Successor/critic head 与 LeWM predictor 的连接方式：Serial Decoupled、Serial Coupled、Hybrid、Parallel Real、Goal Hybrid、Imaginary Hybrid、Direct Goal Critic Hybrid。其总目标均为 `L_LeWM + α_u L_TD`，区别在 real/predicted 支路、是否让 TD 梯度进入 LeWM、是否使用 goal projection/imaginary bootstrap/direct scalar critic。DOCX 继续保留前一版的详细结构、loss、训练曲线与 V0/V1 逐方法说明。",
         "",
         "C–G3 家族共享同一个 TD-JEPA predictor `G`。V0 输入归一化 raw action；V1 改用冻结的 LeWM Action Encoder；V2 联合微调 LeWM/Action Encoder/G；V2-EMA-SG 进一步用 EMA world model、EMA action encoder 与 EMA G 构造完全 stop-gradient target。",
         "",
@@ -1213,13 +1318,22 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
     )
     lines += [
         "",
-        "## 五种推理评分",
+        "## 五种测试方法怎么测",
         "",
-        "- `F-only`：五步 LeWM rollout 的 terminal goal latent distance。",
-        "- `G-only`：只用 `-Q_G(z_0,A_1,g)`，horizon=1。",
-        "- `F+G tail`：F rollout cost 加 final successor tail。",
-        "- `F + first-Q`：`||z_hat_5-z_g||² - 0.25 Q_G(z_0,A_1,g)`。",
-        "- `Mean-Q rollout`：`-(1/5) Σ_k Q_G(z^F_{k-1},A_k,g)`；F 只生成 imagined states。",
+        "统一约定：`z0` 是当前真实图像经部署 encoder 得到的 latent，`z_g` 是 goal 图像的 latent，`z_k^F` 是 LeWM rollout 的 imagined latent。V1/V2/V2-EMA 先用共享 Action Encoder 得到 `e_k=E_A(A_k)`；V0 直接把归一化 25D action block 输入 G。`Q_G(z,A,g)=G(z,e,w(g))^T w(g)`。CEM 始终最小化 cost。",
+        "",
+    ]
+    lines += _markdown_table(
+        ("统一评测字段", "固定设置"), COMMON_EVALUATION_PROTOCOL_ROWS
+    )
+    lines += ["", "五个评分列的实际计算：", ""]
+    lines += _markdown_table(
+        ("评分列", "F/G 的实际路径", "CEM 最小化的 cost", "goal/Q 使用位置"),
+        EVALUATION_METHOD_ROWS,
+    )
+    lines += [
+        "",
+        "V2-EMA 的 EMA world model、EMA Action Encoder 和 EMA G 只构造训练 target；正式 CEM 测试仍部署 online F、online Action Encoder 和 online G。Legacy 7 方法的旧 `G/C-only` 会先由 F 构造 H-1 tail context，不等同于 C-G3 主矩阵里严格 H=1 的 `G-only`。",
         "",
         "## Legacy 7 方法：完整 21 格",
         "",
@@ -1231,7 +1345,7 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
         "",
         "## C–G3 固定 E10 主结果矩阵",
         "",
-        "横向读每一行，可以直接比较同一个训练方法最适合哪一种评分；纵向读每一列，可以比较固定评分下哪个训练方法最好。**粗体**是该行最佳评分，`★` 是该列全局最佳训练配置（并列全部标记）。五种评分在四个版本的 24 个训练配置上均有正式结果。",
+        "横向读每一行，可以比较同一个训练方法最适合哪一种评分；纵向读每一列时，以版本为边界，只比较该版本的 C/D/F/G1/G2/G3。Markdown 中 **粗体**是行最佳，`◆` 是同版本列最佳；并列全部标记。DOCX 使用黄色底色和蓝色粗框叠加表示这两种信息。",
         "",
     ]
     lines += _markdown_table(
@@ -1240,7 +1354,16 @@ def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence)
     )
     lines += [
         "",
-        f"**逐列赢家：** {_column_winner_summary(analysis)}。",
+        "### 每个版本内部的逐列赢家",
+        "",
+    ]
+    lines += _markdown_table(
+        ("版本", "F-only", "G-only", "F+G tail", "First-Q", "Mean-Q"),
+        _fixed_version_winner_rows(cells),
+    )
+    lines += [
+        "",
+        f"**跨四版本的全局逐列赢家（只用于补充分析，不对应 DOCX 蓝框）：** {_column_winner_summary(analysis)}。",
         "",
         "## 训练 / validation loss 证据",
         "",
@@ -1369,20 +1492,78 @@ def _add_table(
     return v2_report._v1._add_table(document, headers=headers, rows=rows, widths=widths)
 
 
-def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
-    """Add the single E10 decision matrix with row/column winner highlighting."""
+def _set_cell_border(
+    cell: Any,
+    *,
+    edges: Sequence[str],
+    color: str,
+    size: int,
+) -> None:
+    """Apply an explicit Word cell border without replacing unrelated edges."""
 
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    properties = cell._tc.get_or_add_tcPr()
+    borders = properties.find(qn("w:tcBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tcBorders")
+        properties.append(borders)
+    for edge in edges:
+        element = borders.find(qn(f"w:{edge}"))
+        if element is None:
+            element = OxmlElement(f"w:{edge}")
+            borders.append(element)
+        element.set(qn("w:val"), "single")
+        element.set(qn("w:sz"), str(size))
+        element.set(qn("w:space"), "0")
+        element.set(qn("w:color"), color)
+
+
+def _add_fixed_master_legend(document: Any) -> Any:
+    """Add a literal legend for the two independent winner encodings."""
+
+    table = _add_table(
+        document,
+        ("Marker", "Meaning", "Comparison scope"),
+        (
+            ("Yellow fill", "Best value in this row", "Five scores for one training method; all ties are marked"),
+            ("Blue outline", "Best value in this column", "Six methods inside the same version only; all ties are marked"),
+            ("Yellow plus blue", "Both winner conditions", "Best in the row and best in the version-specific column"),
+            ("Version band", "Version boundary", "Separates V0, V1, V2 and V2-EMA; it does not encode performance"),
+        ),
+        (2200, 5200, 7000),
+    )
+    v2_report._v1._shade_cell(table.rows[1].cells[0], "FFF2CC")
+    _set_cell_border(
+        table.rows[2].cells[0],
+        edges=("top", "bottom", "left", "right"),
+        color="2F75B5",
+        size=22,
+    )
+    v2_report._v1._shade_cell(table.rows[3].cells[0], "FFF2CC")
+    _set_cell_border(
+        table.rows[3].cells[0],
+        edges=("top", "bottom", "left", "right"),
+        color="2F75B5",
+        size=22,
+    )
+    v2_report._v1._shade_cell(table.rows[4].cells[0], "EDE9FE")
+    return table
+
+
+def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
+    """Add the E10 matrix with row and within-version column winners."""
+
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Pt
+    from docx.shared import Pt, RGBColor
 
     display_rows = _fixed_master_rows(cells)
     count_rows = _fixed_master_counts(cells)
-    column_maxima = tuple(
-        max(row[index] for row in count_rows)
-        for index in range(len(ALL_CONTROLLED_MODES))
-    )
+    version_column_maxima = _fixed_master_version_column_maxima(count_rows)
     table = _add_table(
         document,
         ("Version", "Method", "F-only", "G-only", "F+G tail", "First-Q", "Mean-Q"),
@@ -1408,12 +1589,32 @@ def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
                     margins.append(element)
                 element.set(qn("w:w"), "55")
                 element.set(qn("w:type"), "dxa")
-    for row_index, (row, counts) in enumerate(zip(table.rows[1:], count_rows), start=0):
+    group_styles = (
+        ("E2E8F0", "475569"),
+        ("D1FAE5", "047857"),
+        ("FEF3C7", "B45309"),
+        ("EDE9FE", "6D28D9"),
+    )
+    for row_index, (row, counts) in enumerate(
+        zip(table.rows[1:], count_rows), start=0
+    ):
+        version_index = row_index // len(VARIANTS)
+        group_fill, group_accent = group_styles[version_index]
         row_maximum = max(value for value in counts if value is not None)
-        band_fill = "F8FAFC" if (row_index // len(VARIANTS)) % 2 == 0 else "EEF4F8"
-        for column in (0, 1):
-            v2_report._v1._shade_cell(row.cells[column], band_fill)
-            row.cells[column].paragraphs[0].runs[0].bold = True
+        v2_report._v1._shade_cell(row.cells[0], group_fill)
+        v2_report._v1._shade_cell(row.cells[1], "F8FAFC")
+        row.cells[0].paragraphs[0].runs[0].bold = True
+        row.cells[1].paragraphs[0].runs[0].bold = True
+        if row_index % len(VARIANTS) == 0:
+            for cell in row.cells:
+                _set_cell_border(
+                    cell, edges=("top",), color=group_accent, size=24
+                )
+        if row_index % len(VARIANTS) == len(VARIANTS) - 1:
+            for cell in row.cells:
+                _set_cell_border(
+                    cell, edges=("bottom",), color=group_accent, size=24
+                )
         for score_index, count in enumerate(counts):
             cell = row.cells[score_index + 2]
             paragraph = cell.paragraphs[0]
@@ -1421,14 +1622,39 @@ def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
             run = paragraph.runs[0]
             run.font.size = Pt(8.5)
             row_best = count == row_maximum
-            column_best = count == column_maxima[score_index]
-            if row_best and column_best:
-                v2_report._v1._shade_cell(cell, "B7DEE8")
-            elif column_best:
-                v2_report._v1._shade_cell(cell, "DDEBF7")
-            elif row_best:
+            column_best = count == version_column_maxima[version_index][score_index]
+            if row_best:
                 v2_report._v1._shade_cell(cell, "FFF2CC")
+            if column_best:
+                _set_cell_border(
+                    cell,
+                    edges=("top", "bottom", "left", "right"),
+                    color="2F75B5",
+                    size=22,
+                )
+                run.font.color.rgb = RGBColor.from_string("1D4ED8")
             run.bold = row_best or column_best
+
+    # Merge the repeated version labels into one colored band per six-method
+    # block.  This makes the scope of every blue column marker unambiguous.
+    for version_index, version in enumerate(VERSIONS):
+        first = 1 + version_index * len(VARIANTS)
+        last = first + len(VARIANTS) - 1
+        merged = table.cell(first, 0).merge(table.cell(last, 0))
+        merged.text = VERSION_LABELS[version]
+        merged.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        merged.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        merged_run = merged.paragraphs[0].runs[0]
+        merged_run.bold = True
+        merged_run.font.size = Pt(10)
+        merged_run.font.color.rgb = RGBColor.from_string(group_styles[version_index][1])
+        v2_report._v1._shade_cell(merged, group_styles[version_index][0])
+        _set_cell_border(
+            merged,
+            edges=("top", "bottom"),
+            color=group_styles[version_index][1],
+            size=24,
+        )
     return table
 
 
@@ -1500,6 +1726,8 @@ def build_docx(
     v0_training_chart: bytes,
     v2_training_chart: bytes,
     training_chart: bytes,
+    score_chart: bytes | None = None,
+    base_document: str | Path | None = None,
 ) -> bytes:
     try:
         from docx import Document
@@ -1540,15 +1768,44 @@ def build_docx(
     tail_tie_count = sum(delta == 0 for delta in tail_deltas)
     tail_harm_count = sum(delta < 0 for delta in tail_deltas)
     tail_mean_delta = sum(tail_deltas) / len(tail_deltas)
-    document = Document()
-    _configure_primary_document(document)
+    if base_document is None:
+        document = Document()
+        _configure_primary_document(document)
+    else:
+        document = Document(str(base_document))
+        # Preserve the previous Legacy and V0/V1 pages verbatim, then start a
+        # fresh landscape section for the complete 477-cell decision report.
+        v2_report._v1._configure_append_section(document)
+        v2_report._set_header_text(
+            document.sections[-1],
+            f"Results TD complete ledger · Cube O50 · {COMPLETE_CELL_COUNT} verified cells",
+        )
+        for paragraph in document.paragraphs:
+            if paragraph.text.startswith("Locked protocol:"):
+                notice = paragraph.add_run(
+                    " The complete five-score cross-version section follows the preserved "
+                    "Legacy and V0/V1 reference pages."
+                )
+                v2_report._v1._set_run_font(
+                    notice, size=9.5, color="7A5A00", bold=True
+                )
+                break
+        core = document.core_properties
+        core.title = "Results TD Complete Experiment Ledger"
+        core.subject = (
+            f"{COMPLETE_CELL_COUNT} verified O50 cells and fixed E10 five-score comparison"
+        )
+        core.keywords = (
+            "TD-JEPA, Actor-Free TD-LeWM, fixed E10, five scores, "
+            f"{COMPLETE_CELL_COUNT} cells, {COMPLETE_OUTCOME_COUNT} outcomes"
+        )
 
     kicker = document.add_paragraph(style="Report Kicker")
     kicker.add_run("RESULTS TD / COMPLETE EXPERIMENT LEDGER")
     v2_report._font_paragraph(kicker, size=9.5, color="5C6975")
     title = document.add_paragraph()
     title.paragraph_format.space_after = Pt(4)
-    run = title.add_run("Fixed E10 decision matrix across methods and scores")
+    run = title.add_run("Complete fixed E10 results, methods and analysis")
     v2_report._v1._set_run_font(run, size=24, color="0B2545", bold=True)
     subtitle = document.add_paragraph()
     subtitle.paragraph_format.space_after = Pt(10)
@@ -1558,8 +1815,9 @@ def build_docx(
     v2_report._v1._set_run_font(run, size=12, color="4B5563")
     _add_body(
         document,
-        f"This decision view is backed by the complete {COMPLETE_CELL_COUNT}-cell audit, but its main "
-        "result table shows only the final E10 checkpoint. Every displayed result "
+        "The preceding pages preserve the detailed Legacy and V0/V1 method reference "
+        "from the previous document. This final section is backed by the complete "
+        f"{COMPLETE_CELL_COUNT}-cell audit, while its main result table uses only E10. Every displayed result "
         f"uses the same 50 start-goal pairs; the companion ledgers retain all "
         f"{COMPLETE_OUTCOME_COUNT:,} Boolean outcomes. All training uses one seed, so "
         "no statistical-significance claim is made.",
@@ -1642,18 +1900,64 @@ def build_docx(
         bold=True,
     )
 
+    _add_heading(document, "How the five evaluation methods are run", page_break=True)
+    _add_body(
+        document,
+        "This section defines the five columns in the C-G3 matrix. z0 is the latent "
+        "of the current real observation, z_g is the latent of the supplied goal image, "
+        "and z_k^F is the imagined latent after k LeWM steps. The goal readout is "
+        "w(g)=sqrt(192) z_g/||z_g||_2 and Q_G(z,A,g)=G(z,e,w(g))^T w(g).",
+    )
+    _add_table(
+        document,
+        ("Common protocol field", "Fixed setting"),
+        COMMON_EVALUATION_PROTOCOL_ROWS,
+        (3100, 11300),
+    )
+    _add_body(
+        document,
+        "Action input differs only by training version: V0 passes the normalized 25D "
+        "action block directly to G; V1, V2 and V2-EMA use e=E_A(A) from the shared "
+        "Action Encoder. Every A_k is one 25D block of five consecutive 5D primitive actions.",
+        bold=True,
+    )
+    _add_table(
+        document,
+        ("Score", "Actual F and G path", "Cost minimized by CEM", "What is used"),
+        EVALUATION_METHOD_ROWS,
+        (1800, 4300, 4200, 4100),
+    )
+    _add_body(
+        document,
+        "V2-EMA still deploys the online F, online Action Encoder and online G. The EMA "
+        "modules construct the stopped training target and are checked when loading the "
+        "checkpoint, but they do not score CEM candidates. The Legacy G/C-only column is "
+        "different: its older adapter first uses F to construct an H-1 tail state; only "
+        "Direct Goal Critic Hybrid replaces G with a scalar C.",
+        color="7A5A00",
+        bold=True,
+    )
+
     _add_heading(
         document,
-        "C-G3 fixed E10 master matrix: 24 training configurations x five scores",
+        "C-G3 fixed E10 comparison and color legend",
         page_break=True,
     )
     _add_body(
         document,
         "Read across a row to compare five evaluation scores for one training method; "
-        "read down a column to compare 24 training configurations under one score. "
-        "Gold marks a row winner, blue marks a column winner, and teal marks both. "
-        "Ties are all highlighted in the matrix.",
+        "read down a column only inside one version block to compare C/D/F/G1/G2/G3. "
+        "Yellow fill marks the best value in that row. A blue outline marks the best "
+        "value in that score column within the same version. When both conditions hold, "
+        "the yellow fill and blue outline appear together; all ties are marked.",
         bold=True,
+    )
+    _add_fixed_master_legend(document)
+    _add_heading(
+        document,
+        "Complete 24 by 5 fixed E10 matrix",
+        level=2,
+        page_break=True,
     )
     _add_fixed_master_table(document, cells)
 
@@ -1672,6 +1976,18 @@ def build_docx(
         f"mean ({analysis.best_mean_percent:.1f}%). These are single-seed comparisons.",
         color="7A5A00",
         bold=True,
+    )
+    _add_heading(document, "Within-version column winners", level=2)
+    _add_table(
+        document,
+        ("Version", "F-only", "G-only", "F+G tail", "First-Q", "Mean-Q"),
+        _fixed_version_winner_rows(cells),
+        (1800, 2520, 2520, 2520, 2520, 2520),
+    )
+    _add_body(
+        document,
+        "This table is the textual counterpart of the blue outlines in the master "
+        "matrix. It deliberately resets the column comparison at every version boundary.",
     )
     _add_heading(document, "Fixed E10 means by training version", level=2)
     _add_table(
@@ -1751,6 +2067,42 @@ def build_docx(
         ),
         (2800, 4100, 4200, 3300),
     )
+    _add_heading(document, "Reasoning from the fixed matrix", level=2)
+    _add_body(
+        document,
+        f"First, V0 and V1 share the same F-only result for all six methods, while "
+        f"the version mean falls from {analysis.version_mode_means[('v1', 'f_only')]:.1f}% "
+        f"in V1 to {analysis.version_mode_means[('v2', 'f_only')]:.1f}% in V2. Because "
+        "F-only does not call G at inference, the drop cannot be explained by a bad G "
+        "readout alone. It is consistent with joint TD fine-tuning changing the deployed "
+        "world-model representation or prediction quality.",
+    )
+    _add_body(
+        document,
+        f"Second, replacing raw actions with the shared Action Encoder raises the version "
+        f"mean from {analysis.version_mode_means[('v0', 'g_only')]:.1f}% to "
+        f"{analysis.version_mode_means[('v1', 'g_only')]:.1f}% for G-only and from "
+        f"{analysis.version_mode_means[('v0', 'f_plus_g_first')]:.1f}% to "
+        f"{analysis.version_mode_means[('v1', 'f_plus_g_first')]:.1f}% for First-Q. "
+        "This supports keeping the semantic action embedding, although one training seed "
+        "does not establish causality.",
+    )
+    _add_body(
+        document,
+        f"Third, F+G tail improves {tail_gain_count} of 24 fixed configurations, ties "
+        f"{tail_tie_count}, and hurts {tail_harm_count}; its mean change from F-only is "
+        f"{_signed_pp(tail_mean_delta)}. The tail reads G at the deepest imagined state, "
+        "so rollout distribution shift and Q scale can either help or interfere. First-Q "
+        "keeps Q on the real z0 and therefore avoids that specific source of error.",
+    )
+    _add_body(
+        document,
+        f"Finally, Mean-Q averages five Q values but four of them use imagined predecessor "
+        f"states. Its 24-configuration mean is {analysis.mode_means['g_only_f_rollout_mean']:.1f}%. "
+        "Averaging reduces dependence on one tail state, but it also repeats exposure to "
+        "imagined-state error. The per-version and per-method results therefore matter more "
+        "than the name of the aggregation rule.",
+    )
     _add_body(
         document,
         "Recommended next experiment: freeze the V1 encoder/world model, compare "
@@ -1778,8 +2130,9 @@ def build_docx(
     )
     _add_body(
         document,
-        "The complete E3-E10 trajectories remain in the audited companion ledgers; "
-        "the decision matrix in this document deliberately uses one fixed E10 checkpoint.",
+        "The decision matrix deliberately uses one fixed E10 checkpoint. The full V2 "
+        "and V2-EMA E3-E10 trajectories are reproduced later as diagnostics and remain "
+        "available in the audited companion ledgers.",
     )
 
     _add_heading(document, "V2 / V2-EMA network, target and loss", page_break=True)
@@ -1861,8 +2214,8 @@ def build_docx(
         document,
         "Training totals are method-specific and cannot be ranked by absolute height. "
         "Use them only as within-method convergence diagnostics. The following charts "
-        "show V0, V2 and V2-EMA; legacy and V1 curves remain in the historical source "
-        "report. All numeric rows and E3-E10 O50 trajectories remain in the companion ledgers.",
+        "show V0, V2 and V2-EMA; the preserved opening pages contain the Legacy and V1 "
+        "curves. All numeric rows and E3-E10 O50 trajectories remain in the companion ledgers.",
     )
     v2_report._add_picture(
         document,
@@ -1881,6 +2234,69 @@ def build_docx(
         training_chart,
         title="Figure 3. V2-EMA-SG training and validation loss (E1-E10)",
         description="Training and validation total-loss trajectories for C, D, F, G1, G2 and G3.",
+    )
+    if score_chart is not None:
+        v2_report._add_picture(
+            document,
+            score_chart,
+            title="Figure 4. V2-EMA First-Q and Mean-Q trajectories (E3-E10)",
+            description="Formal O50 checkpoint trajectories for the two added evaluation scores across C, D, F, G1, G2 and G3.",
+        )
+
+    for version, modes, label in (
+        ("v2", ORIGINAL_MODES, "V2"),
+        ("v2_ema_sg", ALL_CONTROLLED_MODES, "V2-EMA"),
+    ):
+        _add_heading(document, f"{label} exact checkpoint trajectories", page_break=True)
+        _add_body(
+            document,
+            "These E3-E10 tables are diagnostic only. The main matrix remains fixed at "
+            "E10, so no value below is substituted after looking at the formal O50 pairs.",
+            color="7A5A00",
+            bold=True,
+        )
+        for index, mode in enumerate(modes):
+            _add_heading(
+                document,
+                MODE_LABELS[mode],
+                level=2,
+                page_break=index > 0,
+            )
+            _add_table(
+                document,
+                ("Epoch", "C", "D", "F", "G1", "G2", "G3"),
+                _trajectory_rows(cells, version, mode),
+                (1600, 2130, 2130, 2130, 2130, 2130, 2150),
+            )
+
+    _add_heading(document, "Post-hoc checkpoint diagnosis", page_break=True)
+    _add_body(
+        document,
+        "The maxima in this section were selected after observing E3-E10 on the same "
+        "O50 pairs. They describe instability and selection risk; they are not formal "
+        "replacements for the fixed E10 results.",
+        color="9C2F17",
+        bold=True,
+    )
+    _add_table(
+        document,
+        ("Version", "Score", "Post-hoc best", "Best", "Best at E10"),
+        _global_posthoc_rows(cells),
+        (1900, 3000, 3700, 2900, 2900),
+    )
+    _add_heading(document, "V2-EMA new-score stability", level=2)
+    _add_table(
+        document,
+        ("Method", "Score", "Mean", "Sigma pp", "Best", "E10"),
+        _ema_new_stability_rows(cells),
+        (1500, 3600, 2100, 2200, 2900, 2100),
+    )
+    _add_heading(document, "V2-EMA training variants", level=2)
+    _add_table(
+        document,
+        ("Training variant", "Five-score mean", "Best readout", "Best rate"),
+        _ema_variant_mean_rows(cells),
+        (2600, 3100, 5600, 3100),
     )
 
     _add_heading(document, "Audit boundary", page_break=True)
@@ -1914,26 +2330,20 @@ def build_docx(
         (3500, 10900),
     )
 
-    _add_heading(
-        document,
-        "Historical appendix — superseded locked source report",
-        page_break=True,
-    )
-    _add_body(
-        document,
-        "The earlier locked V0/V1 report is retained as a historical source at "
-        f"{_display_path(Path(DEFAULT_BASE_DOCUMENT))}. Its stage-specific three-score "
-        "and 18-run statements are not embedded ahead of this report and do not override "
-        "the complete 24-by-five fixed-E10 decision matrix.",
-        color="7A5A00",
-        bold=True,
-    )
-    _add_body(
-        document,
-        "Use the historical source for legacy/V0/V1 architecture detail and training "
-        "curves only. Use this document and its fingerprinted companion ledgers for all "
-        "current cross-version result comparisons.",
-    )
+    if base_document is None:
+        _add_heading(
+            document,
+            "Historical source document",
+            page_break=True,
+        )
+        _add_body(
+            document,
+            "The detailed Legacy and V0/V1 reference is stored at "
+            f"{_display_path(Path(DEFAULT_BASE_DOCUMENT))}. Use the current fixed-E10 "
+            "matrix and its fingerprinted ledgers for cross-version comparisons.",
+            color="7A5A00",
+            bold=True,
+        )
 
     stream = io.BytesIO()
     document.save(stream)
@@ -2015,6 +2425,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         v0_training_chart=v0_training_chart,
         v2_training_chart=v2_training_chart,
         training_chart=training_chart,
+        score_chart=score_chart,
+        base_document=base_inputs.base_document,
     )
     markdown_path = Path(args.markdown_output)
     docx_path = Path(args.docx_output)

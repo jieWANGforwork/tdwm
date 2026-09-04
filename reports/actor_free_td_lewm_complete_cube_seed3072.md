@@ -32,7 +32,7 @@
 
 ## 方法、网络和训练 loss
 
-旧结构消融比较 Successor/critic head 与 LeWM predictor 的连接方式：Serial Decoupled、Serial Coupled、Hybrid、Parallel Real、Goal Hybrid、Imaginary Hybrid、Direct Goal Critic Hybrid。其总目标均为 `L_LeWM + α_u L_TD`，区别在 real/predicted 支路、是否让 TD 梯度进入 LeWM、是否使用 goal projection/imaginary bootstrap/direct scalar critic。旧版阶段性页面不再置于新版决策视图之前；来源文档在历史附录中明确列出。
+旧结构消融比较 Successor/critic head 与 LeWM predictor 的连接方式：Serial Decoupled、Serial Coupled、Hybrid、Parallel Real、Goal Hybrid、Imaginary Hybrid、Direct Goal Critic Hybrid。其总目标均为 `L_LeWM + α_u L_TD`，区别在 real/predicted 支路、是否让 TD 梯度进入 LeWM、是否使用 goal projection/imaginary bootstrap/direct scalar critic。DOCX 继续保留前一版的详细结构、loss、训练曲线与 V0/V1 逐方法说明。
 
 C–G3 家族共享同一个 TD-JEPA predictor `G`。V0 输入归一化 raw action；V1 改用冻结的 LeWM Action Encoder；V2 联合微调 LeWM/Action Encoder/G；V2-EMA-SG 进一步用 EMA world model、EMA action encoder 与 EMA G 构造完全 stop-gradient target。
 
@@ -53,13 +53,30 @@ $$L_{total}=L_{pred}+0.09L_{SIGReg}+\rho(u)(L_{method}^{real}+L_{method}^{pred})
 | G2 | A_i = sg[q_i5 - (1/5) sum_{j=1}^5 q_ij] | L_G2^b = mean_i[w_i(A) l_i^b] | Five zero-suffix action prefixes; full-minus-prefix-mean signal. |
 | G3 | A_i = sg[(1/4) sum_{j=1}^4(q_i,j+1-q_ij)] | L_G3^b = mean_i[w_i(A) l_i^b] | Five prefixes; mean adjacent marginal score gain. |
 
-## 五种推理评分
+## 五种测试方法怎么测
 
-- `F-only`：五步 LeWM rollout 的 terminal goal latent distance。
-- `G-only`：只用 `-Q_G(z_0,A_1,g)`，horizon=1。
-- `F+G tail`：F rollout cost 加 final successor tail。
-- `F + first-Q`：`||z_hat_5-z_g||² - 0.25 Q_G(z_0,A_1,g)`。
-- `Mean-Q rollout`：`-(1/5) Σ_k Q_G(z^F_{k-1},A_k,g)`；F 只生成 imagined states。
+统一约定：`z0` 是当前真实图像经部署 encoder 得到的 latent，`z_g` 是 goal 图像的 latent，`z_k^F` 是 LeWM rollout 的 imagined latent。V1/V2/V2-EMA 先用共享 Action Encoder 得到 `e_k=E_A(A_k)`；V0 直接把归一化 25D action block 输入 G。`Q_G(z,A,g)=G(z,e,w(g))^T w(g)`。CEM 始终最小化 cost。
+
+| 统一评测字段 | 固定设置 |
+| --- | ---: |
+| Environment | swm/OGBCube-v0 |
+| Formal pairs | The same 50 same-episode start-goal pairs; goal offset 50 |
+| CEM | 300 candidates, 30 iterations, 30 elites, planning seed 42, warm start |
+| Execution | Minimize candidate cost, execute only the first action block A1, then observe and replan |
+| Episode success | Object-to-goal distance <= 0.04 m within 100 environment steps |
+| Checkpoint | All five columns in one row use the same fixed epoch-10 checkpoint; no score-specific retraining |
+
+五个评分列的实际计算：
+
+| 评分列 | F/G 的实际路径 | CEM 最小化的 cost | goal/Q 使用位置 |
+| --- | ---: | ---: | ---: |
+| F-only | F rolls A1...A5 from real z0 and produces imagined z1^F...z5^F; G is not called. | J_F = ||z5^F - z_g||_2^2 | Uses terminal goal distance at z5; no Q and no gamma. |
+| G-only | H=1. G scores the real z0 and first candidate action A1; F is not rolled out. | J_G = -Q_G(z0,A1,g) | No explicit goal distance and no gamma; minimizing -Q maximizes Q. |
+| F+G tail | F rolls only A1...A4 to z4^F; G evaluates the fifth transition from z4^F with A5. | J_tail = ||z4^F - z_g||_2^2 - gamma^4 Q_G(z4^F,A5,g) | Uses z4 goal distance and the deepest imagined-state Q; gamma=0.95. |
+| F + first-Q | F completes the five-step rollout; G is read only once at the real z0 with A1. | J_first = ||z5^F - z_g||_2^2 - 0.25 Q_G(z0,A1,g) | Uses terminal goal distance; the Q term is not multiplied by gamma^4. |
+| Mean-Q rollout | F generates predecessors z0,z1^F,...,z4^F; G scores each aligned pair (z{k-1}^F,Ak). | J_mean = -(1/5) sum[k=1..5] Q_G(z{k-1}^F,Ak,g) | No terminal goal distance; z5 is not read by G and gamma is unused. |
+
+V2-EMA 的 EMA world model、EMA Action Encoder 和 EMA G 只构造训练 target；正式 CEM 测试仍部署 online F、online Action Encoder 和 online G。Legacy 7 方法的旧 `G/C-only` 会先由 F 构造 H-1 tail context，不等同于 C-G3 主矩阵里严格 H=1 的 `G-only`。
 
 ## Legacy 7 方法：完整 21 格
 
@@ -75,36 +92,45 @@ $$L_{total}=L_{pred}+0.09L_{SIGReg}+\rho(u)(L_{method}^{real}+L_{method}^{pred})
 
 ## C–G3 固定 E10 主结果矩阵
 
-横向读每一行，可以直接比较同一个训练方法最适合哪一种评分；纵向读每一列，可以比较固定评分下哪个训练方法最好。**粗体**是该行最佳评分，`★` 是该列全局最佳训练配置（并列全部标记）。五种评分在四个版本的 24 个训练配置上均有正式结果。
+横向读每一行，可以比较同一个训练方法最适合哪一种评分；纵向读每一列时，以版本为边界，只比较该版本的 C/D/F/G1/G2/G3。Markdown 中 **粗体**是行最佳，`◆` 是同版本列最佳；并列全部标记。DOCX 使用黄色底色和蓝色粗框叠加表示这两种信息。
 
 | 版本 | 训练方法 | F-only | G-only | F+G tail | First-Q | Mean-Q |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| V0 | C | ★ 23/50 (46%) | 18/50 (36%) | 24/50 (48%) | **26/50 (52%)** | 22/50 (44%) |
-| V0 | D | ★ 23/50 (46%) | 20/50 (40%) | 21/50 (42%) | 24/50 (48%) | **26/50 (52%)** |
-| V0 | F | ★ 23/50 (46%) | 19/50 (38%) | 20/50 (40%) | **24/50 (48%)** | **24/50 (48%)** |
-| V0 | G1 | ★ 23/50 (46%) | 16/50 (32%) | **25/50 (50%)** | 20/50 (40%) | 20/50 (40%) |
-| V0 | G2 | ★ 23/50 (46%) | 16/50 (32%) | **25/50 (50%)** | 23/50 (46%) | 23/50 (46%) |
-| V0 | G3 | ★ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **24/50 (48%)** | **24/50 (48%)** |
-| V1 | C | ★ 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | ★ **28/50 (56%)** | 21/50 (42%) |
-| V1 | D | ★ 23/50 (46%) | 22/50 (44%) | 21/50 (42%) | 25/50 (50%) | **26/50 (52%)** |
-| V1 | F | ★ 23/50 (46%) | ★ 23/50 (46%) | 24/50 (48%) | **26/50 (52%)** | **26/50 (52%)** |
-| V1 | G1 | ★ 23/50 (46%) | 21/50 (42%) | 24/50 (48%) | **26/50 (52%)** | 25/50 (50%) |
-| V1 | G2 | ★ 23/50 (46%) | 21/50 (42%) | **25/50 (50%)** | **25/50 (50%)** | 24/50 (48%) |
-| V1 | G3 | ★ 23/50 (46%) | 19/50 (38%) | ★ **27/50 (54%)** | 26/50 (52%) | ★ **27/50 (54%)** |
-| V2 | C | 13/50 (26%) | **20/50 (40%)** | 16/50 (32%) | 19/50 (38%) | 10/50 (20%) |
-| V2 | D | 16/50 (32%) | 18/50 (36%) | 16/50 (32%) | 21/50 (42%) | **24/50 (48%)** |
-| V2 | F | 15/50 (30%) | 19/50 (38%) | 13/50 (26%) | 21/50 (42%) | **22/50 (44%)** |
+| V0 | C | ◆ 23/50 (46%) | 18/50 (36%) | 24/50 (48%) | ◆ **26/50 (52%)** | 22/50 (44%) |
+| V0 | D | ◆ 23/50 (46%) | ◆ 20/50 (40%) | 21/50 (42%) | 24/50 (48%) | ◆ **26/50 (52%)** |
+| V0 | F | ◆ 23/50 (46%) | 19/50 (38%) | 20/50 (40%) | **24/50 (48%)** | **24/50 (48%)** |
+| V0 | G1 | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 20/50 (40%) | 20/50 (40%) |
+| V0 | G2 | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 23/50 (46%) | 23/50 (46%) |
+| V0 | G3 | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **24/50 (48%)** | **24/50 (48%)** |
+| V1 | C | ◆ 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | ◆ **28/50 (56%)** | 21/50 (42%) |
+| V1 | D | ◆ 23/50 (46%) | 22/50 (44%) | 21/50 (42%) | 25/50 (50%) | **26/50 (52%)** |
+| V1 | F | ◆ 23/50 (46%) | ◆ 23/50 (46%) | 24/50 (48%) | **26/50 (52%)** | **26/50 (52%)** |
+| V1 | G1 | ◆ 23/50 (46%) | 21/50 (42%) | 24/50 (48%) | **26/50 (52%)** | 25/50 (50%) |
+| V1 | G2 | ◆ 23/50 (46%) | 21/50 (42%) | **25/50 (50%)** | **25/50 (50%)** | 24/50 (48%) |
+| V1 | G3 | ◆ 23/50 (46%) | 19/50 (38%) | ◆ **27/50 (54%)** | 26/50 (52%) | ◆ **27/50 (54%)** |
+| V2 | C | 13/50 (26%) | ◆ **20/50 (40%)** | ◆ 16/50 (32%) | 19/50 (38%) | 10/50 (20%) |
+| V2 | D | ◆ 16/50 (32%) | 18/50 (36%) | ◆ 16/50 (32%) | ◆ 21/50 (42%) | ◆ **24/50 (48%)** |
+| V2 | F | 15/50 (30%) | 19/50 (38%) | 13/50 (26%) | ◆ 21/50 (42%) | **22/50 (44%)** |
 | V2 | G1 | 12/50 (24%) | 17/50 (34%) | 13/50 (26%) | **19/50 (38%)** | 17/50 (34%) |
 | V2 | G2 | 12/50 (24%) | 18/50 (36%) | 13/50 (26%) | **20/50 (40%)** | 13/50 (26%) |
 | V2 | G3 | 10/50 (20%) | 14/50 (28%) | 11/50 (22%) | **19/50 (38%)** | 17/50 (34%) |
 | V2-EMA | C | 12/50 (24%) | 18/50 (36%) | 12/50 (24%) | **20/50 (40%)** | 14/50 (28%) |
-| V2-EMA | D | 15/50 (30%) | 19/50 (38%) | 16/50 (32%) | **22/50 (44%)** | 19/50 (38%) |
-| V2-EMA | F | 15/50 (30%) | 19/50 (38%) | 17/50 (34%) | 22/50 (44%) | **23/50 (46%)** |
-| V2-EMA | G1 | 15/50 (30%) | 15/50 (30%) | 11/50 (22%) | 19/50 (38%) | **21/50 (42%)** |
-| V2-EMA | G2 | 12/50 (24%) | **20/50 (40%)** | 16/50 (32%) | 18/50 (36%) | 17/50 (34%) |
+| V2-EMA | D | ◆ 15/50 (30%) | 19/50 (38%) | 16/50 (32%) | ◆ **22/50 (44%)** | 19/50 (38%) |
+| V2-EMA | F | ◆ 15/50 (30%) | 19/50 (38%) | ◆ 17/50 (34%) | ◆ 22/50 (44%) | ◆ **23/50 (46%)** |
+| V2-EMA | G1 | ◆ 15/50 (30%) | 15/50 (30%) | 11/50 (22%) | 19/50 (38%) | **21/50 (42%)** |
+| V2-EMA | G2 | 12/50 (24%) | ◆ **20/50 (40%)** | 16/50 (32%) | 18/50 (36%) | 17/50 (34%) |
 | V2-EMA | G3 | 12/50 (24%) | 17/50 (34%) | 13/50 (26%) | **21/50 (42%)** | 17/50 (34%) |
 
-**逐列赢家：** F-only = 12 tied: V0-C, V0-D, V0-F, …: 23/50 (46%); G-only = V1-F: 23/50 (46%); F+G tail = V1-G3: 27/50 (54%); F + first-Q = V1-C: 28/50 (56%); Mean-Q rollout = V1-G3: 27/50 (54%)。
+### 每个版本内部的逐列赢家
+
+| 版本 | F-only | G-only | F+G tail | First-Q | Mean-Q |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| V0 | C/D/F/G1/G2/G3 23/50 | D 20/50 | G1/G2 25/50 | C 26/50 | D 26/50 |
+| V1 | C/D/F/G1/G2/G3 23/50 | F 23/50 | G3 27/50 | C 28/50 | G3 27/50 |
+| V2 | D 16/50 | C 20/50 | C/D 16/50 | D/F 21/50 | D 24/50 |
+| V2-EMA | D/F/G1 15/50 | G2 20/50 | F 17/50 | D/F 22/50 | F 23/50 |
+
+**跨四版本的全局逐列赢家（只用于补充分析，不对应 DOCX 蓝框）：** F-only = 12 tied: V0-C, V0-D, V0-F, …: 23/50 (46%); G-only = V1-F: 23/50 (46%); F+G tail = V1-G3: 27/50 (54%); F + first-Q = V1-C: 28/50 (56%); Mean-Q rollout = V1-G3: 27/50 (54%)。
 
 ## 训练 / validation loss 证据
 
