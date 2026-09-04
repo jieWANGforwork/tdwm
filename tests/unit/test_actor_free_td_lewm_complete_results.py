@@ -95,8 +95,7 @@ def _prior_ledger() -> tuple[
                 "global_step": 10 * results.STEPS_PER_EPOCH,
                 "training_commit": _sha(f"{version}:training")[:40],
             }
-            modes = results.NEW_SCORE_MODES if version == "v2" else ("f_plus_g_first",)
-            for mode in modes:
+            for mode in results.NEW_SCORE_MODES:
                 alpha = results.G_FIRST_WEIGHT if mode == "f_plus_g_first" else None
                 label = f"fixed:{version}:{variant}:{mode}"
                 fixed_cells.append(
@@ -139,7 +138,7 @@ def _prior_ledger() -> tuple[
         "cells": cells,
         "fixed_checkpoint_comparison": {
             "included": True,
-            "cell_count": 24,
+            "cell_count": results.FIXED_NEW_SCORE_CELL_COUNT,
             "selection_sha256": results.FIXED_SELECTION_RANKS_SHA256,
             "episode_selection_file_sha256": results.SELECTION_SHA256,
             "action_normalization_sha256": results.ACTION_NORMALIZATION_SHA256,
@@ -150,50 +149,116 @@ def _prior_ledger() -> tuple[
     return ledger, fixed_references, ema_references
 
 
-def _write_prior_ledger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ledger: dict[str, Any]
-) -> Path:
+def _write_prior_ledger(tmp_path: Path, ledger: dict[str, Any]) -> tuple[Path, str]:
     path = tmp_path / "reconciliation_ledger.json"
     path.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n")
-    monkeypatch.setattr(results, "EMA_NEW_LEDGER_SHA256", _sha_file(path))
-    return path
+    return path, _sha_file(path)
 
 
 def _sha_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_prior_ledger_reconciles_exact_96_plus_24(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_prior_ledger_reconciles_exact_96_plus_36(tmp_path: Path) -> None:
     ledger, fixed_references, ema_references = _prior_ledger()
-    path = _write_prior_ledger(tmp_path, monkeypatch, ledger)
+    path, ledger_sha = _write_prior_ledger(tmp_path, ledger)
 
     cells, evidence = results._validate_ema_new_ledger(
         ledger_path=path,
         fixed_references=fixed_references,
         ema_references=ema_references,
+        expected_ledger_sha256=ledger_sha,
     )
 
-    assert len(cells) == 120
-    assert evidence["ema_epoch_sweep_cell_count"] == 96
-    assert evidence["fixed_checkpoint_cell_count"] == 24
+    assert len(cells) == 132
+    assert (
+        evidence["ema_epoch_sweep_cell_count"] == results.EMA_SWEEP_NEW_SCORE_CELL_COUNT
+    )
+    assert evidence["fixed_checkpoint_cell_count"] == results.FIXED_NEW_SCORE_CELL_COUNT
     assert {cell["status"] for cell in cells} == {"VERIFIED"}
     fixed = [
         cell
         for cell in cells
         if cell["comparison_role"] == "fixed_checkpoint_new_scores"
     ]
-    assert len(fixed) == 24
+    assert len(fixed) == results.FIXED_NEW_SCORE_CELL_COUNT
     assert {cell["epoch"] for cell in fixed} == {10}
     assert {cell["global_step"] for cell in fixed} == {10 * results.STEPS_PER_EPOCH}
     assert {cell["planning_horizon"] for cell in cells} == {None}
+    fixed_mean_q = [
+        cell
+        for cell in cells
+        if cell["epoch"] == 10 and cell["score_mode"] == "g_only_f_rollout_mean"
+    ]
+    assert len(fixed_mean_q) == results.FIXED_MEAN_Q_CELL_COUNT
+    assert {cell["selection_sha256"] for cell in fixed_mean_q} == {
+        results.SELECTION_SHA256
+    }
+    assert {
+        cell["evidence"]["valid_row_ranks_sha256"]
+        for cell in fixed_mean_q
+        if cell["version"] in ("v0", "v1", "v2")
+    } == {results.FIXED_SELECTION_RANKS_SHA256}
+    assert {(cell["version"], cell["variant"]) for cell in fixed_mean_q} == {
+        (version, variant)
+        for version in ("v0", "v1", "v2", "v2_ema_sg")
+        for variant in results.VARIANTS
+    }
+
+
+def test_prior_ledger_rejects_missing_v0_mean_q(tmp_path: Path) -> None:
+    ledger, fixed_references, ema_references = _prior_ledger()
+    fixed = ledger["fixed_checkpoint_comparison"]
+    fixed["cells"] = [
+        cell
+        for cell in fixed["cells"]
+        if not (
+            cell["version"] == "v0"
+            and cell["variant"] == "c"
+            and cell["score_mode"] == "g_only_f_rollout_mean"
+        )
+    ]
+    fixed["cell_count"] = len(fixed["cells"])
+    path, ledger_sha = _write_prior_ledger(tmp_path, ledger)
+
+    with pytest.raises(results.CompleteReconciliationError, match="cell_count"):
+        results._validate_ema_new_ledger(
+            ledger_path=path,
+            fixed_references=fixed_references,
+            ema_references=ema_references,
+            expected_ledger_sha256=ledger_sha,
+        )
+
+
+def test_fixed_mean_q_rejects_raw_selection_file_hash_drift(tmp_path: Path) -> None:
+    ledger, fixed_references, ema_references = _prior_ledger()
+    target = next(
+        cell
+        for cell in ledger["fixed_checkpoint_comparison"]["cells"]
+        if cell["version"] == "v0"
+        and cell["variant"] == "c"
+        and cell["score_mode"] == "g_only_f_rollout_mean"
+    )
+    assert target["selection_sha256"] == results.FIXED_SELECTION_RANKS_SHA256
+    target["source_files_sha256"]["episode_selection.json"] = _sha(
+        "wrong episode selection file"
+    )
+    path, ledger_sha = _write_prior_ledger(tmp_path, ledger)
+
+    with pytest.raises(
+        results.CompleteReconciliationError, match="selection_file_sha256"
+    ):
+        results._validate_ema_new_ledger(
+            ledger_path=path,
+            fixed_references=fixed_references,
+            ema_references=ema_references,
+            expected_ledger_sha256=ledger_sha,
+        )
 
 
 @pytest.mark.parametrize("mutation", ["integer_outcome", "checkpoint", "duplicate"])
 def test_prior_ledger_fails_closed(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     mutation: str,
 ) -> None:
     ledger, fixed_references, ema_references = _prior_ledger()
@@ -203,13 +268,14 @@ def test_prior_ledger_fails_closed(
         ledger["cells"][0]["checkpoint_sha256"] = _sha("wrong")
     else:
         ledger["cells"][1] = dict(ledger["cells"][0])
-    path = _write_prior_ledger(tmp_path, monkeypatch, ledger)
+    path, ledger_sha = _write_prior_ledger(tmp_path, ledger)
 
     with pytest.raises(results.CompleteReconciliationError):
         results._validate_ema_new_ledger(
             ledger_path=path,
             fixed_references=fixed_references,
             ema_references=ema_references,
+            expected_ledger_sha256=ledger_sha,
         )
 
 
@@ -312,7 +378,7 @@ def test_ema_original_sweep_uses_only_attempt_02_retry_paths(
 
 def _synthetic_study() -> results.ValidatedCompleteStudy:
     cells = []
-    for index in range(465):
+    for index in range(results.COMPLETE_CELL_COUNT):
         outcome = [False] * 49 + [index % 2 == 0]
         count = sum(outcome)
         cells.append(
@@ -383,12 +449,12 @@ def test_archive_writes_exact_schema_and_byte_checks(tmp_path: Path) -> None:
     csv_rows = list(
         csv.DictReader(io.StringIO((tmp_path / "all_o50_results.csv").read_text()))
     )
-    assert len(csv_rows) == 465
+    assert len(csv_rows) == results.COMPLETE_CELL_COUNT
     assert tuple(csv_rows[0]) == results.CSV_FIELDS
     assert {row["status"] for row in csv_rows} == {"VERIFIED"}
     ledger = json.loads((tmp_path / "reconciliation_ledger.json").read_text())
-    assert ledger["cell_count"] == 465
-    assert ledger["outcome_count"] == 23_250
+    assert ledger["cell_count"] == results.COMPLETE_CELL_COUNT
+    assert ledger["outcome_count"] == results.COMPLETE_OUTCOME_COUNT
     results.write_archive(study, artifact_dir=tmp_path, check=True)
     (tmp_path / "all_o50_results.csv").write_text("tampered\n")
     with pytest.raises(results.CompleteReconciliationError, match="differs"):
@@ -432,11 +498,18 @@ def test_real_sources_reconcile_to_exact_complete_ledger() -> None:
     arguments = _real_source_arguments()
     if not all(path.exists() for path in arguments.values()):
         pytest.skip("external read-only result evidence is not present")
+    prior_ledger = json.loads(arguments["ema_new_ledger"].read_text())
+    fixed = prior_ledger.get("fixed_checkpoint_comparison", {})
+    if fixed.get("cell_count") != results.FIXED_NEW_SCORE_CELL_COUNT:
+        pytest.skip("477-cell formal input is not present yet")
+    arguments["ema_new_ledger_sha256"] = _sha_file(arguments["ema_new_ledger"])
 
     study = results.reconcile_complete_o50(**arguments)
 
-    assert len(study.cells) == 465
-    assert sum(len(cell["outcomes"]) for cell in study.cells) == 23_250
+    assert len(study.cells) == results.COMPLETE_CELL_COUNT
+    assert sum(len(cell["outcomes"]) for cell in study.cells) == (
+        results.COMPLETE_OUTCOME_COUNT
+    )
     assert {cell["status"] for cell in study.cells} == {"VERIFIED"}
     assert len(study.v0_training_rows) == 60
     assert len(study.v2_training_rows) == 60

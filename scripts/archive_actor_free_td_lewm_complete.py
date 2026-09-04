@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and archive all 465 formal Actor-Free TD-LeWM Cube O50 cells."""
+"""Validate and archive all 477 formal Actor-Free TD-LeWM Cube O50 cells."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Sequence
 
 from tdwm.results.actor_free_td_lewm_complete import (
+    COMPLETE_CELL_COUNT,
+    COMPLETE_OUTCOME_COUNT,
+    EMA_NEW_LEDGER_SHA256,
     reconcile_complete_o50,
     write_archive,
 )
@@ -57,9 +60,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     for name, path in DEFAULTS.items():
         parser.add_argument(f"--{name.replace('_', '-')}", default=str(path))
     parser.add_argument(
+        "--ema-new-ledger-sha256",
+        default=EMA_NEW_LEDGER_SHA256,
+        help="Expected SHA-256 of the 96-sweep + 36-fixed new-score ledger.",
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
-        help="Validate all sources and 465 cells without writing the archive.",
+        help=f"Validate all sources and {COMPLETE_CELL_COUNT} cells without writing.",
     )
     parser.add_argument(
         "--check",
@@ -84,6 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         v1_summary=args.v1_summary,
         v1_paired_outcomes=args.v1_paired_outcomes,
         ema_new_ledger=args.ema_new_ledger,
+        ema_new_ledger_sha256=args.ema_new_ledger_sha256,
         v2_root=args.v2_root,
         v2_training_root=args.v2_training_root,
         v2_ema_root=args.v2_ema_root,
@@ -91,11 +100,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         v2_ema_epoch10_paired_outcomes=args.v2_ema_epoch10_paired_outcomes,
     )
     if args.validate_only:
-        print("Validated 465 cells with 23,250 boolean O50 outcomes.")
+        print(
+            f"Validated {COMPLETE_CELL_COUNT} cells with "
+            f"{COMPLETE_OUTCOME_COUNT:,} boolean O50 outcomes."
+        )
         return 0
     paths = write_archive(study, artifact_dir=args.artifact_dir, check=args.check)
     verb = "Verified" if args.check else "Wrote"
-    print(f"{verb} {len(paths)} complete-ledger artifacts from 465 validated cells:")
+    print(
+        f"{verb} {len(paths)} complete-ledger artifacts from "
+        f"{COMPLETE_CELL_COUNT} validated cells:"
+    )
     for path in paths:
         print(path)
     return 0

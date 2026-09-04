@@ -38,6 +38,11 @@ VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
 ORIGINAL_SCORE_MODES = ("f_only", "g_only", "f_plus_g")
 NEW_SCORE_MODES = ("f_plus_g_first", "g_only_f_rollout_mean")
 G_FIRST_WEIGHT = 0.25
+COMPLETE_CELL_COUNT = 477
+COMPLETE_OUTCOME_COUNT = COMPLETE_CELL_COUNT * EPISODE_COUNT
+EMA_SWEEP_NEW_SCORE_CELL_COUNT = 96
+FIXED_NEW_SCORE_CELL_COUNT = 36
+FIXED_MEAN_Q_CELL_COUNT = len(("v0", "v1", "v2", "v2_ema_sg")) * len(VARIANTS)
 
 SELECTION_SHA256 = "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7"
 ACTION_NORMALIZATION_SHA256 = (
@@ -124,7 +129,7 @@ _GIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 class CompleteReconciliationError(ValueError):
-    """Raised when the 465-cell archive cannot be proven from its sources."""
+    """Raised when the 477-cell archive cannot be proven from its sources."""
 
 
 @dataclass(frozen=True)
@@ -1506,9 +1511,13 @@ def _validate_ema_new_ledger(
     ledger_path: Path,
     fixed_references: Mapping[str, Mapping[str, Mapping[str, Any]]],
     ema_references: Mapping[tuple[int, str], Mapping[str, Any]],
+    expected_ledger_sha256: str = EMA_NEW_LEDGER_SHA256,
 ) -> tuple[list[dict[str, Any]], Mapping[str, Any]]:
     context = "ema_new_ledger"
-    raw = _require_locked_file(ledger_path, EMA_NEW_LEDGER_SHA256, context=context)
+    locked_ledger_sha = _sha256(
+        expected_ledger_sha256, context=f"{context}.expected_sha256"
+    )
+    raw = _require_locked_file(ledger_path, locked_ledger_sha, context=context)
     try:
         ledger = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -1641,7 +1650,7 @@ def _validate_ema_new_ledger(
                 evidence = {
                     "prior_reconciliation_ledger": {
                         "path": str(ledger_path.resolve()),
-                        "sha256": EMA_NEW_LEDGER_SHA256,
+                        "sha256": locked_ledger_sha,
                     },
                     "original_output_dir": output,
                     "source_state": source.get("source_state"),
@@ -1681,11 +1690,10 @@ def _validate_ema_new_ledger(
     )
     expected_fixed_header = {
         "included": True,
-        "cell_count": 24,
+        "cell_count": FIXED_NEW_SCORE_CELL_COUNT,
         "selection_sha256": FIXED_SELECTION_RANKS_SHA256,
         "episode_selection_file_sha256": SELECTION_SHA256,
         "action_normalization_sha256": ACTION_NORMALIZATION_SHA256,
-        "evaluation_commit": EMA_NEW_EVALUATION_COMMIT,
     }
     for key, expected in expected_fixed_header.items():
         _expect_equal(
@@ -1698,11 +1706,7 @@ def _validate_ema_new_ledger(
         (version, variant, mode)
         for version in ("v0", "v1", "v2")
         for variant in VARIANTS
-        for mode in (
-            ("f_plus_g_first", "g_only_f_rollout_mean")
-            if version == "v2"
-            else ("f_plus_g_first",)
-        )
+        for mode in NEW_SCORE_MODES
     }
     fixed_index: dict[tuple[str, str, str], Mapping[str, Any]] = {}
     fixed_outputs: set[str] = set()
@@ -1713,7 +1717,10 @@ def _validate_ema_new_ledger(
             raise _error(context, f"duplicate fixed new-score cell {key}")
         fixed_index[key] = source
     if set(fixed_index) != expected_fixed_grid:
-        raise _error(context, "fixed new-score grid is not exactly 24 cells")
+        raise _error(
+            context,
+            f"fixed new-score grid is not exactly {FIXED_NEW_SCORE_CELL_COUNT} cells",
+        )
     for version in ("v0", "v1", "v2"):
         version_refs = _mapping(
             fixed_references.get(version),
@@ -1724,12 +1731,7 @@ def _validate_ema_new_ledger(
                 version_refs.get(variant),
                 context=f"{context}.fixed.reference.{version}.{variant}",
             )
-            modes = (
-                ("f_plus_g_first", "g_only_f_rollout_mean")
-                if version == "v2"
-                else ("f_plus_g_first",)
-            )
-            for mode in modes:
+            for mode in NEW_SCORE_MODES:
                 source = fixed_index[(version, variant, mode)]
                 cell_context = f"{context}.fixed.{version}.{variant}.{mode}"
                 outcomes = _ledger_outcomes(source, context=cell_context)
@@ -1749,9 +1751,8 @@ def _validate_ema_new_ledger(
                     ACTION_NORMALIZATION_SHA256,
                     context=f"{cell_context}.action",
                 )
-                _expect_equal(
+                evaluation_commit = _git_revision(
                     source.get("evaluation_commit"),
-                    EMA_NEW_EVALUATION_COMMIT,
                     context=f"{cell_context}.evaluation_commit",
                 )
                 expected_alpha = G_FIRST_WEIGHT if mode == "f_plus_g_first" else None
@@ -1792,12 +1793,13 @@ def _validate_ema_new_ledger(
                 evidence = {
                     "prior_reconciliation_ledger": {
                         "path": str(ledger_path.resolve()),
-                        "sha256": EMA_NEW_LEDGER_SHA256,
+                        "sha256": locked_ledger_sha,
                     },
                     "original_output_dir": source.get("output_dir"),
                     "source_launcher_manifest": source.get("source_launcher_manifest"),
                     "source_files_sha256": dict(hashes),
                     "fixed_selection_ranks_sha256": source.get("selection_sha256"),
+                    "valid_row_ranks_sha256": source.get("selection_sha256"),
                     "checkpoint_crosslink": dict(reference),
                     "epoch_global_step_evidence": "crosslinked original formal checkpoint",
                     "evaluation_commit_evidence": source.get(
@@ -1816,7 +1818,7 @@ def _validate_ema_new_ledger(
                         score_mode=mode,
                         outcomes=outcomes,
                         training_commit=training_commit,
-                        evaluation_commit=EMA_NEW_EVALUATION_COMMIT,
+                        evaluation_commit=evaluation_commit,
                         planning_horizon=None,
                         g_first_weight=expected_alpha,
                         status="SUCCEEDED",
@@ -1828,14 +1830,19 @@ def _validate_ema_new_ledger(
                         evidence=evidence,
                     )
                 )
-    if len(cells) != 120:
-        raise _error(context, "did not produce exactly 96 + 24 cells")
+    expected_total = EMA_SWEEP_NEW_SCORE_CELL_COUNT + FIXED_NEW_SCORE_CELL_COUNT
+    if len(cells) != expected_total:
+        raise _error(
+            context,
+            "did not produce exactly "
+            f"{EMA_SWEEP_NEW_SCORE_CELL_COUNT} + {FIXED_NEW_SCORE_CELL_COUNT} cells",
+        )
     return cells, {
         "ledger_path": str(ledger_path.resolve()),
-        "ledger_sha256": EMA_NEW_LEDGER_SHA256,
-        "ema_epoch_sweep_cell_count": 96,
-        "fixed_checkpoint_cell_count": 24,
-        "cell_count": 120,
+        "ledger_sha256": locked_ledger_sha,
+        "ema_epoch_sweep_cell_count": EMA_SWEEP_NEW_SCORE_CELL_COUNT,
+        "fixed_checkpoint_cell_count": FIXED_NEW_SCORE_CELL_COUNT,
+        "cell_count": expected_total,
     }
 
 
@@ -1851,13 +1858,14 @@ def reconcile_complete_o50(
     v1_summary: str | Path,
     v1_paired_outcomes: str | Path,
     ema_new_ledger: str | Path,
+    ema_new_ledger_sha256: str = EMA_NEW_LEDGER_SHA256,
     v2_root: str | Path,
     v2_training_root: str | Path,
     v2_ema_root: str | Path,
     v2_ema_epoch10_summary: str | Path,
     v2_ema_epoch10_paired_outcomes: str | Path,
 ) -> ValidatedCompleteStudy:
-    """Validate and reconcile the exact 465-cell formal O50 universe."""
+    """Validate and reconcile the exact 477-cell formal O50 universe."""
 
     legacy_bundle = Path(legacy_bundle_root).expanduser().resolve()
     legacy_summary_path = Path(legacy_summary).expanduser().resolve()
@@ -1935,15 +1943,19 @@ def reconcile_complete_o50(
             "v2": v2_references,
         },
         ema_references=ema_references,
+        expected_ledger_sha256=ema_new_ledger_sha256,
     )
 
     cells = tuple(
         legacy_cells + v0_cells + v1_cells + v2_cells + ema_cells + ema_new_cells
     )
-    if len(cells) != 465:
-        raise _error("complete", f"cell count is {len(cells)}, expected 465")
+    if len(cells) != COMPLETE_CELL_COUNT:
+        raise _error(
+            "complete",
+            f"cell count is {len(cells)}, expected {COMPLETE_CELL_COUNT}",
+        )
     identities = [str(cell["cell_id"]) for cell in cells]
-    if len(set(identities)) != 465:
+    if len(set(identities)) != COMPLETE_CELL_COUNT:
         duplicates = sorted(
             cell_id for cell_id, count in Counter(identities).items() if count > 1
         )
@@ -1952,23 +1964,40 @@ def reconcile_complete_o50(
         "fixed_checkpoint_original_scores": 57,
         "epoch_sweep_original_scores": 288,
         "epoch_sweep_new_scores": 96,
-        "fixed_checkpoint_new_scores": 24,
+        "fixed_checkpoint_new_scores": FIXED_NEW_SCORE_CELL_COUNT,
     }
     actual_roles = Counter(str(cell["comparison_role"]) for cell in cells)
     if dict(actual_roles) != expected_roles:
         raise _error("complete", f"comparison-role counts differ: {dict(actual_roles)}")
     expected_versions = {
         "legacy": 21,
-        "v0": 24,
-        "v1": 24,
+        "v0": 30,
+        "v1": 30,
         "v2": 156,
         "v2_ema_sg": 240,
     }
     actual_versions = Counter(str(cell["version"]) for cell in cells)
     if dict(actual_versions) != expected_versions:
         raise _error("complete", f"version counts differ: {dict(actual_versions)}")
-    if sum(len(cell["outcomes"]) for cell in cells) != 465 * EPISODE_COUNT:
-        raise _error("complete", "outcome total is not 23,250")
+    if sum(len(cell["outcomes"]) for cell in cells) != COMPLETE_OUTCOME_COUNT:
+        raise _error("complete", f"outcome total is not {COMPLETE_OUTCOME_COUNT:,}")
+    fixed_mean_q_grid = {
+        (str(cell["version"]), str(cell["variant"]))
+        for cell in cells
+        if int(cell["epoch"]) == 10
+        and cell["score_mode"] == "g_only_f_rollout_mean"
+        and cell["version"] in ("v0", "v1", "v2", "v2_ema_sg")
+    }
+    expected_fixed_mean_q_grid = {
+        (version, variant)
+        for version in ("v0", "v1", "v2", "v2_ema_sg")
+        for variant in VARIANTS
+    }
+    if fixed_mean_q_grid != expected_fixed_mean_q_grid:
+        raise _error(
+            "complete",
+            f"fixed E10 Mean-Q coverage is not exactly {FIXED_MEAN_Q_CELL_COUNT} cells",
+        )
     for cell in cells:
         if cell["selection_sha256"] != SELECTION_SHA256:
             raise _error("complete", "selection drift remains after reconciliation")
@@ -2015,7 +2044,7 @@ def reconcile_complete_o50(
 
 
 def build_all_results_csv(study: ValidatedCompleteStudy) -> bytes:
-    """Build the fixed-schema 465-row scalar result table."""
+    """Build the fixed-schema 477-row scalar result table."""
 
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=CSV_FIELDS, lineterminator="\n")
@@ -2068,7 +2097,7 @@ def build_v2_training_csv(study: ValidatedCompleteStudy) -> bytes:
 
 
 def build_ledger(study: ValidatedCompleteStudy) -> dict[str, Any]:
-    """Build the unique full-evidence ledger, including all 23,250 outcomes."""
+    """Build the unique full-evidence ledger, including all 23,850 outcomes."""
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -2082,7 +2111,7 @@ def build_ledger(study: ValidatedCompleteStudy) -> dict[str, Any]:
             "fixed_checkpoint_original_scores": 57,
             "epoch_sweep_original_scores": 288,
             "epoch_sweep_new_scores": 96,
-            "fixed_checkpoint_new_scores": 24,
+            "fixed_checkpoint_new_scores": FIXED_NEW_SCORE_CELL_COUNT,
         },
         "sources": dict(study.sources),
         "training_curve_sources": dict(study.training_curve_sources),

@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Build the complete Results TD ledger report from 465 audited O50 cells.
+"""Build the complete Results TD ledger report from 477 audited O50 cells.
 
 The existing Results TD reports were produced incrementally.  This builder is
 the consolidation layer: it requires the exact legacy/V0/V1/V2/V2-EMA grid,
 checks every identity and rate, then produces a standalone Markdown report and
-a DOCX which keeps the established legacy/V0/V1 material and appends the full
-V2/V2-EMA trajectories plus the cross-version decision analysis.
+a standalone DOCX which presents one fixed-E10 decision matrix, derives the
+cross-version decision analysis from it, and points to superseded source pages
+only in a clearly marked historical appendix.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import importlib.util
 import io
+import json
 import math
 import os
 import sys
@@ -47,6 +50,7 @@ DEFAULT_LEDGER = (
     REPOSITORY_ROOT
     / "reports/artifacts/actor_free_td_lewm_complete_cube_seed3072/all_o50_results.csv"
 )
+DEFAULT_RECONCILIATION_LEDGER = DEFAULT_LEDGER.parent / "reconciliation_ledger.json"
 DEFAULT_MARKDOWN_OUTPUT = (
     REPOSITORY_ROOT / "reports/actor_free_td_lewm_complete_cube_seed3072.md"
 )
@@ -64,16 +68,24 @@ DEFAULT_V0_TRAINING_CSV = DEFAULT_LEDGER.parent / "v0_training_loss_curves.csv"
 DEFAULT_V2_TRAINING_CSV = DEFAULT_LEDGER.parent / "v2_training_loss_curves.csv"
 
 EPISODES = 50
+COMPLETE_CELL_COUNT = 477
+COMPLETE_OUTCOME_COUNT = COMPLETE_CELL_COUNT * EPISODES
 TRAINING_SEED = 3072
 PLANNING_SEED = 42
 STEPS_PER_EPOCH = 12_796
 SELECTION_SHA256 = v2_report.SHARED_EPISODE_SELECTION_SHA256
 ACTION_NORMALIZATION_SHA256 = v2_report.ACTION_NORMALIZATION_SHA256
 FIXED_SELECTION_RANKS_SHA256 = (
-    "88c204c83daf2157334d4ce9ecf7f18dcd11f778fbb80c310e31f322bfe5aed7"
+    "88c204770f33c0b0220057d45b187766e3cfc54912e3f5ca49f2aa93d16437e9"
 )
 VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
 VERSIONS = ("v0", "v1", "v2", "v2_ema_sg")
+VERSION_LABELS = {
+    "v0": "V0",
+    "v1": "V1",
+    "v2": "V2",
+    "v2_ema_sg": "V2-EMA",
+}
 ORIGINAL_MODES = ("f_only", "g_only", "f_plus_g")
 NEW_MODES = ("f_plus_g_first", "g_only_f_rollout_mean")
 ALL_CONTROLLED_MODES = ORIGINAL_MODES + NEW_MODES
@@ -161,6 +173,34 @@ class ResultCell:
         return self.values[key]
 
 
+@dataclass(frozen=True)
+class FixedAnalysis:
+    """Derived fixed-E10 comparisons used by every report surface."""
+
+    mode_means: Mapping[str, float]
+    mode_best_counts: Mapping[str, int]
+    mode_winners: Mapping[str, tuple[str, ...]]
+    overall_best_count: int
+    overall_winners: tuple[str, ...]
+    best_mean_modes: tuple[str, ...]
+    best_mean_percent: float
+    version_mode_means: Mapping[tuple[str, str], float]
+    ema_variant_means: Mapping[str, float]
+    ema_best_variants: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LedgerEvidence:
+    """Companion files that preserve the full scalar and per-pair audit trail."""
+
+    csv_path: str
+    csv_sha256: str
+    json_path: str
+    json_sha256: str
+    cell_count: int
+    outcome_count: int
+
+
 def _sha(value: str, *, context: str, allow_empty: bool = False) -> str:
     value = value.strip()
     if allow_empty and value == "":
@@ -170,6 +210,94 @@ def _sha(value: str, *, context: str, allow_empty: bool = False) -> str:
     ):
         raise CompleteResultsError(f"{context} must be a lowercase SHA-256.")
     return value
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(REPOSITORY_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def load_ledger_evidence(csv_path: str | Path, json_path: str | Path) -> LedgerEvidence:
+    """Validate and fingerprint the two files that preserve the complete ledger."""
+
+    csv_source = Path(csv_path)
+    json_source = Path(json_path)
+    if not csv_source.is_file():
+        raise FileNotFoundError(f"Complete CSV ledger does not exist: {csv_source}")
+    if not json_source.is_file():
+        raise FileNotFoundError(
+            f"Reconciliation JSON ledger does not exist: {json_source}"
+        )
+
+    with csv_source.open(newline="", encoding="utf-8") as stream:
+        csv_cell_count = sum(1 for _ in csv.DictReader(stream))
+    if csv_cell_count != COMPLETE_CELL_COUNT:
+        raise CompleteResultsError(
+            "Companion CSV must contain "
+            f"{COMPLETE_CELL_COUNT} cells, found {csv_cell_count}."
+        )
+
+    try:
+        reconciliation = json.loads(json_source.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise CompleteResultsError(
+            f"Reconciliation ledger is not valid JSON: {json_source}."
+        ) from exc
+    if not isinstance(reconciliation, dict):
+        raise CompleteResultsError("Reconciliation ledger root must be an object.")
+    if reconciliation.get("cell_count") != COMPLETE_CELL_COUNT:
+        raise CompleteResultsError(
+            f"Reconciliation ledger cell_count must be {COMPLETE_CELL_COUNT}."
+        )
+    if reconciliation.get("episode_count_per_cell") != EPISODES:
+        raise CompleteResultsError(
+            f"Reconciliation ledger must preserve {EPISODES} outcomes per cell."
+        )
+    if reconciliation.get("outcome_count") != COMPLETE_OUTCOME_COUNT:
+        raise CompleteResultsError(
+            f"Reconciliation ledger outcome_count must be {COMPLETE_OUTCOME_COUNT}."
+        )
+    json_cells = reconciliation.get("cells")
+    if not isinstance(json_cells, list) or len(json_cells) != COMPLETE_CELL_COUNT:
+        raise CompleteResultsError(
+            "Reconciliation ledger cells must contain exactly "
+            f"{COMPLETE_CELL_COUNT} entries."
+        )
+    for index, cell in enumerate(json_cells):
+        if not isinstance(cell, dict):
+            raise CompleteResultsError(
+                f"reconciliation.cells[{index}] is not an object."
+            )
+        outcomes = cell.get("outcomes")
+        if (
+            not isinstance(outcomes, list)
+            or len(outcomes) != EPISODES
+            or any(type(value) is not bool for value in outcomes)
+        ):
+            raise CompleteResultsError(
+                f"reconciliation.cells[{index}].outcomes must contain "
+                f"{EPISODES} Booleans."
+            )
+
+    return LedgerEvidence(
+        csv_path=_display_path(csv_source),
+        csv_sha256=_file_sha256(csv_source),
+        json_path=_display_path(json_source),
+        json_sha256=_file_sha256(json_source),
+        cell_count=csv_cell_count,
+        outcome_count=sum(len(cell["outcomes"]) for cell in json_cells),
+    )
 
 
 def _int(value: str, *, context: str) -> int:
@@ -211,7 +339,7 @@ def _expected_identities() -> set[tuple[str, str, int, str]]:
         expected.update(
             (version, variant, 10, mode)
             for variant in VARIANTS
-            for mode in ORIGINAL_MODES + ("f_plus_g_first",)
+            for mode in ALL_CONTROLLED_MODES
         )
     expected.update(
         ("v2", variant, epoch, mode)
@@ -242,9 +370,10 @@ def load_complete_ledger(path: str | Path) -> tuple[ResultCell, ...]:
                 f"Complete ledger columns changed: {reader.fieldnames!r}."
             )
         raw_rows = tuple(dict(row) for row in reader)
-    if len(raw_rows) != 465:
+    if len(raw_rows) != COMPLETE_CELL_COUNT:
         raise CompleteResultsError(
-            f"Complete ledger must contain 465 cells, found {len(raw_rows)}."
+            "Complete ledger must contain "
+            f"{COMPLETE_CELL_COUNT} cells, found {len(raw_rows)}."
         )
 
     cells: list[ResultCell] = []
@@ -383,6 +512,20 @@ def load_complete_ledger(path: str | Path) -> tuple[ResultCell, ...]:
         raise CompleteResultsError(
             f"Score modes do not share a checkpoint: {next(iter(inconsistent.items()))!r}."
         )
+    fixed_mean_q = {
+        (str(cell["version"]), str(cell["variant"]))
+        for cell in cells
+        if int(cell["epoch"]) == 10
+        and cell["score_mode"] == "g_only_f_rollout_mean"
+        and cell["version"] in VERSIONS
+    }
+    expected_fixed_mean_q = {
+        (version, variant) for version in VERSIONS for variant in VARIANTS
+    }
+    if fixed_mean_q != expected_fixed_mean_q:
+        raise CompleteResultsError(
+            "Fixed E10 Mean-Q coverage must contain exactly 24 version/variant cells."
+        )
     return tuple(cells)
 
 
@@ -427,6 +570,116 @@ def _mean(cells: Iterable[ResultCell]) -> float:
     return sum(_percent(cell) for cell in selected) / len(selected)
 
 
+def _fixed_cell_label(cell: ResultCell) -> str:
+    return f"{VERSION_LABELS[str(cell['version'])]}-{str(cell['variant']).upper()}"
+
+
+def _fixed_analysis(cells: Sequence[ResultCell]) -> FixedAnalysis:
+    fixed = tuple(
+        _find(cells, version=version, variant=variant, epoch=10, mode=mode)
+        for version in VERSIONS
+        for variant in VARIANTS
+        for mode in ALL_CONTROLLED_MODES
+    )
+    if len(fixed) != len(VERSIONS) * len(VARIANTS) * len(ALL_CONTROLLED_MODES):
+        raise CompleteResultsError("Fixed E10 decision grid is incomplete.")
+    version_mode_means = {
+        (version, mode): _mean(
+            _find(cells, version=version, variant=variant, epoch=10, mode=mode)
+            for variant in VARIANTS
+        )
+        for version in VERSIONS
+        for mode in ALL_CONTROLLED_MODES
+    }
+    mode_means = {
+        mode: _mean(cell for cell in fixed if cell["score_mode"] == mode)
+        for mode in ALL_CONTROLLED_MODES
+    }
+    mode_best_counts: dict[str, int] = {}
+    mode_winners: dict[str, tuple[str, ...]] = {}
+    for mode in ALL_CONTROLLED_MODES:
+        selected = tuple(cell for cell in fixed if cell["score_mode"] == mode)
+        best = max(int(cell["success_count"]) for cell in selected)
+        mode_best_counts[mode] = best
+        mode_winners[mode] = tuple(
+            _fixed_cell_label(cell)
+            for cell in selected
+            if int(cell["success_count"]) == best
+        )
+    overall_best = max(int(cell["success_count"]) for cell in fixed)
+    overall_winners = tuple(
+        f"{_fixed_cell_label(cell)} + {MODE_LABELS[str(cell['score_mode'])]}"
+        for cell in fixed
+        if int(cell["success_count"]) == overall_best
+    )
+    best_mean = max(mode_means.values())
+    best_mean_modes = tuple(
+        mode for mode in ALL_CONTROLLED_MODES if mode_means[mode] == best_mean
+    )
+    ema_variant_means = {
+        variant: sum(
+            _percent(
+                _find(
+                    cells,
+                    version="v2_ema_sg",
+                    variant=variant,
+                    epoch=10,
+                    mode=mode,
+                )
+            )
+            for mode in ALL_CONTROLLED_MODES
+        )
+        / len(ALL_CONTROLLED_MODES)
+        for variant in VARIANTS
+    }
+    ema_best_mean = max(ema_variant_means.values())
+    return FixedAnalysis(
+        mode_means=mode_means,
+        mode_best_counts=mode_best_counts,
+        mode_winners=mode_winners,
+        overall_best_count=overall_best,
+        overall_winners=overall_winners,
+        best_mean_modes=best_mean_modes,
+        best_mean_percent=best_mean,
+        version_mode_means=version_mode_means,
+        ema_variant_means=ema_variant_means,
+        ema_best_variants=tuple(
+            variant
+            for variant in VARIANTS
+            if ema_variant_means[variant] == ema_best_mean
+        ),
+    )
+
+
+def _joined(values: Sequence[str]) -> str:
+    return ", ".join(values)
+
+
+def _compact_join(values: Sequence[str], *, limit: int = 3) -> str:
+    """Keep tied-winner summaries bounded; the matrix retains every highlight."""
+
+    items = tuple(values)
+    if len(items) <= limit:
+        return _joined(items)
+    return f"{len(items)} tied: {_joined(items[:limit])}, …"
+
+
+def _winner_result(analysis: FixedAnalysis, mode: str) -> str:
+    count = analysis.mode_best_counts[mode]
+    return f"{_compact_join(analysis.mode_winners[mode])}: {count}/50 ({count * 2}%)"
+
+
+def _column_winner_summary(analysis: FixedAnalysis) -> str:
+    return "; ".join(
+        f"{MODE_LABELS[mode]} = {_winner_result(analysis, mode)}"
+        for mode in ALL_CONTROLLED_MODES
+    )
+
+
+def _signed_pp(value: float) -> str:
+    return f"{value:+.1f} pp"
+
+
 def _markdown_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
     return [
         "| " + " | ".join(headers) + " |",
@@ -469,26 +722,87 @@ def _legacy_rows(cells: Sequence[ResultCell]) -> tuple[tuple[str, ...], ...]:
     return tuple(rows)
 
 
-def _fixed_rows(
-    cells: Sequence[ResultCell], version: str
+def _fixed_master_rows(
+    cells: Sequence[ResultCell], *, epoch: int = 10
 ) -> tuple[tuple[str, ...], ...]:
-    modes = ORIGINAL_MODES
-    if version in ("v0", "v1"):
-        modes += ("f_plus_g_first",)
-    else:
-        modes += NEW_MODES
-    return tuple(
-        (
-            variant.upper(),
-            *(
+    """Return one comparison matrix across every controlled training setup.
+
+    The matrix deliberately uses one prespecified checkpoint per version and
+    requires all five inference scores for all 24 training configurations.
+    """
+
+    version_labels = {
+        "v0": "V0",
+        "v1": "V1",
+        "v2": "V2",
+        "v2_ema_sg": "V2-EMA",
+    }
+    rows: list[tuple[str, ...]] = []
+    for version in VERSIONS:
+        for variant in VARIANTS:
+            values = [
                 _result(
-                    _find(cells, version=version, variant=variant, epoch=10, mode=mode)
+                    _find(
+                        cells,
+                        version=version,
+                        variant=variant,
+                        epoch=epoch,
+                        mode=mode,
+                    )
                 )
-                for mode in modes
-            ),
-        )
-        for variant in VARIANTS
+                for mode in ALL_CONTROLLED_MODES
+            ]
+            rows.append((version_labels[version], variant.upper(), *values))
+    return tuple(rows)
+
+
+def _fixed_master_counts(
+    cells: Sequence[ResultCell], *, epoch: int = 10
+) -> tuple[tuple[int, ...], ...]:
+    """Numeric companion to ``_fixed_master_rows`` for deterministic highlighting."""
+
+    counts: list[tuple[int, ...]] = []
+    for version in VERSIONS:
+        for variant in VARIANTS:
+            row: list[int] = []
+            for mode in ALL_CONTROLLED_MODES:
+                row.append(
+                    int(
+                        _find(
+                            cells,
+                            version=version,
+                            variant=variant,
+                            epoch=epoch,
+                            mode=mode,
+                        )["success_count"]
+                    )
+                )
+            counts.append(tuple(row))
+    return tuple(counts)
+
+
+def _fixed_master_markdown_rows(
+    cells: Sequence[ResultCell], *, epoch: int = 10
+) -> tuple[tuple[str, ...], ...]:
+    """Format the master matrix so row and column winners are visible at a glance."""
+
+    display_rows = _fixed_master_rows(cells, epoch=epoch)
+    count_rows = _fixed_master_counts(cells, epoch=epoch)
+    column_maxima = tuple(
+        max(row[index] for row in count_rows)
+        for index in range(len(ALL_CONTROLLED_MODES))
     )
+    formatted: list[tuple[str, ...]] = []
+    for display_row, count_row in zip(display_rows, count_rows):
+        row_maximum = max(value for value in count_row if value is not None)
+        scores = []
+        for index, (display, count) in enumerate(zip(display_row[2:], count_row)):
+            text = f"**{display}**" if count == row_maximum else display
+            if count == column_maxima[index]:
+                text = f"★ {text}"
+            scores.append(text)
+        formatted.append((*display_row[:2], *scores))
+    return tuple(formatted)
 
 
 def _trajectory_rows(
@@ -602,21 +916,14 @@ def _fixed_version_mean_rows(
         ("v2", "V2 joint fine-tune"),
         ("v2_ema_sg", "V2-EMA-SG"),
     ):
-        common = tuple(
-            _epoch10_mode_mean(cells, version, mode)
-            for mode in ORIGINAL_MODES + ("f_plus_g_first",)
-        )
-        mean_q = (
-            f"{_epoch10_mode_mean(cells, version, 'g_only_f_rollout_mean'):.1f}%"
-            if version in ("v2", "v2_ema_sg")
-            else "—"
+        values = tuple(
+            _epoch10_mode_mean(cells, version, mode) for mode in ALL_CONTROLLED_MODES
         )
         rows.append(
             (
                 label,
-                *(f"{value:.1f}%" for value in common),
-                mean_q,
-                f"{sum(common) / len(common):.1f}%",
+                *(f"{value:.1f}%" for value in values),
+                f"{sum(values) / len(values):.1f}%",
             )
         )
     return tuple(rows)
@@ -629,7 +936,7 @@ def _fixed_score_mean_rows(
 
     rows = []
     for mode in ALL_CONTROLLED_MODES:
-        versions = VERSIONS if mode != "g_only_f_rollout_mean" else ("v2", "v2_ema_sg")
+        versions = VERSIONS
         per_version = [_epoch10_mode_mean(cells, version, mode) for version in versions]
         fixed_cells = [
             cell
@@ -639,7 +946,7 @@ def _fixed_score_mean_rows(
             and cell["score_mode"] == mode
         ]
         best = max(int(cell["success_count"]) for cell in fixed_cells)
-        winners = ", ".join(
+        winner_labels = tuple(
             f"{str(cell['version']).replace('v2_ema_sg', 'V2-EMA').upper()}-"
             f"{str(cell['variant']).upper()}"
             for cell in fixed_cells
@@ -654,7 +961,7 @@ def _fixed_score_mean_rows(
                 ),
                 str(len(fixed_cells)),
                 f"{sum(per_version) / len(per_version):.1f}%",
-                f"{winners}: {best}/50 ({best * 2}%)",
+                f"{_compact_join(winner_labels)}: {best}/50 ({best * 2}%)",
             )
         )
     return tuple(rows)
@@ -763,26 +1070,82 @@ def build_training_chart_from_archive(path: str | Path, *, title: str) -> bytes:
     return v2_report._save_chart(image)
 
 
-def build_markdown(cells: Sequence[ResultCell]) -> str:
+def build_markdown(cells: Sequence[ResultCell], ledger_evidence: LedgerEvidence) -> str:
+    analysis = _fixed_analysis(cells)
+    f_plus_g_winner = _winner_result(analysis, "f_plus_g")
+    overall_winner = (
+        f"{_compact_join(analysis.overall_winners)}: {analysis.overall_best_count}/50 "
+        f"({analysis.overall_best_count * 2}%)"
+    )
+    best_score_names = _joined(
+        tuple(MODE_LABELS[mode] for mode in analysis.best_mean_modes)
+    )
+    ema_best_variants = _compact_join(
+        tuple(variant.upper() for variant in analysis.ema_best_variants)
+    )
+    ema_best_mean = analysis.ema_variant_means[analysis.ema_best_variants[0]]
+    v1_f = analysis.version_mode_means[("v1", "f_only")]
+    v2_f = analysis.version_mode_means[("v2", "f_only")]
+    v1_tail = analysis.version_mode_means[("v1", "f_plus_g")]
+    v2_tail = analysis.version_mode_means[("v2", "f_plus_g")]
+    ema_mode_summary = "、".join(
+        f"{MODE_LABELS[mode]} {analysis.version_mode_means[('v2_ema_sg', mode)]:.1f}%"
+        for mode in ALL_CONTROLLED_MODES
+    )
+    mean_q_winner = _winner_result(analysis, "g_only_f_rollout_mean")
+    tail_harm_count = sum(
+        _percent(
+            _find(cells, version=version, variant=variant, epoch=10, mode="f_plus_g")
+        )
+        < _percent(
+            _find(cells, version=version, variant=variant, epoch=10, mode="f_only")
+        )
+        for version in VERSIONS
+        for variant in VARIANTS
+    )
     lines = [
         "# Results TD — 全部 Actor-Free TD-LeWM 实验总账（Cube seed 3072）",
         "",
-        "本报告是统一总账，不是新增结果附录。它覆盖 **465 个正式 O50 单元**：旧 7 方法 21 格、V0 24 格、V1 24 格、V2 156 格、V2-EMA-SG 240 格。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。",
+        f"本报告基于 **{COMPLETE_CELL_COUNT} 个已核验正式 O50 单元**，但主结果只展示每个训练配置的最终 E10 checkpoint，避免把逐 epoch 诊断结果与正式横向比较混在一起。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。",
         "",
         "## 一句话结论",
         "",
-        "- **按原先固定的主评分列 F+G，受控 C–G3 中描述性最好的训练方案是 V1-G3：27/50（54%）。**",
-        "- **所有固定 checkpoint 的最高单格是 V1-C + first-Q：28/50（56%）。**",
-        "- **当前描述性最好的默认测试评分是 first-Q。** 它保留 F 的五步 terminal goal cost，只用真实当前 latent 与第一动作读取 G，受 imagined-state 漂移较少；单 seed 下不把它表述为统计稳健最优。",
-        "- V1→V2 联合微调后，F-only 均值由 46.0% 降到 26.0%，F+G 由 47.7% 降到 27.3%；EMA 只恢复约 1–3 pp，核心问题首先是 world-model/control representation 退化，而不只是 G 的读出形式。",
+        f"- **按原先固定的主评分列 F+G，描述性领先配置为 {f_plus_g_winner}。**",
+        f"- **所有固定 E10 单格的最高结果为 {overall_winner}。**",
+        f"- **按四版本、24 个训练配置的固定 E10 均值，描述性领先测试评分为 {best_score_names}（{analysis.best_mean_percent:.1f}%）。** 单 seed 下不把它表述为统计稳健最优。",
+        f"- V1→V2 联合微调后，F-only 均值由 {v1_f:.1f}% 变为 {v2_f:.1f}%（{_signed_pp(v2_f - v1_f)}），F+G 由 {v1_tail:.1f}% 变为 {v2_tail:.1f}%（{_signed_pp(v2_tail - v1_tail)}）；这首先提示 world-model/control representation 变化，而不只是 G 的读出形式。",
+        "",
+        "## 完整全账伴随文件",
+        "",
+    ]
+    lines += _markdown_table(
+        ("文件", "保留内容", "路径", "SHA-256"),
+        (
+            (
+                "CSV scalar ledger",
+                f"{ledger_evidence.cell_count} 个 O50 单元",
+                f"`{ledger_evidence.csv_path}`",
+                f"`{ledger_evidence.csv_sha256}`",
+            ),
+            (
+                "JSON reconciliation ledger",
+                f"{ledger_evidence.cell_count} 格 × {EPISODES} outcomes = {ledger_evidence.outcome_count:,}",
+                f"`{ledger_evidence.json_path}`",
+                f"`{ledger_evidence.json_sha256}`",
+            ),
+        ),
+    )
+    lines += [
+        "",
+        f"主表只使用固定 E10；全部 {ledger_evidence.cell_count} 格和 {ledger_evidence.outcome_count:,} 个逐-pair 布尔结果仍由上述伴随文件完整保留。",
         "",
         "## 结果覆盖与版本定义",
         "",
     ]
     coverage = (
         ("Legacy", "7", "E10", "F / G(C) / combined", "21"),
-        ("V0 raw action", "6", "E10", "F / G / F+G / first-Q", "24"),
-        ("V1 action encoder", "6", "E10", "F / G / F+G / first-Q", "24"),
+        ("V0 raw action", "6", "E10", "all five scores", "30"),
+        ("V1 action encoder", "6", "E10", "all five scores", "30"),
         ("V2 joint fine-tune", "6", "E3-E10", "3 original + E10 first/Mean", "156"),
         ("V2-EMA-SG", "6", "E3-E10", "all five scores", "240"),
     )
@@ -793,7 +1156,7 @@ def build_markdown(cells: Sequence[ResultCell]) -> str:
         "",
         "## 方法、网络和训练 loss",
         "",
-        "旧结构消融比较 Successor/critic head 与 LeWM predictor 的连接方式：Serial Decoupled、Serial Coupled、Hybrid、Parallel Real、Goal Hybrid、Imaginary Hybrid、Direct Goal Critic Hybrid。其总目标均为 `L_LeWM + α_u L_TD`，区别在 real/predicted 支路、是否让 TD 梯度进入 LeWM、是否使用 goal projection/imaginary bootstrap/direct scalar critic。完整逐方法网络、loss 与推理说明保留在本总账 DOCX 的前置锁定页。",
+        "旧结构消融比较 Successor/critic head 与 LeWM predictor 的连接方式：Serial Decoupled、Serial Coupled、Hybrid、Parallel Real、Goal Hybrid、Imaginary Hybrid、Direct Goal Critic Hybrid。其总目标均为 `L_LeWM + α_u L_TD`，区别在 real/predicted 支路、是否让 TD 梯度进入 LeWM、是否使用 goal projection/imaginary bootstrap/direct scalar critic。旧版阶段性页面不再置于新版决策视图之前；来源文档在历史附录中明确列出。",
         "",
         "C–G3 家族共享同一个 TD-JEPA predictor `G`。V0 输入归一化 raw action；V1 改用冻结的 LeWM Action Encoder；V2 联合微调 LeWM/Action Encoder/G；V2-EMA-SG 进一步用 EMA world model、EMA action encoder 与 EMA G 构造完全 stop-gradient target。",
         "",
@@ -828,84 +1191,59 @@ def build_markdown(cells: Sequence[ResultCell]) -> str:
     lines += _markdown_table(
         ("方法", "F-only", "G/C-only", "Combined"), _legacy_rows(cells)
     )
-    for version, label in (
-        ("v0", "V0 fixed E10：完整 24 格"),
-        ("v1", "V1 fixed E10：完整 24 格"),
-        ("v2", "V2 fixed E10：完整 30 格中的 5 评分"),
-        ("v2_ema_sg", "V2-EMA fixed E10：完整 30 格中的 5 评分"),
-    ):
-        headers = ("方法", "F-only", "G-only", "F+G", "first-Q")
-        if version in ("v2", "v2_ema_sg"):
-            headers += ("Mean-Q",)
-        lines += ["", f"## {label}", ""]
-        lines += _markdown_table(headers, _fixed_rows(cells, version))
-
-    lines += ["", "## V2 checkpoint 轨迹：原三评分 144 格", ""]
-    for mode in ORIGINAL_MODES:
-        lines += [f"### {MODE_LABELS[mode]}", ""]
-        lines += _markdown_table(
-            ("Epoch", "C", "D", "F", "G1", "G2", "G3"),
-            _trajectory_rows(cells, "v2", mode),
-        )
-        lines.append("")
-
-    lines += ["## V2-EMA checkpoint 轨迹：五评分 240 格", ""]
-    for mode in ALL_CONTROLLED_MODES:
-        lines += [f"### {MODE_LABELS[mode]}", ""]
-        lines += _markdown_table(
-            ("Epoch", "C", "D", "F", "G1", "G2", "G3"),
-            _trajectory_rows(cells, "v2_ema_sg", mode),
-        )
-        lines.append("")
-
     lines += [
-        "## 训练 / validation loss 证据",
         "",
-        "训练总 loss 含不同辅助项，绝对数值不能直接给 C–G3 排名，只用于判断各自是否收敛。Legacy 与 V1 曲线保留在锁定的前置报告；V0、V2 的 60 行逐 epoch 数值分别存于 `v0_training_loss_curves.csv`、`v2_training_loss_curves.csv`；V2-EMA 的完整曲线与图也保留在总账 artifacts 中。",
+        "## C–G3 固定 E10 主结果矩阵",
         "",
-        "## 最佳训练方法与最佳测试评分",
-        "",
-        "### 固定 E10 的版本 × 评分均值",
+        "横向读每一行，可以直接比较同一个训练方法最适合哪一种评分；纵向读每一列，可以比较固定评分下哪个训练方法最好。**粗体**是该行最佳评分，`★` 是该列全局最佳训练配置（并列全部标记）。五种评分在四个版本的 24 个训练配置上均有正式结果。",
         "",
     ]
     lines += _markdown_table(
-        ("训练版本", "F-only", "G-only", "F+G", "first-Q", "Mean-Q", "前四列均值"),
+        ("版本", "训练方法", "F-only", "G-only", "F+G tail", "First-Q", "Mean-Q"),
+        _fixed_master_markdown_rows(cells),
+    )
+    lines += [
+        "",
+        f"**逐列赢家：** {_column_winner_summary(analysis)}。",
+        "",
+        "## 训练 / validation loss 证据",
+        "",
+        "训练总 loss 含不同辅助项，绝对数值不能直接给 C–G3 排名，只用于判断各自是否收敛。Legacy 与 V1 曲线保留在历史来源文档；V0、V2、V2-EMA 的逐 epoch 数值和全部 E3–E10 O50 轨迹继续保留在总账 artifacts 中，但不再塞进主结果表。",
+        "",
+        "## 最佳训练方法与最佳测试评分",
+        "",
+        "### 固定 E10 四版本均值",
+        "",
+    ]
+    lines += _markdown_table(
+        ("训练版本", "F-only", "G-only", "F+G", "First-Q", "Mean-Q", "五评分均值"),
         _fixed_version_mean_rows(cells),
     )
     lines += [
         "",
-        "### 测试评分的固定结果汇总",
+        "### 五种评分的四版本汇总",
         "",
     ]
     lines += _markdown_table(
-        ("评分方式", "覆盖版本", "固定格数", "版本均值", "最高固定单格"),
+        ("评分方式", "覆盖版本", "固定格数", "四版本均值", "最高固定单格"),
         _fixed_score_mean_rows(cells),
-    )
-    lines += [
-        "",
-        "### V2-EMA 内训练变体的五评分均值",
-        "",
-    ]
-    lines += _markdown_table(
-        ("训练变体", "E10五评分均值", "该变体最佳评分", "最佳率"),
-        _ema_variant_mean_rows(cells),
     )
     lines += [
         "",
         "### 1. 哪个训练方法最好",
         "",
-        "不存在脱离测试评分的唯一训练赢家。按原研究固定的 F+G 主列，受控 C–G3 中 **V1-G3=54%** 描述性最好；旧结构家族的 **Hybrid=54%** 与其同率，但两者不是同构版本。若统一使用新增 first-Q，最高固定单格变成 **V1-C=56%**。在 V2-EMA E10 内，**训练变体 F（Same-Future Advantage）** 的五评分均值为 38.4%，在六个 EMA 训练变体中最高，因此若只继续 V2-EMA 家族，优先保留训练变体 F。",
+        f"不存在脱离测试评分的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 **{f_plus_g_winner}**；若按全部五种评分寻找最高单格，则为 **{overall_winner}**。在 V2-EMA E10 内，五评分均值最高的训练变体为 **{ema_best_variants}（{ema_best_mean:.1f}%）**。这些都是描述性单 seed 结果。",
         "",
         "### 2. 哪个测试方法最好",
         "",
-        "V2-EMA E10 六法均值：F-only 27.0%、G-only 36.0%、F+G 28.3%、first-Q 40.7%、Mean-Q 37.0%。跨 V0/V1/V2/V2-EMA 的固定 E10，first-Q 的版本均值为 44.8%，也是五种读出中最高。因此 **first-Q 是当前描述性默认主测试方式**；Mean-Q 只在训练变体 F 上达到 46%，应保留为方法特定消融。",
+        f"V2-EMA E10 六法均值为：{ema_mode_summary}。跨 V0/V1/V2/V2-EMA 的固定 E10，**{best_score_names}** 的 24 配置均值最高（{analysis.best_mean_percent:.1f}%），因此它是当前描述性默认主测试方式。Mean-Q 的最高固定配置为 {mean_q_winner}。",
         "",
         "### 3. 原因分析",
         "",
-        "- V0→V1 后 G-only 均值从 35.7% 到 41.3%，first-Q 从 47.0% 到 52.0%，说明共享 Action Encoder 的语义动作表示明显有利于 G。",
+        f"- V0→V1 后 G-only 均值从 {analysis.version_mode_means[('v0', 'g_only')]:.1f}% 到 {analysis.version_mode_means[('v1', 'g_only')]:.1f}%，First-Q 从 {analysis.version_mode_means[('v0', 'f_plus_g_first')]:.1f}% 到 {analysis.version_mode_means[('v1', 'f_plus_g_first')]:.1f}%；这与共享 Action Encoder 改善 G 读出一致。",
         "- V1→V2 后 F-only 与 F+G 同时大幅下降，与 TD 梯度进入 online LeWM/Action Encoder 后产生 latent/control representation drift 的假设一致；单 seed 不能证明因果，问题也不能只归因于 critic。",
-        "- first-Q 只在真实 `z0` 与将执行的第一动作上读取 G，F 仍承担五步目标距离；它较少暴露于 CEM 候选动作和 imagined states，因此 OOD/rollout 误差是目前最合理的解释之一。",
-        "- Mean-Q 在五个 imagined predecessor states 上反复读取 G，world-model 漂移、Q 尺度失配和 OOD 高估可能累积。训练变体 F 的 same-future 对比可能让 goal projection 沿轨迹更可用，但目前只有单 seed。",
+        f"- 当前均值领先读出是 {best_score_names}；不同读出暴露于真实状态、imagined states 与 G 尺度的程度不同，OOD/rollout 误差仍是需要用独立 dev pairs 验证的解释。",
+        f"- Mean-Q 在 24 个固定训练配置上的均值为 {analysis.mode_means['g_only_f_rollout_mean']:.1f}%，最高格为 {mean_q_winner}；它是否应进入主评测由这一完整覆盖结果决定，不再按旧的 V2-only 结论处理。",
         "",
         "## 负面结果与下一轮目标",
         "",
@@ -915,20 +1253,28 @@ def build_markdown(cells: Sequence[ResultCell]) -> str:
         (
             (
                 "V2 world model 退化",
-                "V1→V2 F-only 46.0%→26.0%",
+                f"V1→V2 F-only {v1_f:.1f}%→{v2_f:.1f}%",
                 "先恢复 F，再谈 G 增益",
             ),
             (
                 "EMA 未根治",
-                "V2→EMA 各固定评分只恢复约 1–3 pp",
+                "V2→EMA 五评分变化："
+                + "，".join(
+                    f"{MODE_LABELS[mode]} {_signed_pp(analysis.version_mode_means[('v2_ema_sg', mode)] - analysis.version_mode_means[('v2', mode)])}"
+                    for mode in ALL_CONTROLLED_MODES
+                ),
                 "冻结或低 LR 微调 encoder/world",
             ),
             (
                 "tail 干扰",
-                "多组 F+G 低于 F-only",
-                "优先 first-Q；G readout 加 gate/校准",
+                f"{tail_harm_count}/24 个配置的 F+G 低于 F-only",
+                f"以 {best_score_names} 为默认；G readout 加 gate/校准",
             ),
-            ("Mean-Q 不通用", "V2-C 20%、V2-G2 26%", "只作为 F 等方法特定消融"),
+            (
+                "Mean-Q 完整覆盖",
+                f"24 配置均值 {analysis.mode_means['g_only_f_rollout_mean']:.1f}%；{mean_q_winner}",
+                "按完整四版本结果决定主评测或消融地位",
+            ),
             (
                 "checkpoint 选择偏差",
                 "同一 O50 上看 E3–E10 再取最大",
@@ -945,34 +1291,20 @@ def build_markdown(cells: Sequence[ResultCell]) -> str:
         "",
         "下一轮优先目标：",
         "",
-        "1. 把联合模型固定 E10 的 F-only 六法均值从 27% 恢复到至少 V0/V1 的 46%。",
-        "2. 预注册 `V1-C + first-Q` 与 `V1-G3 + F+G` 两条主基线；正式 O50 不再事后选 epoch。",
+        f"1. 把联合模型固定 E10 的 F-only 六法均值从 {analysis.version_mode_means[('v2_ema_sg', 'f_only')]:.1f}% 恢复到至少 V1 的 {v1_f:.1f}%。",
+        f"2. 预注册 `{_compact_join(analysis.overall_winners)}` 与 `{_compact_join(analysis.mode_winners['f_plus_g'])} + F+G tail` 作为主基线；正式 O50 不再事后选 epoch。",
         "3. 若继续 joint training，先冻结 encoder/world 或给 TD 极低学习率，再分阶段解冻；增加对 V1 latent/prediction 的 anchor，并限制 TD 梯度进入 F。",
         "4. 在独立 dev pair set 上选择 α、epoch 与 Q 校准；对 CEM 候选/imagined-state 分布加入 conservative/calibration 训练，抑制 OOD 高估。",
         "5. 至少 3 个、最好 5 个 training seeds；用 paired bootstrap/McNemar 分析固定配置。",
         "",
-        "## 事后 checkpoint 诊断（不能替代固定 E10）",
-        "",
-        "> 下表在看完同一 O50 的 E3–E10 后选择最大值，存在 selection bias，只能用于诊断训练轨迹。",
-        "",
-    ]
-    lines += _markdown_table(
-        ("版本", "评分", "事后最佳方法/epoch", "最佳", "E10最佳"),
-        _global_posthoc_rows(cells),
-    )
-    lines += ["", "### V2-EMA 新评分稳定性", ""]
-    lines += _markdown_table(
-        ("方法", "评分", "E3–E10均值", "σ(pp)", "最佳", "E10"),
-        _ema_new_stability_rows(cells),
-    )
-    lines += [
-        "",
         "## 审计边界",
         "",
-        f"- 465/465 格共享 episode-selection 文件 SHA-256 `{SELECTION_SHA256}` 与 action normalization SHA-256 `{ACTION_NORMALIZATION_SHA256}`。",
+        f"- {COMPLETE_CELL_COUNT}/{COMPLETE_CELL_COUNT} 格共享 episode-selection 文件 SHA-256 `{SELECTION_SHA256}` 与 action normalization SHA-256 `{ACTION_NORMALIZATION_SHA256}`。",
         f"- fixed 新评分 launcher 另有 valid-row-ranks SHA-256 `{FIXED_SELECTION_RANKS_SHA256}`；它是规范化索引哈希，不是 episode-selection 文件哈希，二者不能混写。",
-        "- 每格成功数都由 50 个布尔 outcome 重算；完整来源路径与 SHA 位于 `all_o50_results.csv` 和 `reconciliation_ledger.json`。",
+        f"- 每格成功数都由 50 个布尔 outcome 重算；CSV `{ledger_evidence.csv_path}`（SHA-256 `{ledger_evidence.csv_sha256}`）与 JSON `{ledger_evidence.json_path}`（SHA-256 `{ledger_evidence.json_sha256}`）共同保留 {ledger_evidence.cell_count} 格 / {ledger_evidence.outcome_count:,} 个 outcomes。",
         "- EMA E3 的 G1/F+G 与 G2/F-only 使用隔离 retry attempt_02；原失败调度证据保留，不把失败单元伪装成原调度成功。",
+        "- 固定 E10 Mean-Q 覆盖 V0/V1/V2/V2-EMA × C/D/F/G1/G2/G3，共 24 格；主结果表不允许缺格或使用占位符。",
+        "- 主结果表只展示 E10；E3–E10 全轨迹仍保存在 `all_o50_results.csv`，没有因版式精简而删除。",
         "- 只有一个 training seed；所有跨版本结果都是描述性结构消融，不声称多 seed 总体最优或统计显著。",
         "",
     ]
@@ -1000,27 +1332,137 @@ def _add_table(
     return v2_report._v1._add_table(document, headers=headers, rows=rows, widths=widths)
 
 
-def _fixed_headers(version: str) -> tuple[str, ...]:
-    headers = ("Method", "F-only", "G-only", "F+G", "First-Q")
-    return headers + (("Mean-Q",) if version in ("v2", "v2_ema_sg") else ())
+def _add_fixed_master_table(document: Any, cells: Sequence[ResultCell]) -> Any:
+    """Add the single E10 decision matrix with row/column winner highlighting."""
+
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    display_rows = _fixed_master_rows(cells)
+    count_rows = _fixed_master_counts(cells)
+    column_maxima = tuple(
+        max(row[index] for row in count_rows)
+        for index in range(len(ALL_CONTROLLED_MODES))
+    )
+    table = _add_table(
+        document,
+        ("Version", "Method", "F-only", "G-only", "F+G tail", "First-Q", "Mean-Q"),
+        display_rows,
+        (1200, 900, 2460, 2460, 2460, 2460, 2460),
+    )
+    for column, cell in enumerate(table.rows[0].cells):
+        cell.paragraphs[0].alignment = (
+            WD_ALIGN_PARAGRAPH.LEFT if column < 2 else WD_ALIGN_PARAGRAPH.CENTER
+        )
+    for row in table.rows:
+        for cell in row.cells:
+            cell.paragraphs[0].paragraph_format.line_spacing = 1.0
+            properties = cell._tc.get_or_add_tcPr()
+            margins = properties.find(qn("w:tcMar"))
+            if margins is None:
+                margins = OxmlElement("w:tcMar")
+                properties.append(margins)
+            for side in ("top", "bottom"):
+                element = margins.find(qn(f"w:{side}"))
+                if element is None:
+                    element = OxmlElement(f"w:{side}")
+                    margins.append(element)
+                element.set(qn("w:w"), "55")
+                element.set(qn("w:type"), "dxa")
+    for row_index, (row, counts) in enumerate(zip(table.rows[1:], count_rows), start=0):
+        row_maximum = max(value for value in counts if value is not None)
+        band_fill = "F8FAFC" if (row_index // len(VARIANTS)) % 2 == 0 else "EEF4F8"
+        for column in (0, 1):
+            v2_report._v1._shade_cell(row.cells[column], band_fill)
+            row.cells[column].paragraphs[0].runs[0].bold = True
+        for score_index, count in enumerate(counts):
+            cell = row.cells[score_index + 2]
+            paragraph = cell.paragraphs[0]
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = paragraph.runs[0]
+            run.font.size = Pt(8.5)
+            row_best = count == row_maximum
+            column_best = count == column_maxima[score_index]
+            if row_best and column_best:
+                v2_report._v1._shade_cell(cell, "B7DEE8")
+            elif column_best:
+                v2_report._v1._shade_cell(cell, "DDEBF7")
+            elif row_best:
+                v2_report._v1._shade_cell(cell, "FFF2CC")
+            run.bold = row_best or column_best
+    return table
 
 
-def _fixed_widths(version: str) -> tuple[int, ...]:
-    return (
-        (1800, 3150, 3150, 3150, 3150)
-        if version in ("v0", "v1")
-        else (1400, 2600, 2600, 2600, 2600, 2600)
+def _configure_primary_document(document: Any) -> None:
+    """Configure a standalone landscape report with no stale pages in front."""
+
+    from docx.enum.section import WD_ORIENT
+    from docx.enum.style import WD_STYLE_TYPE
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Inches, Pt, RGBColor
+
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = Inches(11)
+    section.page_height = Inches(8.5)
+    section.top_margin = Inches(0.5)
+    section.right_margin = Inches(0.5)
+    section.bottom_margin = Inches(0.5)
+    section.left_margin = Inches(0.5)
+    section.header_distance = Inches(0.25)
+    section.footer_distance = Inches(0.25)
+
+    if "Report Kicker" not in document.styles:
+        kicker = document.styles.add_style("Report Kicker", WD_STYLE_TYPE.PARAGRAPH)
+    else:
+        kicker = document.styles["Report Kicker"]
+    kicker.font.name = "Arial Unicode MS"
+    kicker._element.get_or_add_rPr().rFonts.set(qn("w:ascii"), "Arial Unicode MS")
+    kicker._element.get_or_add_rPr().rFonts.set(qn("w:hAnsi"), "Arial Unicode MS")
+    kicker._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "Arial Unicode MS")
+    kicker.font.size = Pt(9.5)
+    kicker.font.bold = True
+    kicker.font.color.rgb = RGBColor.from_string("5C6975")
+    kicker.paragraph_format.space_before = Pt(4)
+    kicker.paragraph_format.space_after = Pt(4)
+
+    v2_report._set_header_text(
+        section,
+        f"Results TD complete ledger · Cube O50 · {COMPLETE_CELL_COUNT} verified cells",
+    )
+    for footer in (section.footer, section.even_page_footer):
+        footer.is_linked_to_previous = False
+        paragraph = footer.paragraphs[0]
+        paragraph.text = ""
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        footer_run = paragraph.add_run("Complete fixed-E10 decision report · Page ")
+        v2_report._v1._set_run_font(footer_run, size=8.5, color="6B7280")
+        field = OxmlElement("w:fldSimple")
+        field.set(qn("w:instr"), "PAGE")
+        paragraph._p.append(field)
+
+    core = document.core_properties
+    core.title = "Results TD Complete Experiment Ledger"
+    core.subject = (
+        f"{COMPLETE_CELL_COUNT} verified O50 cells and fixed E10 five-score comparison"
+    )
+    core.keywords = (
+        "TD-JEPA, Actor-Free TD-LeWM, fixed E10, five scores, "
+        f"{COMPLETE_CELL_COUNT} cells, {COMPLETE_OUTCOME_COUNT} outcomes"
     )
 
 
 def build_docx(
     cells: Sequence[ResultCell],
-    base_inputs: v2_report.ValidatedReportInputs,
+    ledger_evidence: LedgerEvidence,
     *,
     v0_training_chart: bytes,
     v2_training_chart: bytes,
     training_chart: bytes,
-    score_chart: bytes,
 ) -> bytes:
     try:
         from docx import Document
@@ -1030,30 +1472,55 @@ def build_docx(
             "python-docx is required from the workspace runtime."
         ) from exc
 
-    document = Document(str(base_inputs.base_document))
-    v2_report._v1._configure_append_section(document)
-    v2_report._set_header_text(
-        document.sections[-1],
-        "Results TD complete ledger · Cube O50 · 465 verified cells",
+    analysis = _fixed_analysis(cells)
+    f_plus_g_winner = _winner_result(analysis, "f_plus_g")
+    overall_winner = (
+        f"{_compact_join(analysis.overall_winners)}: {analysis.overall_best_count}/50 "
+        f"({analysis.overall_best_count * 2}%)"
     )
+    best_score_names = _joined(
+        tuple(MODE_LABELS[mode] for mode in analysis.best_mean_modes)
+    )
+    ema_best_variants = _compact_join(
+        tuple(variant.upper() for variant in analysis.ema_best_variants)
+    )
+    ema_best_mean = analysis.ema_variant_means[analysis.ema_best_variants[0]]
+    v1_f = analysis.version_mode_means[("v1", "f_only")]
+    v2_f = analysis.version_mode_means[("v2", "f_only")]
+    mean_q_winner = _winner_result(analysis, "g_only_f_rollout_mean")
+    tail_harm_count = sum(
+        _percent(
+            _find(cells, version=version, variant=variant, epoch=10, mode="f_plus_g")
+        )
+        < _percent(
+            _find(cells, version=version, variant=variant, epoch=10, mode="f_only")
+        )
+        for version in VERSIONS
+        for variant in VARIANTS
+    )
+    document = Document()
+    _configure_primary_document(document)
+
     kicker = document.add_paragraph(style="Report Kicker")
     kicker.add_run("RESULTS TD / COMPLETE EXPERIMENT LEDGER")
     v2_report._font_paragraph(kicker, size=9.5, color="5C6975")
     title = document.add_paragraph()
     title.paragraph_format.space_after = Pt(4)
-    run = title.add_run("All methods, versions, checkpoints and scores")
+    run = title.add_run("Fixed E10 decision matrix across methods and scores")
     v2_report._v1._set_run_font(run, size=24, color="0B2545", bold=True)
     subtitle = document.add_paragraph()
     subtitle.paragraph_format.space_after = Pt(10)
     run = subtitle.add_run(
-        "Cube · seed 3072 · 465 O50 cells · legacy + V0 + V1 + V2 + V2-EMA-SG"
+        f"Cube · seed 3072 · {COMPLETE_CELL_COUNT} O50 cells · legacy + V0 + V1 + V2 + V2-EMA-SG"
     )
     v2_report._v1._set_run_font(run, size=12, color="4B5563")
     _add_body(
         document,
-        "This is the consolidated ledger, not a new-score appendix. Every result "
-        "uses the same 50 start-goal pairs. Best-epoch findings are explicitly "
-        "post-hoc; all training uses one seed and no statistical-significance claim is made.",
+        f"This decision view is backed by the complete {COMPLETE_CELL_COUNT}-cell audit, but its main "
+        "result table shows only the final E10 checkpoint. Every displayed result "
+        f"uses the same 50 start-goal pairs; the companion ledgers retain all "
+        f"{COMPLETE_OUTCOME_COUNT:,} Boolean outcomes. All training uses one seed, so "
+        "no statistical-significance claim is made.",
         color="7A5A00",
         bold=True,
     )
@@ -1065,36 +1532,189 @@ def build_docx(
         (
             (
                 "Best on prespecified F+G column",
-                "V1-G3",
-                "27/50 (54%)",
+                _compact_join(analysis.mode_winners["f_plus_g"]),
+                f"{analysis.mode_best_counts['f_plus_g']}/50 "
+                f"({analysis.mode_best_counts['f_plus_g'] * 2}%)",
                 "Keep as primary baseline",
             ),
             (
                 "Best fixed result overall",
-                "V1-C + First-Q",
-                "28/50 (56%)",
-                "Primary new-readout baseline",
+                _compact_join(analysis.overall_winners),
+                f"{analysis.overall_best_count}/50 ({analysis.overall_best_count * 2}%)",
+                "Primary fixed-E10 baseline",
             ),
             (
                 "Best V2-EMA training variant",
-                "F (Same-Future)",
-                "E10 five-score mean 38.4%",
+                ema_best_variants,
+                f"E10 five-score mean {ema_best_mean:.1f}%",
                 "Retain this variant if joint training continues",
             ),
             (
                 "Descriptive default test score",
-                "First-Q",
-                "4-version mean 44.8%",
-                "Default readout; Mean-Q is an ablation",
+                best_score_names,
+                f"24-configuration mean {analysis.best_mean_percent:.1f}%",
+                "Default readout candidate; confirm on dev pairs",
             ),
             (
                 "Leading failure hypothesis",
                 "Joint world-model drift",
-                "V1→V2 F-only 46%→26%",
-                "Restore F before optimizing G",
+                f"V1→V2 F-only {v1_f:.1f}%→{v2_f:.1f}%",
+                f"Restore F toward the V1 mean ({v1_f:.1f}%)",
             ),
         ),
         (3300, 3400, 3600, 4100),
+    )
+
+    _add_heading(document, "Complete companion ledgers")
+    _add_table(
+        document,
+        ("Artifact", "Coverage", "Repository-relative path", "SHA-256"),
+        (
+            (
+                "CSV scalar ledger",
+                f"{ledger_evidence.cell_count} O50 cells",
+                ledger_evidence.csv_path,
+                ledger_evidence.csv_sha256,
+            ),
+            (
+                "JSON reconciliation ledger",
+                f"{ledger_evidence.cell_count} x {EPISODES} = "
+                f"{ledger_evidence.outcome_count:,} outcomes",
+                ledger_evidence.json_path,
+                ledger_evidence.json_sha256,
+            ),
+        ),
+        (2600, 2900, 4500, 4400),
+    )
+    _add_body(
+        document,
+        f"The main matrix is fixed E10 only. The two fingerprinted files above retain "
+        f"all {ledger_evidence.cell_count} scalar cells and all "
+        f"{ledger_evidence.outcome_count:,} per-pair Boolean outcomes.",
+        bold=True,
+    )
+
+    _add_heading(
+        document,
+        "C-G3 fixed E10 master matrix: 24 training configurations x five scores",
+        page_break=True,
+    )
+    _add_body(
+        document,
+        "Read across a row to compare five evaluation scores for one training method; "
+        "read down a column to compare 24 training configurations under one score. "
+        "Gold marks a row winner, blue marks a column winner, and teal marks both. "
+        "Ties are all highlighted in the matrix.",
+        bold=True,
+    )
+    _add_fixed_master_table(document, cells)
+    _add_body(
+        document,
+        "All five scores have formal E10 results for every one of the 24 training "
+        f"configurations. Column winners: {_column_winner_summary(analysis)}.",
+        color="5C6975",
+    )
+
+    _add_heading(
+        document,
+        "Best training method and evaluation score",
+        page_break=True,
+    )
+    _add_body(
+        document,
+        "There is no evaluation-independent training winner. The prespecified F+G "
+        f"leader is {f_plus_g_winner}; the highest fixed cell is {overall_winner}. "
+        f"Across all 24 configurations, {best_score_names} has the largest descriptive "
+        f"mean ({analysis.best_mean_percent:.1f}%). These are single-seed comparisons.",
+        color="7A5A00",
+        bold=True,
+    )
+    _add_heading(document, "Fixed E10 means by training version", level=2)
+    _add_table(
+        document,
+        (
+            "Training version",
+            "F-only",
+            "G-only",
+            "F+G",
+            "First-Q",
+            "Mean-Q",
+            "Five-score mean",
+        ),
+        _fixed_version_mean_rows(cells),
+        (3000, 1850, 1850, 1850, 1850, 1850, 2150),
+    )
+    _add_heading(document, "Fixed E10 means by evaluation score", level=2)
+    _add_table(
+        document,
+        ("Score", "Versions", "Cells", "Four-version mean", "Best fixed cell"),
+        _fixed_score_mean_rows(cells),
+        (2500, 3000, 1500, 2400, 5000),
+    )
+
+    _add_heading(document, "Causes and next objectives", page_break=True)
+    _add_table(
+        document,
+        ("Finding", "Evidence", "Interpretation", "Next objective"),
+        (
+            (
+                "Action embedding helps G",
+                f"V0→V1 G-only {analysis.version_mode_means[('v0', 'g_only')]:.1f}→"
+                f"{analysis.version_mode_means[('v1', 'g_only')]:.1f}%; First-Q "
+                f"{analysis.version_mode_means[('v0', 'f_plus_g_first')]:.1f}→"
+                f"{analysis.version_mode_means[('v1', 'f_plus_g_first')]:.1f}%",
+                "Semantic action representation improves critic readout",
+                "Keep shared V1 Action Encoder",
+            ),
+            (
+                "Joint tuning damages F",
+                f"V1→V2 F-only {v1_f:.1f}→{v2_f:.1f}%",
+                "Consistent with TD-gradient representation drift",
+                f"Restore F-only mean to >={v1_f:.1f}%",
+            ),
+            (
+                "EMA is insufficient",
+                "Five-score mean delta "
+                f"{_signed_pp(sum(analysis.version_mode_means[('v2_ema_sg', mode)] - analysis.version_mode_means[('v2', mode)] for mode in ALL_CONTROLLED_MODES) / len(ALL_CONTROLLED_MODES))}",
+                "Target stabilization does not undo online drift",
+                "Freeze/low-LR then staged unfreeze",
+            ),
+            (
+                f"{best_score_names} leads descriptively",
+                f"24-configuration mean {analysis.best_mean_percent:.1f}%",
+                "Readout exposure to rollout OOD remains a testable hypothesis",
+                "Use as default candidate; tune score parameters on dev",
+            ),
+            (
+                "Tail interference",
+                f"F+G is below F-only in {tail_harm_count}/24 fixed configurations",
+                "Final imagined-state G can add OOD or scale error",
+                "Gate/calibrate the tail on independent dev pairs",
+            ),
+            (
+                "Mean-Q complete coverage",
+                f"Mean {analysis.mode_means['g_only_f_rollout_mean']:.1f}%; {mean_q_winner}",
+                "All four versions now contribute equally to the comparison",
+                "Use the complete result to decide primary versus ablation status",
+            ),
+            (
+                "Single-seed boundary",
+                "All training seed 3072",
+                "No population-level claim",
+                ">=3 seeds + paired statistics",
+            ),
+        ),
+        (2800, 4100, 4200, 3300),
+    )
+    _add_body(
+        document,
+        "Recommended next experiment: freeze the V1 encoder/world model, compare "
+        f"{_compact_join(analysis.overall_winners)} against "
+        f"{_compact_join(analysis.mode_winners['f_plus_g'])} + F+G tail on independent development pairs, "
+        "pre-register epoch/alpha, then run at least three training seeds. If joint "
+        "training is retained, use a much smaller TD learning rate, latent/prediction "
+        "anchors to V1 and conservative calibration on CEM candidate actions.",
+        bold=True,
     )
 
     _add_heading(document, "Coverage map", page_break=True)
@@ -1103,19 +1723,18 @@ def build_docx(
         ("Family/version", "Methods", "Epochs", "Scores", "Cells"),
         (
             ("Legacy structures", "7", "E10", "F / G(C) / combined", "21"),
-            ("V0 raw action", "6", "E10", "F / G / F+G / First-Q", "24"),
-            ("V1 action encoder", "6", "E10", "F / G / F+G / First-Q", "24"),
+            ("V0 raw action", "6", "E10", "All five", "30"),
+            ("V1 action encoder", "6", "E10", "All five", "30"),
             ("V2 joint", "6", "E3-E10", "3 original + E10 First/Mean", "156"),
             ("V2-EMA-SG", "6", "E3-E10", "All five", "240"),
-            ("TOTAL", "-", "-", "Same O50 selection", "465"),
+            ("TOTAL", "-", "-", "Same O50 selection", str(COMPLETE_CELL_COUNT)),
         ),
         (3600, 1800, 2200, 4900, 1900),
     )
     _add_body(
         document,
-        "The legacy and V0/V1 method/network/loss definitions remain in the "
-        "preceding locked pages. The following pages add the complete V2 and "
-        "V2-EMA trajectories and the cross-version decision analysis.",
+        "The complete E3-E10 trajectories remain in the audited companion ledgers; "
+        "the decision matrix in this document deliberately uses one fixed E10 checkpoint.",
     )
 
     _add_heading(document, "V2 / V2-EMA network, target and loss", page_break=True)
@@ -1192,51 +1811,13 @@ def build_docx(
         (2500, 5000, 3700, 3200),
     )
 
-    for version, title_text in (
-        ("v0", "V0 fixed E10 — complete four-score matrix"),
-        ("v1", "V1 fixed E10 — complete four-score matrix"),
-        ("v2", "V2 fixed E10 — complete five-score matrix"),
-        ("v2_ema_sg", "V2-EMA fixed E10 — complete five-score matrix"),
-    ):
-        _add_heading(document, title_text, page_break=True)
-        _add_table(
-            document,
-            _fixed_headers(version),
-            _fixed_rows(cells, version),
-            _fixed_widths(version),
-        )
-
-    for version, modes, label in (
-        ("v2", ORIGINAL_MODES, "V2"),
-        ("v2_ema_sg", ALL_CONTROLLED_MODES, "V2-EMA"),
-    ):
-        _add_heading(document, f"{label} exact checkpoint trajectory", page_break=True)
-        _add_body(
-            document,
-            f"Every entry below is an exact O50 result. Together these tables contain "
-            f"{144 if version == 'v2' else 240} unique {label} cells.",
-        )
-        for index, mode in enumerate(modes):
-            _add_heading(
-                document,
-                MODE_LABELS[mode],
-                level=2,
-                page_break=index > 0,
-            )
-            _add_table(
-                document,
-                ("Epoch", "C", "D", "F", "G1", "G2", "G3"),
-                _trajectory_rows(cells, version, mode),
-                (1600, 2130, 2130, 2130, 2130, 2130, 2150),
-            )
-
     _add_heading(document, "Training / validation trajectories", page_break=True)
     _add_body(
         document,
         "Training totals are method-specific and cannot be ranked by absolute height. "
-        "Use them only as within-method convergence diagnostics. The locked opening pages "
-        "contain the legacy and V1 curves; the following charts add V0, V2 and V2-EMA. "
-        "All numeric rows are retained in the reconciled CSV archives.",
+        "Use them only as within-method convergence diagnostics. The following charts "
+        "show V0, V2 and V2-EMA; legacy and V1 curves remain in the historical source "
+        "report. All numeric rows and E3-E10 O50 trajectories remain in the companion ledgers.",
     )
     v2_report._add_picture(
         document,
@@ -1256,130 +1837,25 @@ def build_docx(
         title="Figure 3. V2-EMA-SG training and validation loss (E1-E10)",
         description="Training and validation total-loss trajectories for C, D, F, G1, G2 and G3.",
     )
-    v2_report._add_picture(
-        document,
-        score_chart,
-        title="Figure 4. V2-EMA new-score trajectories (E3-E10)",
-        description="First-Q and Mean-Q O50 trajectories for all six methods.",
-    )
 
-    _add_heading(document, "Post-hoc checkpoint diagnosis", page_break=True)
-    _add_body(
-        document,
-        "WARNING: maxima below were selected after observing E3-E10 on the same O50 "
-        "pairs. They are selection-biased trajectory diagnostics and do not replace the fixed E10 results.",
-        color="9C2F17",
-        bold=True,
-    )
-    _add_table(
-        document,
-        ("Version", "Score", "Post-hoc best", "Best", "Best at E10"),
-        _global_posthoc_rows(cells),
-        (1900, 3000, 3700, 2900, 2900),
-    )
-    _add_heading(document, "V2-EMA new-score stability", level=2)
-    _add_table(
-        document,
-        ("Method", "Score", "Mean", "Sigma pp", "Best", "E10"),
-        _ema_new_stability_rows(cells),
-        (1500, 3600, 2100, 2200, 2900, 2100),
-    )
-
-    _add_heading(document, "Interpretation and next objectives", page_break=True)
-    _add_heading(document, "Fixed E10 version means", level=2)
-    _add_table(
-        document,
-        (
-            "Training version",
-            "F-only",
-            "G-only",
-            "F+G",
-            "First-Q",
-            "Mean-Q",
-            "Common-4 mean",
-        ),
-        _fixed_version_mean_rows(cells),
-        (3000, 1850, 1850, 1850, 1850, 1850, 2150),
-    )
-    _add_heading(document, "Fixed-score comparison", level=2)
-    _add_table(
-        document,
-        ("Score", "Versions", "Cells", "Version mean", "Best fixed cell"),
-        _fixed_score_mean_rows(cells),
-        (2500, 3000, 1500, 2400, 5000),
-    )
-    _add_heading(document, "V2-EMA training variants", level=2)
-    _add_table(
-        document,
-        ("Training variant", "Five-score mean", "Best readout", "Best rate"),
-        _ema_variant_mean_rows(cells),
-        (2600, 3100, 5600, 3100),
-    )
-    _add_body(
-        document,
-        "There is no readout-independent training winner: V1-G3 leads the "
-        "prespecified F+G column, whereas V1-C leads First-Q. These are descriptive "
-        "single-seed results, not statistical superiority claims.",
-        color="7A5A00",
-        bold=True,
-    )
-    _add_table(
-        document,
-        ("Finding", "Evidence", "Interpretation", "Next objective"),
-        (
-            (
-                "Action embedding helps G",
-                "V0→V1 G-only 35.7→41.3%; First-Q 47→52%",
-                "Semantic action representation improves critic readout",
-                "Keep shared V1 Action Encoder",
-            ),
-            (
-                "Joint tuning damages F",
-                "V1→V2 F-only 46→26%",
-                "Consistent with TD-gradient representation drift",
-                "Restore F-only mean to >=46%",
-            ),
-            (
-                "EMA is insufficient",
-                "Only ~1–3 pp recovery",
-                "Target stabilization does not undo online drift",
-                "Freeze/low-LR then staged unfreeze",
-            ),
-            (
-                "First-Q leads descriptively",
-                "4-version mean 44.8%",
-                "Real-state/first-action readout may limit rollout OOD",
-                "Default test score; calibrate alpha on dev",
-            ),
-            (
-                "Mean-Q is method-specific",
-                "F=46%; V2-C=20%",
-                "Repeated imagined-state readout compounds error",
-                "Keep only as registered ablation",
-            ),
-            (
-                "Single-seed boundary",
-                "All training seed 3072",
-                "No population-level claim",
-                ">=3 seeds + paired statistics",
-            ),
-        ),
-        (2800, 4100, 4200, 3300),
-    )
-    _add_body(
-        document,
-        "Recommended next experiment: freeze the V1 encoder/world model, compare "
-        "V1-C + First-Q against V1-G3 + F+G on independent development pairs, "
-        "pre-register epoch/alpha, then run at least three training seeds. If joint "
-        "training is retained, use a much smaller TD learning rate, latent/prediction "
-        "anchors to V1 and conservative calibration on CEM candidate actions.",
-        bold=True,
-    )
+    _add_heading(document, "Audit boundary", page_break=True)
     _add_table(
         document,
         ("Audit field", "Locked value"),
         (
-            ("Verified O50 cells", "465 / 465"),
+            (
+                "Verified O50 cells",
+                f"{COMPLETE_CELL_COUNT} / {COMPLETE_CELL_COUNT}",
+            ),
+            ("Scalar CSV path", ledger_evidence.csv_path),
+            ("Scalar CSV SHA-256", ledger_evidence.csv_sha256),
+            ("Reconciliation JSON path", ledger_evidence.json_path),
+            ("Reconciliation JSON SHA-256", ledger_evidence.json_sha256),
+            (
+                "Per-pair Boolean outcomes",
+                f"{ledger_evidence.outcome_count:,} / {COMPLETE_OUTCOME_COUNT:,}",
+            ),
+            ("Fixed E10 Mean-Q cells", "24 / 24"),
             ("Episode selection", SELECTION_SHA256),
             ("Fixed valid-row-ranks hash", FIXED_SELECTION_RANKS_SHA256),
             ("Action normalization", ACTION_NORMALIZATION_SHA256),
@@ -1387,10 +1863,31 @@ def build_docx(
             ("EMA E3 retry", "G1/F+G and G2/F-only use isolated attempt_02"),
             (
                 "Claim boundary",
-                "One training seed; post-hoc epoch maxima are diagnostic only",
+                "One training seed; the decision matrix is fixed E10 only",
             ),
         ),
         (3500, 10900),
+    )
+
+    _add_heading(
+        document,
+        "Historical appendix — superseded locked source report",
+        page_break=True,
+    )
+    _add_body(
+        document,
+        "The earlier locked V0/V1 report is retained as a historical source at "
+        f"{_display_path(Path(DEFAULT_BASE_DOCUMENT))}. Its stage-specific three-score "
+        "and 18-run statements are not embedded ahead of this report and do not override "
+        "the complete 24-by-five fixed-E10 decision matrix.",
+        color="7A5A00",
+        bold=True,
+    )
+    _add_body(
+        document,
+        "Use the historical source for legacy/V0/V1 architecture detail and training "
+        "curves only. Use this document and its fingerprinted companion ledgers for all "
+        "current cross-version result comparisons.",
     )
 
     stream = io.BytesIO()
@@ -1426,6 +1923,9 @@ def _atomic_write(path: Path, payload: bytes) -> None:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ledger", default=str(DEFAULT_LEDGER))
+    parser.add_argument(
+        "--reconciliation-ledger", default=str(DEFAULT_RECONCILIATION_LEDGER)
+    )
     parser.add_argument("--markdown-output", default=str(DEFAULT_MARKDOWN_OUTPUT))
     parser.add_argument("--docx-output", default=str(DEFAULT_DOCX_OUTPUT))
     parser.add_argument("--root-docx-output", default=str(DEFAULT_ROOT_DOCX_OUTPUT))
@@ -1439,6 +1939,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     cells = load_complete_ledger(args.ledger)
+    ledger_evidence = load_ledger_evidence(args.ledger, args.reconciliation_ledger)
+    if args.validate_only:
+        print(
+            "PASS: complete Results TD ledger contains "
+            f"{COMPLETE_CELL_COUNT} verified O50 cells and "
+            f"{COMPLETE_OUTCOME_COUNT} reconciled outcomes."
+        )
+        return 0
     base_inputs = v2_report.load_validated_report_inputs(
         original_summary_path=v2_report.DEFAULT_ORIGINAL_SUMMARY,
         training_loss_csv_path=v2_report.DEFAULT_TRAINING_LOSS_CSV,
@@ -1447,9 +1955,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         fixed_results_csv_path=v2_report.DEFAULT_FIXED_RESULTS_CSV,
         base_document_path=DEFAULT_BASE_DOCUMENT,
     )
-    if args.validate_only:
-        print("PASS: complete Results TD ledger contains 465 verified O50 cells.")
-        return 0
     v0_training_chart = build_training_chart_from_archive(
         args.v0_training_csv, title="V0 raw-action training and validation loss"
     )
@@ -1458,14 +1963,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     training_chart = v2_report.build_training_loss_chart(base_inputs)
     score_chart = v2_report.build_new_score_chart(base_inputs)
-    markdown = build_markdown(cells)
+    markdown = build_markdown(cells, ledger_evidence)
     document = build_docx(
         cells,
-        base_inputs,
+        ledger_evidence,
         v0_training_chart=v0_training_chart,
         v2_training_chart=v2_training_chart,
         training_chart=training_chart,
-        score_chart=score_chart,
     )
     markdown_path = Path(args.markdown_output)
     docx_path = Path(args.docx_output)
