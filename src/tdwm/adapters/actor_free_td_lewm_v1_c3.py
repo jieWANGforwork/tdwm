@@ -1,10 +1,11 @@
 """Deployment adapter for the V1-C3 RP1-style goal-conditioned State-V critic.
 
 V1-C3 is an actor-free continuation of the frozen V1-C checkpoint.  The
-checkpoint retains V1-C's frozen LeWM and online/EMA G pair for provenance,
-but planning deliberately uses neither G nor latent distance: CEM rolls the
-frozen LeWM through all five action blocks and minimizes the EMA State-V value
-of the terminal imagined latent relative to the encoded goal latent.
+checkpoint retains V1-C's frozen LeWM and online/EMA G pair.  The original
+State-V ablation deliberately uses neither G nor latent distance.  The paired
+``state_v_plus_first_q2`` ablation keeps the same full frozen-F rollout and
+adds only V1-C's online first-action Q after independently normalizing the
+State-V and Q signals over each CEM candidate set.
 """
 
 from __future__ import annotations
@@ -23,12 +24,16 @@ from tdwm.adapters.actor_free_td_lewm_v1_c import METHOD_SPEC as PARENT_METHOD_S
 from tdwm.adapters.frozen_actor_free_td_v1_common import (
     ACTION_BLOCK_STEPS,
     LEWM_HISTORY_SIZE,
+    _normalize_cem_candidate_scores,
     validate_frozen_actor_free_td_v1_payload,
 )
 from tdwm.methods.actor_free_td_lewm_v1 import (
     V1_RAW_ACTION_DIM,
     V1_STATE_DIM,
     ActorFreeTDJEPAPredictorV1,
+    encode_frozen_action_blocks_v1,
+    project_tasks_to_sphere_v1,
+    tdjepa_goal_score_v1,
     validate_frozen_lewm_action_encoder_v1,
 )
 from tdwm.methods.actor_free_td_lewm_v1_c3 import RP1StateValueV1C3
@@ -46,6 +51,9 @@ PARENT_CHECKPOINT_SHA256 = (
     "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3"
 )
 STATE_V_SCORE_MODE = "state_v_terminal"
+STATE_V_FIRST_Q2_SCORE_MODE = "state_v_plus_first_q2"
+STATE_V_SCORE_MODES = frozenset({STATE_V_SCORE_MODE, STATE_V_FIRST_Q2_SCORE_MODE})
+STATE_V_FIRST_Q2_WEIGHT = 0.25
 STATE_V_CONSTANT_SANITY_OFFSET = 25.0
 
 
@@ -390,16 +398,19 @@ def assert_constant_shift_preserves_selection(
 
 
 class ActorFreeTDLeWMV1C3(nn.Module):
-    """Full frozen-F rollout followed solely by EMA goal-conditioned State-V."""
+    """Full frozen-F rollout scored by State-V, optionally plus first-Q2."""
 
-    supported_score_modes = frozenset({STATE_V_SCORE_MODE})
+    supported_score_modes = STATE_V_SCORE_MODES
     default_score_mode = STATE_V_SCORE_MODE
 
     def __init__(
         self,
         world_model: nn.Module,
         target_critic: RP1StateValueV1C3,
+        predictor: ActorFreeTDJEPAPredictorV1 | None = None,
         *,
+        score_mode: str = STATE_V_SCORE_MODE,
+        g_first_weight: float | None = None,
         lewm_history_size: int = LEWM_HISTORY_SIZE,
         rollout_horizon: int = 5,
         run_constant_shift_sanity: bool = True,
@@ -411,6 +422,23 @@ class ActorFreeTDLeWMV1C3(nn.Module):
             raise ValueError("V1-C3 requires exactly five imagined action blocks.")
         self.world_model = world_model
         self.target_critic = target_critic
+        if score_mode not in self.supported_score_modes:
+            raise ValueError(
+                f"Unsupported V1-C3 score mode {score_mode!r}; expected one of "
+                f"{sorted(self.supported_score_modes)}."
+            )
+        self.score_mode = score_mode
+        if score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+            if predictor is None:
+                raise ValueError("state_v_plus_first_q2 requires the retained online G.")
+            if g_first_weight != STATE_V_FIRST_Q2_WEIGHT:
+                raise ValueError(
+                    "state_v_plus_first_q2 requires the pre-registered weight 0.25."
+                )
+        elif g_first_weight is not None:
+            raise ValueError("g_first_weight is only valid for state_v_plus_first_q2.")
+        self.predictor = predictor
+        self.g_first_weight = g_first_weight
         self.lewm_history_size = int(lewm_history_size)
         self.rollout_horizon = int(rollout_horizon)
         self.run_constant_shift_sanity = bool(run_constant_shift_sanity)
@@ -460,6 +488,14 @@ class ActorFreeTDLeWMV1C3(nn.Module):
                 "V1-C3 State-V scoring requires a full five-block rollout."
             )
 
+        current = None
+        if self.score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+            current = self._current_state_for_samples(
+                dict(info_dict),
+                batch=batch,
+                samples=samples,
+                reference=action_candidates,
+            )
         goal = self._goal_for_samples(
             info_dict,
             batch=batch,
@@ -472,19 +508,50 @@ class ActorFreeTDLeWMV1C3(nn.Module):
             batch=batch,
             samples=samples,
         )
-        costs = self.target_critic(terminal, goal)
-        if costs.ndim == 3 and costs.shape[-1] == 1:
-            costs = costs.squeeze(-1)
-        if costs.shape != (batch, samples):
+        state_v = self.target_critic(terminal, goal)
+        if state_v.ndim == 3 and state_v.shape[-1] == 1:
+            state_v = state_v.squeeze(-1)
+        if state_v.shape != (batch, samples):
             raise ValueError("EMA State-V must return one scalar per CEM candidate.")
-        if not bool(torch.isfinite(costs).all()):
+        if not bool(torch.isfinite(state_v).all()):
             raise ValueError("EMA State-V returned NaN or Inf costs.")
-        if bool((costs < 0).any()):
+        if bool((state_v < 0).any()):
             raise ValueError("EMA State-V must be nonnegative.")
         if self.run_constant_shift_sanity and not self.constant_shift_sanity_checked:
-            assert_constant_shift_preserves_selection(costs)
+            assert_constant_shift_preserves_selection(state_v)
             self.constant_shift_sanity_checked = True
-        return costs
+        if self.score_mode == STATE_V_SCORE_MODE:
+            return state_v
+
+        if current is None or self.predictor is None or self.g_first_weight is None:
+            raise RuntimeError("V1-C3 first-Q2 components were not initialized.")
+        task = project_tasks_to_sphere_v1(goal)
+        q_first = self._goal_score(
+            current,
+            action_candidates[..., 0, :],
+            task,
+        )
+        return _normalize_cem_candidate_scores(state_v) - self.g_first_weight * (
+            _normalize_cem_candidate_scores(q_first)
+        )
+
+    def _goal_score(
+        self,
+        state: torch.Tensor,
+        raw_action: torch.Tensor,
+        task: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.predictor is None:
+            raise RuntimeError("The retained online G is unavailable.")
+        action_embedding = encode_frozen_action_blocks_v1(
+            self.world_model.action_encoder,
+            raw_action,
+            reference=state,
+        )
+        prediction = self.predictor(state, action_embedding, task)
+        if prediction.shape != state.shape:
+            raise ValueError("V1-C3 retained online G must return one 192D vector.")
+        return tdjepa_goal_score_v1(prediction, task)
 
     def _terminal_future(
         self,
@@ -514,6 +581,59 @@ class ActorFreeTDLeWMV1C3(nn.Module):
         if future.shape[-2] != self.rollout_horizon:
             raise ValueError("LeWM rollout future must contain exactly five blocks.")
         return future[..., -1, :]
+
+    def _current_state_for_samples(
+        self,
+        info: dict[str, Any],
+        *,
+        batch: int,
+        samples: int,
+        reference: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return the real current encoder state used by V1-C First-Q2."""
+
+        embedding = info.get("emb")
+        if embedding is None:
+            pixels = info.get("pixels")
+            if not torch.is_tensor(pixels):
+                raise ValueError("pixels or cached emb is required for first-Q2.")
+            initial = {
+                key: value[:, 0]
+                for key, value in info.items()
+                if torch.is_tensor(value)
+                and key not in {"action", "goal", "goal_emb", "predicted_emb"}
+            }
+            encoded = self.world_model.encode(initial)
+            embedding = encoded.get("emb")
+            if not torch.is_tensor(embedding):
+                raise ValueError("LeWM encode must return a tensor under 'emb'.")
+            if embedding.ndim == 3:
+                info["emb"] = embedding.unsqueeze(1).expand(
+                    batch, samples, -1, -1
+                )
+            elif embedding.ndim == 2:
+                info["emb"] = embedding.unsqueeze(1).expand(batch, samples, -1)
+
+        state = embedding.to(device=reference.device, dtype=reference.dtype)
+        if state.ndim == 4:
+            if state.shape[:2] != (batch, samples):
+                raise ValueError("Cached emb has the wrong batch or sample axes.")
+            state = state[..., -1, :]
+        elif state.ndim == 3:
+            if state.shape[0] != batch:
+                raise ValueError("Cached emb has the wrong batch axis.")
+            state = state[..., -1, :].unsqueeze(1).expand(batch, samples, -1)
+        elif state.ndim == 2:
+            if state.shape[0] != batch:
+                raise ValueError("Cached emb has the wrong batch axis.")
+            state = state.unsqueeze(1).expand(batch, samples, -1)
+        else:
+            raise ValueError(
+                "Cached emb must have shape (B,D), (B,T,D), or (B,S,T,D)."
+            )
+        if state.shape != (batch, samples, V1_STATE_DIM):
+            raise ValueError("Current frozen LeWM state must be 192-dimensional.")
+        return state
 
     @staticmethod
     def _observed_frames(info: Mapping[str, Any]) -> int:
@@ -579,11 +699,14 @@ def make_actor_free_td_lewm_v1_c3_policy(
     *,
     world_model: nn.Module,
     target_critic: RP1StateValueV1C3,
+    predictor: ActorFreeTDJEPAPredictorV1 | None = None,
     planning: dict[str, Any],
     process: dict[str, Any] | None = None,
     transform: dict[str, Any] | None = None,
     device: str | torch.device = "cpu",
     reduced_evaluation: bool = False,
+    score_mode: str = STATE_V_SCORE_MODE,
+    g_first_weight: float | None = None,
 ):
     """Build Stable World Model 0.1.1's public actor-free CEM policy."""
 
@@ -617,7 +740,13 @@ def make_actor_free_td_lewm_v1_c3_policy(
 
     import stable_worldmodel as swm
 
-    wrapped = ActorFreeTDLeWMV1C3(world_model, target_critic).to(device)
+    wrapped = ActorFreeTDLeWMV1C3(
+        world_model,
+        target_critic,
+        predictor,
+        score_mode=score_mode,
+        g_first_weight=g_first_weight,
+    ).to(device)
     wrapped.eval().requires_grad_(False)
     solver = swm.solver.CEMSolver(
         model=wrapped,
@@ -657,7 +786,10 @@ __all__ = [
     "PARENT_CHECKPOINT_SHA256",
     "PARENT_METHOD",
     "STATE_V_CONSTANT_SANITY_OFFSET",
+    "STATE_V_FIRST_Q2_SCORE_MODE",
+    "STATE_V_FIRST_Q2_WEIGHT",
     "STATE_V_SCORE_MODE",
+    "STATE_V_SCORE_MODES",
     "VARIANT",
     "assert_constant_shift_preserves_selection",
     "load_actor_free_td_lewm_v1_c3_checkpoint",

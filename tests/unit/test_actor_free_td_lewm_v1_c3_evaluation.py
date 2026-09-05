@@ -14,6 +14,8 @@ from torch import nn
 
 from tdwm.adapters.actor_free_td_lewm_v1_c3 import (
     METHOD,
+    STATE_V_FIRST_Q2_SCORE_MODE,
+    STATE_V_FIRST_Q2_WEIGHT,
     STATE_V_SCORE_MODE,
     ActorFreeTDLeWMV1C3,
     assert_constant_shift_preserves_selection,
@@ -23,6 +25,7 @@ from tdwm.adapters.actor_free_td_lewm_v1_c3 import (
 from tdwm.evaluation.actor_free_td_lewm_v1_c3 import (
     FORMAL_O50_PLANNING,
     FORMAL_SELECTION_SHA256,
+    STATE_V_FIRST_Q2_SCORE_DEFINITION,
     STATE_V_SCORE_DEFINITION,
     load_actor_free_td_lewm_v1_c3_evaluation_protocol,
     validate_actor_free_td_lewm_v1_c3_checkpoint_protocol,
@@ -81,6 +84,25 @@ class _RecordingCritic(nn.Module):
         self.seen_state = state.detach().clone()
         self.seen_goal = goal.detach().clone()
         return (state[..., 0] - goal[..., 0]).abs()
+
+
+class _RecordingPredictor(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen_state: torch.Tensor | None = None
+        self.seen_action: torch.Tensor | None = None
+        self.seen_task: torch.Tensor | None = None
+
+    def forward(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        task: torch.Tensor,
+    ) -> torch.Tensor:
+        self.seen_state = state.detach().clone()
+        self.seen_action = action.detach().clone()
+        self.seen_task = task.detach().clone()
+        return action
 
 
 class _ForbiddenG(nn.Module):
@@ -244,6 +266,75 @@ def test_state_v_adapter_rejects_partial_rollout_and_bad_critic_output() -> None
         ActorFreeTDLeWMV1C3(world, _Negative()).get_cost(info, torch.zeros(1, 2, 5, 25))
 
 
+def test_state_v_plus_first_q2_combines_normalized_v_with_online_g_first_action() -> None:
+    terminal = torch.zeros(1, 4, 192)
+    terminal[0, :, 0] = torch.tensor([4.0, 1.0, 3.0, 2.0])
+    world = _RecordingWorld(terminal).eval().requires_grad_(False)
+    with torch.no_grad():
+        world.action_encoder.projection.weight.zero_()
+        world.action_encoder.projection.bias.zero_()
+        world.action_encoder.projection.weight[0, 0] = 1.0
+    critic = _RecordingCritic()
+    predictor = _RecordingPredictor()
+    adapter = ActorFreeTDLeWMV1C3(
+        world,
+        critic,
+        predictor,
+        score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+        g_first_weight=STATE_V_FIRST_Q2_WEIGHT,
+    )
+    actions = torch.zeros(1, 4, 5, 25)
+    actions[0, :, 0, 0] = torch.tensor([0.0, 3.0, 1.0, 2.0])
+    actions[0, :, 1:, :] = torch.randn(4, 4, 25)
+    goal = torch.zeros(1, 192)
+    goal[0, 0] = 1.0
+
+    costs = adapter.get_cost(
+        {
+            "pixels": torch.zeros(1, 4, 3, 1),
+            "emb": torch.zeros(1, 3, 192),
+            "goal_emb": goal,
+        },
+        actions,
+    )
+
+    state_v = torch.tensor([[3.0, 0.0, 2.0, 1.0]])
+    q_first = torch.tensor([[0.0, 3.0, 1.0, 2.0]])
+
+    def zscore(value: torch.Tensor) -> torch.Tensor:
+        centered = value - value.mean(dim=1, keepdim=True)
+        return centered / centered.square().mean(dim=1, keepdim=True).sqrt()
+
+    expected = zscore(state_v) - STATE_V_FIRST_Q2_WEIGHT * zscore(q_first)
+    assert torch.allclose(costs, expected)
+    assert world.seen_actions is not None and torch.equal(world.seen_actions, actions)
+    assert predictor.seen_state is not None
+    assert torch.equal(predictor.seen_state, torch.zeros(1, 4, 192))
+    assert predictor.seen_action is not None
+    assert torch.equal(predictor.seen_action[..., 0], actions[..., 0, 0])
+    assert critic.seen_state is not None and torch.equal(critic.seen_state, terminal)
+
+
+def test_state_v_plus_first_q2_requires_online_g_and_fixed_weight() -> None:
+    world = _RecordingWorld(torch.zeros(1, 2, 192))
+    critic = _RecordingCritic()
+    with pytest.raises(ValueError, match="retained online G"):
+        ActorFreeTDLeWMV1C3(
+            world,
+            critic,
+            score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+            g_first_weight=STATE_V_FIRST_Q2_WEIGHT,
+        )
+    with pytest.raises(ValueError, match="weight 0.25"):
+        ActorFreeTDLeWMV1C3(
+            world,
+            critic,
+            _RecordingPredictor(),
+            score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+            g_first_weight=0.5,
+        )
+
+
 def test_constant_25_sanity_preserves_exact_ranking_and_selected_action() -> None:
     costs = torch.tensor([[3.0, 0.0, 2.0, 1.0], [1.5, 1.5, 2.0, 0.5]])
     shifted = costs.double() + 25.0
@@ -268,6 +359,34 @@ def test_v1_c3_protocol_locks_state_v_only_formal_o50() -> None:
     )
     assert protocol["inference_objective"]["parent_g_used"] is False
     assert protocol["inference_objective"]["terminal_goal_distance_used"] is False
+
+
+def test_v1_c3_first_q2_override_is_fixed_and_auditable() -> None:
+    from tdwm.evaluation.actor_free_td_lewm_v1_c3 import (
+        actor_free_td_lewm_v1_c3_output_directory_name,
+        configure_actor_free_td_lewm_v1_c3_evaluation_mode,
+    )
+
+    configured = configure_actor_free_td_lewm_v1_c3_evaluation_mode(
+        _protocol(),
+        smoke=False,
+        pilot=False,
+        score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+    )
+    validate_actor_free_td_lewm_v1_c3_evaluation_protocol(configured)
+    inference = configured["inference_objective"]
+    assert inference["score_mode"] == STATE_V_FIRST_Q2_SCORE_MODE
+    assert inference["score_definition"] == STATE_V_FIRST_Q2_SCORE_DEFINITION
+    assert inference["parent_g_used"] is True
+    assert inference["parent_g"] == "online_predictor"
+    assert inference["g_first_weight"] == STATE_V_FIRST_Q2_WEIGHT
+    assert inference["terminal_goal_distance_used"] is False
+    assert actor_free_td_lewm_v1_c3_output_directory_name(
+        _protocol(),
+        smoke=False,
+        pilot=False,
+        score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+    ).endswith("state_v_plus_first_q2_alpha_0p25_formal")
 
 
 @pytest.mark.parametrize(
@@ -341,7 +460,7 @@ def test_v1_c3_checkpoint_loader_restores_and_freezes_every_module(
         assert all(not parameter.requires_grad for parameter in module.parameters())
 
 
-def test_v1_c3_cli_has_one_state_v_score_and_no_g_or_l2_mode(
+def test_v1_c3_cli_exposes_only_pre_registered_state_v_scores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = importlib.util.spec_from_file_location("v1_c3_evaluation_cli", SCRIPT_PATH)
@@ -361,5 +480,20 @@ def test_v1_c3_cli_has_one_state_v_score_and_no_g_or_l2_mode(
     )
 
     args = module.parse_args()
-    assert not hasattr(args, "score_mode")
+    assert args.score_mode is None
     assert not hasattr(args, "g_first_weight")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT_PATH),
+            "--config",
+            str(CONFIG_PATH),
+            "--checkpoint-path",
+            "checkpoint.pt",
+            "--score-mode",
+            STATE_V_FIRST_Q2_SCORE_MODE,
+        ],
+    )
+    assert module.parse_args().score_mode == STATE_V_FIRST_Q2_SCORE_MODE

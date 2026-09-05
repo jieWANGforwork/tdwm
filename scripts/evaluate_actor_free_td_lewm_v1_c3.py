@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate V1-C3 with full frozen-F rollout and EMA terminal State-V."""
+"""Evaluate V1-C3 State-V alone or combined with V1-C first-Q2."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 
+from tdwm.adapters.actor_free_td_lewm_v1_c3 import STATE_V_SCORE_MODES
 from tdwm.evaluation.actor_free_td_lewm_v1_c3 import (
     actor_free_td_lewm_v1_c3_output_directory_name,
     evaluate_actor_free_td_lewm_v1_c3,
@@ -18,14 +19,15 @@ from tdwm.evaluation.actor_free_td_lewm_v1_c3 import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate V1-C3 using only EMA State-V after a full five-block "
-            "frozen-LeWM rollout."
+            "Evaluate V1-C3 after a full five-block frozen-LeWM rollout, "
+            "using EMA State-V alone or State-V plus retained V1-C first-Q2."
         )
     )
     parser.add_argument("--config", required=True)
     parser.add_argument("--dataset", default=os.environ.get("TDWM_CUBE_DATASET"))
     parser.add_argument("--checkpoint-path", required=True)
     parser.add_argument("--checkpoint-epoch", type=int)
+    parser.add_argument("--score-mode", choices=sorted(STATE_V_SCORE_MODES))
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--video", action="store_true")
     mode = parser.add_mutually_exclusive_group()
@@ -45,7 +47,10 @@ def main() -> None:
         protocol = load_actor_free_td_lewm_v1_c3_evaluation_protocol(args.config)
         output_dir = Path(os.environ.get("TDWM_RUN_ROOT", "outputs")) / (
             actor_free_td_lewm_v1_c3_output_directory_name(
-                protocol, smoke=args.smoke, pilot=args.pilot
+                protocol,
+                smoke=args.smoke,
+                pilot=args.pilot,
+                score_mode=args.score_mode,
             )
         )
     result = evaluate_actor_free_td_lewm_v1_c3(
@@ -57,6 +62,7 @@ def main() -> None:
         video=args.video,
         smoke=args.smoke,
         pilot=args.pilot,
+        score_mode=args.score_mode,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 

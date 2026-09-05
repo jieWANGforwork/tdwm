@@ -22,13 +22,16 @@ from tdwm.adapters.actor_free_td_lewm_v1_c3 import (
     PARENT_CHECKPOINT_SHA256,
     PARENT_METHOD,
     STATE_V_CONSTANT_SANITY_OFFSET,
-    STATE_V_SCORE_MODE,
+    STATE_V_FIRST_Q2_SCORE_MODE,
+    STATE_V_FIRST_Q2_WEIGHT,
+    STATE_V_SCORE_MODES,
     VARIANT,
     load_actor_free_td_lewm_v1_c3_checkpoint,
     make_actor_free_td_lewm_v1_c3_policy,
     validate_actor_free_td_lewm_v1_c3_payload,
 )
 from tdwm.adapters.frozen_actor_free_td_common import is_lower_sha256
+from tdwm.adapters.frozen_actor_free_td_v1_common import FIRST_Q2_STD_EPSILON
 from tdwm.adapters.runtime import prepare_cloud_runtime
 from tdwm.evaluation.frozen_actor_free_td_common import (
     _resolve_frozen_dataset_source,
@@ -81,6 +84,36 @@ STATE_V_SCORE_DEFINITION = {
     "parent_online_g_used": False,
     "parent_target_g_used": False,
     "terminal_latent_l2_used": False,
+    "constant_shift_sanity": "25_plus_value_has_identical_ranking_and_action",
+    "constant_shift": STATE_V_CONSTANT_SANITY_OFFSET,
+    "executed_action_block": "first_block_only",
+    "replanning": "every_action_block",
+}
+STATE_V_FIRST_Q2_SCORE_DEFINITION = {
+    "formula": (
+        "zscore_samples(target_state_v(F_frozen_rollout_5(z0,A1:A5),z_goal)) "
+        "- g_first_weight * zscore_samples(q_first)"
+    ),
+    "optimization": "cem_minimize",
+    "f_rollout": "full_five_action_blocks_A1_through_A5",
+    "state_input": "terminal_imagined_frozen_lewm_latent",
+    "goal_input": "frozen_lewm_encoded_goal_latent",
+    "critic": "ema_target_state_value",
+    "online_critic_used": False,
+    "parent_online_g_used": True,
+    "parent_target_g_used": False,
+    "terminal_latent_l2_used": False,
+    "q_first": "dot(G_online(z0, frozen_E_A(A1), w_goal), w_goal)",
+    "q_first_state": "current_frozen_lewm_encoder_state_z0",
+    "q_first_action": "first_candidate_raw_action_block_A1",
+    "q_first_action_processing": "frozen_shared_lewm_action_encoder_to_192d",
+    "q_first_task": "sqrt_dim_l2_normalized_goal_vector",
+    "q_first_discount": "none",
+    "normalization": "population_z_score",
+    "normalization_axis": "cem_candidate_sample_axis_dim_1_per_environment",
+    "normalization_scope": "independent_per_get_cost_call",
+    "normalization_epsilon": FIRST_Q2_STD_EPSILON,
+    "degenerate_signal": "zeros_when_population_std_lte_epsilon",
     "constant_shift_sanity": "25_plus_value_has_identical_ranking_and_action",
     "constant_shift": STATE_V_CONSTANT_SANITY_OFFSET,
     "executed_action_block": "first_block_only",
@@ -271,17 +304,35 @@ def validate_actor_free_td_lewm_v1_c3_evaluation_protocol(
     inference = protocol.get("inference_objective")
     if not isinstance(inference, Mapping):
         raise ValueError("protocol.inference_objective must be a mapping.")
+    score_mode = inference.get("score_mode")
+    if score_mode not in STATE_V_SCORE_MODES:
+        raise ValueError(
+            f"inference_objective.score_mode must be one of "
+            f"{sorted(STATE_V_SCORE_MODES)}."
+        )
+    inference_expected = {
+        "score_mode": score_mode,
+        "score_definition": (
+            STATE_V_FIRST_Q2_SCORE_DEFINITION
+            if score_mode == STATE_V_FIRST_Q2_SCORE_MODE
+            else STATE_V_SCORE_DEFINITION
+        ),
+        "learned_actor": False,
+        "parent_g_used": score_mode == STATE_V_FIRST_Q2_SCORE_MODE,
+        "terminal_goal_distance_used": False,
+        "critic": "ema_target",
+        "replanning": "every_action_block",
+    }
+    if score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+        inference_expected.update(
+            {
+                "parent_g": "online_predictor",
+                "g_first_weight": STATE_V_FIRST_Q2_WEIGHT,
+            }
+        )
     _require_exact_values(
         inference,
-        {
-            "score_mode": STATE_V_SCORE_MODE,
-            "score_definition": STATE_V_SCORE_DEFINITION,
-            "learned_actor": False,
-            "parent_g_used": False,
-            "terminal_goal_distance_used": False,
-            "critic": "ema_target",
-            "replanning": "every_action_block",
-        },
+        inference_expected,
         label="inference_objective",
     )
     checkpoint = protocol.get("checkpoint")
@@ -312,11 +363,45 @@ def load_actor_free_td_lewm_v1_c3_evaluation_protocol(
 
 
 def configure_actor_free_td_lewm_v1_c3_evaluation_mode(
-    protocol: Mapping[str, Any], *, smoke: bool, pilot: bool
+    protocol: Mapping[str, Any],
+    *,
+    smoke: bool,
+    pilot: bool,
+    score_mode: str | None = None,
 ) -> dict[str, Any]:
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
     configured = deepcopy(dict(protocol))
+    selected_score_mode = score_mode or str(
+        configured["inference_objective"]["score_mode"]
+    )
+    if selected_score_mode not in STATE_V_SCORE_MODES:
+        raise ValueError(
+            f"Unsupported V1-C3 score mode {selected_score_mode!r}; expected one "
+            f"of {sorted(STATE_V_SCORE_MODES)}."
+        )
+    inference = configured["inference_objective"]
+    inference.update(
+        {
+            "score_mode": selected_score_mode,
+            "score_definition": deepcopy(
+                STATE_V_FIRST_Q2_SCORE_DEFINITION
+                if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE
+                else STATE_V_SCORE_DEFINITION
+            ),
+            "learned_actor": False,
+            "parent_g_used": selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE,
+            "terminal_goal_distance_used": False,
+            "critic": "ema_target",
+            "replanning": "every_action_block",
+        }
+    )
+    if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+        inference["parent_g"] = "online_predictor"
+        inference["g_first_weight"] = STATE_V_FIRST_Q2_WEIGHT
+    else:
+        inference.pop("parent_g", None)
+        inference.pop("g_first_weight", None)
     if smoke:
         configured["id"] = f"{configured['id']}_smoke"
         configured["evaluation"]["episodes"] = 1
@@ -338,12 +423,28 @@ def configure_actor_free_td_lewm_v1_c3_evaluation_mode(
 
 
 def actor_free_td_lewm_v1_c3_output_directory_name(
-    protocol: Mapping[str, Any], *, smoke: bool, pilot: bool
+    protocol: Mapping[str, Any],
+    *,
+    smoke: bool,
+    pilot: bool,
+    score_mode: str | None = None,
 ) -> str:
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
     run_mode = "smoke" if smoke else "pilot" if pilot else "formal"
-    return f"{protocol['method']}_cube_o50_{STATE_V_SCORE_MODE}_{run_mode}"
+    selected_score_mode = score_mode or str(
+        protocol["inference_objective"]["score_mode"]
+    )
+    if selected_score_mode not in STATE_V_SCORE_MODES:
+        raise ValueError(f"Unsupported V1-C3 score mode {selected_score_mode!r}.")
+    suffix = (
+        "_alpha_0p25"
+        if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE
+        else ""
+    )
+    return (
+        f"{protocol['method']}_cube_o50_{selected_score_mode}{suffix}_{run_mode}"
+    )
 
 
 def validate_actor_free_td_lewm_v1_c3_checkpoint_protocol(
@@ -426,12 +527,16 @@ def evaluate_actor_free_td_lewm_v1_c3(
     smoke: bool = False,
     pilot: bool = False,
     checkpoint_epoch: int | None = None,
+    score_mode: str | None = None,
 ) -> dict[str, Any]:
     """Run the audited public Stable World Model CEM/O50 evaluation."""
 
     formal_protocol = load_actor_free_td_lewm_v1_c3_evaluation_protocol(protocol_path)
     protocol = configure_actor_free_td_lewm_v1_c3_evaluation_mode(
-        formal_protocol, smoke=smoke, pilot=pilot
+        formal_protocol,
+        smoke=smoke,
+        pilot=pilot,
+        score_mode=score_mode,
     )
     if checkpoint_epoch is not None and (smoke or pilot):
         raise ValueError("--checkpoint-epoch is only valid for full O50 evaluation.")
@@ -510,6 +615,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
 
     world_model = restored.world_model.to(device).eval().requires_grad_(False)
     target_critic = restored.target_critic.to(device).eval().requires_grad_(False)
+    predictor = restored.predictor.to(device).eval().requires_grad_(False)
     image = protocol["image_preprocessing"]
     image_transform = transforms.Compose(
         [
@@ -522,11 +628,14 @@ def evaluate_actor_free_td_lewm_v1_c3(
     policy = make_actor_free_td_lewm_v1_c3_policy(
         world_model=world_model,
         target_critic=target_critic,
+        predictor=predictor,
         planning=planning,
         process={"action": action_processor},
         transform={"pixels": image_transform, "goal": image_transform},
         device=device,
         reduced_evaluation=bool(smoke or pilot),
+        score_mode=protocol["inference_objective"]["score_mode"],
+        g_first_weight=protocol["inference_objective"].get("g_first_weight"),
     )
 
     runtime = {
@@ -563,9 +672,11 @@ def evaluate_actor_free_td_lewm_v1_c3(
     if checkpoint_epoch is not None:
         checkpoint_manifest["requested_checkpoint_epoch"] = checkpoint_epoch
         checkpoint_manifest["checkpoint_role"] = "intermediate_epoch_o50"
+    selected_score_mode = protocol["inference_objective"]["score_mode"]
+    selected_score_definition = protocol["inference_objective"]["score_definition"]
     manifest = {
-        "score_mode": STATE_V_SCORE_MODE,
-        "score_definition": deepcopy(STATE_V_SCORE_DEFINITION),
+        "score_mode": selected_score_mode,
+        "score_definition": deepcopy(selected_score_definition),
         "protocol": protocol,
         "formal_protocol": formal_protocol,
         "protocol_path": str(Path(protocol_path).resolve()),
@@ -645,8 +756,8 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "method_family": METHOD_FAMILY,
         "variant": VARIANT,
         "implementation_version": IMPLEMENTATION_VERSION,
-        "score_mode": STATE_V_SCORE_MODE,
-        "score_definition": deepcopy(STATE_V_SCORE_DEFINITION),
+        "score_mode": selected_score_mode,
+        "score_definition": deepcopy(selected_score_definition),
         "planning_horizon": planning["horizon"],
         "selection_sha256": selection_sha256,
         "constant_shift_sanity": "checked_on_first_CEM_cost_call",
@@ -654,6 +765,8 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
     }
+    if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+        result["g_first_weight"] = STATE_V_FIRST_Q2_WEIGHT
     if checkpoint_epoch is not None:
         result["checkpoint_epoch"] = restored.payload["epoch"]
         result["checkpoint_role"] = "intermediate_epoch_o50"
@@ -665,6 +778,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
 __all__ = [
     "FORMAL_O50_PLANNING",
     "FORMAL_SELECTION_SHA256",
+    "STATE_V_FIRST_Q2_SCORE_DEFINITION",
     "STATE_V_SCORE_DEFINITION",
     "actor_free_td_lewm_v1_c3_output_directory_name",
     "configure_actor_free_td_lewm_v1_c3_evaluation_mode",
