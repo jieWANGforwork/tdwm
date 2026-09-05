@@ -114,8 +114,10 @@ STATE_V_FIRST_Q2_SCORE_DEFINITION = {
     "normalization_scope": "independent_per_get_cost_call",
     "normalization_epsilon": FIRST_Q2_STD_EPSILON,
     "degenerate_signal": "zeros_when_population_std_lte_epsilon",
-    "constant_shift_sanity": "25_plus_value_has_identical_ranking_and_action",
-    "constant_shift": STATE_V_CONSTANT_SANITY_OFFSET,
+    "raw_state_v_constant_shift_sanity": (
+        "25_plus_value_has_identical_raw_state_v_ranking"
+    ),
+    "raw_state_v_constant_shift": STATE_V_CONSTANT_SANITY_OFFSET,
     "executed_action_block": "first_block_only",
     "replanning": "every_action_block",
 }
@@ -399,6 +401,12 @@ def configure_actor_free_td_lewm_v1_c3_evaluation_mode(
     if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
         inference["parent_g"] = "online_predictor"
         inference["g_first_weight"] = STATE_V_FIRST_Q2_WEIGHT
+        configured["provenance"]["note"] = (
+            "C3+First-Q2 planning combines candidate-normalized EMA State-V at "
+            "the terminal latent of a full frozen-F five-block rollout with the "
+            "candidate-normalized retained online-G readout at real z0 and A1; "
+            "target G and terminal latent L2 remain excluded."
+        )
     else:
         inference.pop("parent_g", None)
         inference.pop("g_first_weight", None)
@@ -613,9 +621,12 @@ def evaluate_actor_free_td_lewm_v1_c3(
         dataset, output_dir / "action_normalization.json"
     )
 
+    selected_score_mode = protocol["inference_objective"]["score_mode"]
     world_model = restored.world_model.to(device).eval().requires_grad_(False)
     target_critic = restored.target_critic.to(device).eval().requires_grad_(False)
-    predictor = restored.predictor.to(device).eval().requires_grad_(False)
+    predictor = None
+    if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+        predictor = restored.predictor.to(device).eval().requires_grad_(False)
     image = protocol["image_preprocessing"]
     image_transform = transforms.Compose(
         [
@@ -672,7 +683,6 @@ def evaluate_actor_free_td_lewm_v1_c3(
     if checkpoint_epoch is not None:
         checkpoint_manifest["requested_checkpoint_epoch"] = checkpoint_epoch
         checkpoint_manifest["checkpoint_role"] = "intermediate_epoch_o50"
-    selected_score_mode = protocol["inference_objective"]["score_mode"]
     selected_score_definition = protocol["inference_objective"]["score_definition"]
     manifest = {
         "score_mode": selected_score_mode,
@@ -760,13 +770,17 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "score_definition": deepcopy(selected_score_definition),
         "planning_horizon": planning["horizon"],
         "selection_sha256": selection_sha256,
-        "constant_shift_sanity": "checked_on_first_CEM_cost_call",
         "smoke": smoke,
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
     }
     if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
         result["g_first_weight"] = STATE_V_FIRST_Q2_WEIGHT
+        result["raw_state_v_constant_shift_sanity"] = (
+            "checked_on_first_CEM_cost_call"
+        )
+    else:
+        result["constant_shift_sanity"] = "checked_on_first_CEM_cost_call"
     if checkpoint_epoch is not None:
         result["checkpoint_epoch"] = restored.payload["epoch"]
         result["checkpoint_role"] = "intermediate_epoch_o50"

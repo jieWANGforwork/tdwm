@@ -227,7 +227,7 @@ def test_state_v_adapter_uses_full_f_terminal_and_only_ema_critic() -> None:
     forbidden_online_g = _ForbiddenG()
     forbidden_target_g = _ForbiddenG()
     adapter = ActorFreeTDLeWMV1C3(world, critic)
-    adapter.parent_predictor = forbidden_online_g
+    adapter.predictor = forbidden_online_g
     adapter.parent_target_predictor = forbidden_target_g
     actions = torch.randn(1, 4, 5, 25)
     goal = torch.zeros(1, 192)
@@ -381,6 +381,9 @@ def test_v1_c3_first_q2_override_is_fixed_and_auditable() -> None:
     assert inference["parent_g"] == "online_predictor"
     assert inference["g_first_weight"] == STATE_V_FIRST_Q2_WEIGHT
     assert inference["terminal_goal_distance_used"] is False
+    assert "combines candidate-normalized EMA State-V" in configured["provenance"][
+        "note"
+    ]
     assert actor_free_td_lewm_v1_c3_output_directory_name(
         _protocol(),
         smoke=False,
