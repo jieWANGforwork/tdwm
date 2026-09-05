@@ -269,7 +269,13 @@ def validate_job_output(job: SweepJob) -> dict[str, Any]:
     selection_sha256 = _file_sha256(required[2])
     if selection_sha256 != EXPECTED_SELECTION_FILE_SHA256:
         raise ValueError(f"{job.job_id} used a different O50 selection.")
-    if results.get("selection_sha256") != EXPECTED_SELECTION_FILE_SHA256:
+    # C3 records this redundant digest in results.json; the older V1-C
+    # evaluator does not. The authoritative selection file was hashed above.
+    reported_selection_sha256 = results.get("selection_sha256")
+    if (
+        reported_selection_sha256 is not None
+        and reported_selection_sha256 != EXPECTED_SELECTION_FILE_SHA256
+    ):
         raise ValueError(f"{job.job_id} results selection hash changed.")
     return {
         "family": job.family,

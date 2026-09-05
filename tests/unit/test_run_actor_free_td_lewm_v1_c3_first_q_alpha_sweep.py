@@ -153,6 +153,53 @@ def test_validate_job_output_binds_formula_checkpoint_and_selection(
     assert evidence["alpha"] == 0.5
 
 
+def test_validate_v1_c_accepts_selection_file_without_redundant_result_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    job = module.build_jobs(**_inputs(tmp_path), alphas=(0.5,))[2]
+    output = Path(job.output_dir)
+    output.mkdir(parents=True)
+    selection_path = output / "episode_selection.json"
+    selection_path.write_text(json.dumps({"locked": list(range(50))}) + "\n")
+    selection_sha = module._file_sha256(selection_path)
+    monkeypatch.setattr(module, "EXPECTED_SELECTION_FILE_SHA256", selection_sha)
+    outcomes = [index % 2 == 0 for index in range(50)]
+    definition = {"formula": "f_cost - g_first_weight * q_first"}
+    results = {
+        "score_mode": job.score_mode,
+        "g_first_weight": job.alpha,
+        "score_definition": definition,
+        "smoke": False,
+        "pilot": False,
+        "planning_horizon": 5,
+        "elapsed_seconds": 1.0,
+        "metrics": {"episode_successes": outcomes, "success_rate": 50.0},
+    }
+    manifest = {
+        "score_mode": job.score_mode,
+        "g_first_weight": job.alpha,
+        "score_definition": definition,
+        "protocol": {
+            "inference_objective": {
+                "score_mode": job.score_mode,
+                "g_first_weight": job.alpha,
+            }
+        },
+        "checkpoint": {
+            "path": job.checkpoint,
+            "sha256": job.checkpoint_sha256,
+        },
+    }
+    (output / "results.json").write_text(json.dumps(results))
+    (output / "protocol_manifest.json").write_text(json.dumps(manifest))
+
+    evidence = module.validate_job_output(job)
+
+    assert evidence["success_count"] == 25
+    assert evidence["selection_file_sha256"] == selection_sha
+
+
 def test_score_definitions_fail_closed_across_raw_and_zscore(tmp_path: Path) -> None:
     module = _load_module()
     jobs = module.build_jobs(**_inputs(tmp_path), alphas=(0.25,))
