@@ -1,11 +1,12 @@
 # Results TD — 全部 Actor-Free TD-LeWM 实验总账（Cube seed 3072）
 
-本报告保留 **477 个已核验正式 O50 基础单元**及其原分析；唯一主矩阵另预留 V1-C2/C3 的 8 个严格 endpoint 单元。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。
+本报告在同一份总账中保留 **477 个已核验 O50 基础单元、8 个 V1-C2/C3 严格 endpoint 单元，以及 20 个 First-Q 权重扫描单元，共 505 格、25,250 个逐-pair outcome**。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。
 
 ## 一句话结论
 
 - **按原先固定的主评分列 F+G，描述性领先配置为 V1-G3: 27/50 (54%)。**
 - **所有固定 E10 单格的最高结果为 V1-C + F + first-Q: 28/50 (56%)。**
+- **把 20 个权重扫描单元并入主表后，最高观察值为 V1-C3 Z-score First-Q2、alpha=0.1：31/50 (62%)。** 该 alpha 在同一 O50 上选择，因此只作为探索性结果，不替代固定 endpoint。
 - **按四版本、24 个训练配置的固定 E10 均值，描述性领先测试评分为 F + first-Q（44.8%）。** 单 seed 下不把它表述为统计稳健最优。
 - **若把五种评分等权平均，描述性领先训练配置为 V1-F, V1-G3（并列 48.8%）。**
 - **按六个训练方法 × 五种评分的版本均值，V1 action encoder 最高（47.3%）。**
@@ -17,8 +18,10 @@
 | --- | ---: | ---: | ---: |
 | CSV scalar ledger | 477 个 O50 单元 | `reports/artifacts/actor_free_td_lewm_complete_cube_seed3072/all_o50_results.csv` | `0e5b541bdb11cf6d647fc1e679499a02c3aa430d64e37c8819d02c44e1dcb900` |
 | JSON reconciliation ledger | 477 格 × 50 outcomes = 23,850 | `reports/artifacts/actor_free_td_lewm_complete_cube_seed3072/reconciliation_ledger.json` | `2f1985d5703e795f48bd8b850d470f76e35c998447112c86065e8bdcbbe1372b` |
+| First-Q alpha scalar ledger | 20 个 O50 单元 | `reports/artifacts/actor_free_td_lewm_first_q_alpha_sweep_023e8f8_20260906/alpha_sweep_results.csv` | `ce6c7e99a1acbce2148fb26f14e824ddb08455672e22e694c58717e30b97f848` |
+| First-Q alpha validation ledger | 20 格 × 50 outcomes = 1,000 | `reports/artifacts/actor_free_td_lewm_first_q_alpha_sweep_023e8f8_20260906/posthoc_validation.json` | `bbdfe687179e7edd941159d60c1105d35173ae86119ad625f88f882e3293dc9d` |
 
-原 24×5 分析固定使用 E10；全部 477 格和 23,850 个逐-pair 布尔结果仍由上述伴随文件完整保留。C2/C3 的 8 格由独立严格 endpoint ledger 接入，不改写原账。
+原 24×5 分析固定使用 E10；477 格基础账不被改写。主表同时接入 C2/C3 的 8 个严格 endpoint 格和 20 个 alpha 扫描格，所以当前文档总覆盖为 505 格、25,250 个逐-pair 布尔结果。
 
 ## 结果覆盖与版本定义
 
@@ -30,6 +33,8 @@
 | V2 joint fine-tune | 6 | E3-E10 | 3 original + E10 first/Mean | 156 |
 | V2-EMA-SG | 6 | E3-E10 | all five scores | 240 |
 | V1-C2/C3 endpoint extension | 2 | C2 E10 / C3 E12 | First-Q2 + State-V integrated into seven-column matrix | 8 |
+| First-Q alpha sweep | V1-C / V1-C3 | C E10 / C3 E12 | 5 original First-Q + 5 C3 Raw First-Q + 10 C3 Z-score First-Q2 | 20 |
+| **TOTAL** | — | — | same locked O50 selection | **505** |
 
 ## 方法、网络和训练 loss
 
@@ -76,9 +81,9 @@ $$L_{total}=L_{pred}+0.09L_{SIGReg}+\rho(u)(L_{method}^{real}+L_{method}^{pred})
 | F-only | F rolls A1...A5 from real z0 and produces imagined z1^F...z5^F; G is not called. | J_F = ||z5^F - z_g||_2^2 | Uses terminal goal distance at z5; no Q and no gamma. |
 | G-only | H=1. G scores the real z0 and first candidate action A1; F is not rolled out. | J_G = -Q_G(z0,A1,g) | No explicit goal distance and no gamma; minimizing -Q maximizes Q. |
 | F+G tail | F rolls only A1...A4 to z4^F; G evaluates the fifth transition from z4^F with A5. | J_tail = ||z4^F - z_g||_2^2 - gamma^4 Q_G(z4^F,A5,g) | Uses z4 goal distance and the deepest imagined-state Q; gamma=0.95. |
-| F + first-Q | F completes the five-step rollout; G is read only once at the real z0 with A1. | J_first = ||z5^F - z_g||_2^2 - 0.25 Q_G(z0,A1,g) | Uses terminal goal distance; the Q term is not multiplied by gamma^4. |
+| F + first-Q | F completes the five-step rollout; G is read only once at the real z0 with A1. | J_first = ||z5^F - z_g||_2^2 - alpha Q_G(z0,A1,g) | Uses terminal goal distance; the Q term is not multiplied by gamma^4. Fixed-table default alpha=0.25; the integrated sweep also tests 0.1, 0.5, 1 and 2. |
 | Mean-Q rollout | F generates predecessors z0,z1^F,...,z4^F; G scores each aligned pair (z{k-1}^F,Ak). | J_mean = -(1/5) sum[k=1..5] Q_G(z{k-1}^F,Ak,g) | No terminal goal distance; z5 is not read by G and gamma is unused. |
-| First-Q2 | F completes the five-step rollout; G is read once at real z0 with A1. Each candidate set normalizes F-cost and first-Q separately. | J_first2 = zscore_candidates(J_F) - 0.25 zscore_candidates(Q_G(z0,A1,g)) | No gamma. Population z-score statistics are recomputed inside each CEM candidate set; they never persist across iterations or episodes. |
+| First-Q2 | F completes the five-step rollout; G is read once at real z0 with A1. Each candidate set normalizes F-cost and first-Q separately. | J_first2 = zscore_candidates(J_F) - alpha zscore_candidates(Q_G(z0,A1,g)) | No gamma. Population z-score statistics are recomputed inside each CEM candidate set; the C3 sweep tests alpha=0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.5, 1 and 2. |
 | State-V terminal | Frozen F completes all five blocks to z5^F; only the EMA State-V critic reads (z5^F,z_g). G is not called. | J_V = V_bar(z5^F,z_g) | No terminal latent L2, G term, actor or gamma factor is added at inference; CEM minimizes predicted temporal cost-to-go. |
 
 V2-EMA 的 EMA world model、EMA Action Encoder 和 EMA G 只构造训练 target；正式 CEM 测试仍部署 online F、online Action Encoder 和 online G。Legacy 7 方法的旧 `G/C-only` 会先由 F 构造 H-1 tail context，不等同于 C-G3 主矩阵里严格 H=1 的 `G-only`。
@@ -95,9 +100,9 @@ V2-EMA 的 EMA world model、EMA Action Encoder 和 EMA G 只构造训练 target
 | Imaginary Hybrid | 24/50 (48%) | 13/50 (26%) | 23/50 (46%) |
 | Direct Goal Critic Hybrid | 22/50 (44%) | 16/50 (32%) | 19/50 (38%) |
 
-## 26 个方法 × 7 种评分的唯一主结果矩阵
+## 26 个训练方法 × 7 种评分的唯一主结果矩阵（含 20 个 alpha 扫描格）
 
-横向读每一行，可以同时看到训练 loss，并比较同一个训练方法已有的评分；纵向读每一列时，以版本为边界比较该版本内所有可用方法。Markdown 中 **粗体**是行最佳，`◆` 是同版本列最佳；并列全部标记。缺失格显示 `—`，不参加任何最大值；DOCX 使用黄底表示行最佳、蓝底表示同版本列最佳、青色底表示两者同时成立。
+横向读每一行，可以同时看到训练 loss，并比较同一个训练方法已有的评分；纵向读每一列时，以版本为边界比较该版本内所有可用方法。V1-C 的 First-Q、V1-C3 的 Raw First-Q 与 Z-score First-Q2 位置直接列出本轮全部 20 个 alpha 测试结果，不再只放在后面的附表。固定 26×7 结果与探索性 alpha 扫描分别计算赢家，避免事后调参覆盖固定 endpoint 的颜色。Markdown 中 **粗体**是行最佳，`◆` 是对应比较范围内的列最佳；并列全部标记。缺失格显示 `—`；DOCX 使用黄底表示行最佳、蓝底表示列最佳、青色底表示两者同时成立。
 
 Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`；D–G3 的 `w_i(·)` 是由括号内 stop-gradient 信号形成的归一化样本权重。V0/V1 只有 real 分支；V2/V2-EMA 的总目标为 `L_pred+0.09L_SIGReg+ρ(L_method^real+L_method^pred)`。精确信号、goal 子集和权重定义见前面的“方法、网络和训练 loss”表。
 
@@ -109,9 +114,9 @@ Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`
 | V0 | G1 | L_G1=mean_i w_i(A_neighbor)l_i | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 20/50 (40%) | 20/50 (40%) | — | — |
 | V0 | G2 | L_G2=mean_i w_i(A_prefix-mean)l_i | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 23/50 (46%) | 23/50 (46%) | — | — |
 | V0 | G3 | L_G3=mean_i w_i(A_prefix-gain)l_i | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **24/50 (48%)** | **24/50 (48%)** | — | — |
-| V1 | C | L_C=mean(l)+mean_goal(q-qY)^2 | ◆ 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | ◆ **28/50 (56%)** | 21/50 (42%) | ◆ 26/50 (52%) | — |
-| V1 | C2 | L_C2=L_C+CE(p_F,p_Qfirst) | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **26/50 (52%)** | 22/50 (44%) | ◆ **26/50 (52%)** | — |
-| V1 | C3 | L_C3=mean_i omega_tau(r_i)Huber_1(r_i) | — | — | — | — | — | — | ◆ **26/50 (52%)** |
+| V1 | C | L_C=mean(l)+mean_goal(q-qY)^2 | ◆ 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | α=.10 24/50 (48%)<br>◆ **α=.25 28/50 (56%)**<br>α=.50 27/50 (54%)<br>◆ **α=1 28/50 (56%)**<br>α=2 25/50 (50%) | 21/50 (42%) | 26/50 (52%) | — |
+| V1 | C2 | L_C2=L_C+CE(p_F,p_Qfirst) | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **26/50 (52%)** | 22/50 (44%) | **26/50 (52%)** | — |
+| V1 | C3 | L_C3=mean_i omega_tau(r_i)Huber_1(r_i) | — | — | — | Raw: α=.10 26/50 (52%)<br>α=.25 22/50 (44%)<br>α=.50 21/50 (42%)<br>α=1 21/50 (42%)<br>α=2 22/50 (44%) | — | Z: α=.025 25/50 (50%)<br>α=.05 28/50 (56%)<br>α=.075 27/50 (54%)<br>◆ **α=.10 31/50 (62%)**<br>α=.15 23/50 (46%)<br>α=.20 28/50 (56%)<br>α=.25 26/50 (52%)<br>α=.50 24/50 (48%)<br>α=1 24/50 (48%)<br>α=2 25/50 (50%) | ◆ 26/50 (52%) |
 | V1 | D | L_D=mean_i w_i[sg(qY)]l_i | ◆ 23/50 (46%) | 22/50 (44%) | 21/50 (42%) | 25/50 (50%) | **26/50 (52%)** | — | — |
 | V1 | F | L_F=mean_i w_i(A_goal)l_i | ◆ 23/50 (46%) | ◆ 23/50 (46%) | 24/50 (48%) | **26/50 (52%)** | **26/50 (52%)** | — | — |
 | V1 | G1 | L_G1=mean_i w_i(A_neighbor)l_i | ◆ 23/50 (46%) | 21/50 (42%) | 24/50 (48%) | **26/50 (52%)** | 25/50 (50%) | — | — |
@@ -135,11 +140,12 @@ Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`
 | 版本 | F-only | G-only | F+G tail | First-Q | Mean-Q | First-Q2 | State-V |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | V0 | C/D/F/G1/G2/G3 23/50 | D 20/50 | G1/G2 25/50 | C 26/50 | D 26/50 | — | — |
-| V1 | C/C2/D/F/G1/G2/G3 23/50 | F 23/50 | G3 27/50 | C 28/50 | G3 27/50 | C/C2 26/50 | C3 26/50 |
+| V1 fixed | C/C2/D/F/G1/G2/G3 23/50 | F 23/50 | G3 27/50 | C 28/50 | G3 27/50 | C/C2 26/50 | C3 26/50 |
+| V1 alpha sweep | — | — | — | C α=.25/1 28/50 | — | C3 Z-score α=.10 31/50 | C3 α=0 anchor 26/50 |
 | V2 | D 16/50 | C 20/50 | C/D 16/50 | D/F 21/50 | D 24/50 | — | — |
 | V2-EMA | D/F/G1 15/50 | G2 20/50 | F 17/50 | D/F 22/50 | F 23/50 | — | — |
 
-**跨四版本的全局逐列赢家（只用于补充分析，不对应 DOCX 蓝框）：** F-only = 12 tied: V0-C, V0-D, V0-F, …: 23/50 (46%); G-only = V1-F: 23/50 (46%); F+G tail = V1-G3: 27/50 (54%); F + first-Q = V1-C: 28/50 (56%); Mean-Q rollout = V1-G3: 27/50 (54%)。
+**跨四版本的全局逐列赢家（只用于补充分析，不对应 DOCX 蓝框）：** F-only = 12 tied: V0-C, V0-D, V0-F, …: 23/50 (46%); G-only = V1-F: 23/50 (46%); F+G tail = V1-G3: 27/50 (54%); F + first-Q = V1-C α=.25/1: 28/50 (56%); Mean-Q rollout = V1-G3: 27/50 (54%); First-Q2 = V1-C3 Z-score α=.10: 31/50 (62%，探索性调参结果)。
 
 ### V1-C2/C3 endpoint 证据
 
@@ -247,12 +253,12 @@ C3 的 validation TD loss 从 0.3203 降至 0.2940，MC MAE 从 12.750 到 12.02
 
 ### 1. 哪个训练方法最好
 
-不存在脱离测试评分定义的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 **V1-G3: 27/50 (54%)**；若把五种评分等权平均，则 **V1-F, V1-G3 并列领先（48.8%）**；若寻找最高单格，则为 **V1-C + F + first-Q: 28/50 (56%)**。在 V2-EMA E10 内，五评分均值最高的训练变体为 **F（38.4%）**。这些都是描述性单 seed 结果。
+不存在脱离测试评分定义的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 **V1-G3: 27/50 (54%)**；若把五种评分等权平均，则 **V1-F, V1-G3 并列领先（48.8%）**；固定评分中的最高单格为 **V1-C + F + first-Q: 28/50 (56%)**。把本轮 20 个 alpha 扫描格纳入后，最高观察值变为 **V1-C3 Z-score First-Q2、alpha=0.1：31/50 (62%)**，但它是在同一 O50 上选权重的探索性结果。在 V2-EMA E10 内，五评分均值最高的训练变体为 **F（38.4%）**。这些都是描述性单 seed 结果。
 从版本整体看，V1 action encoder 的六方法 × 五评分均值最高（47.3%）。
 
 ### 2. 哪个测试方法最好
 
-V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G tail 28.3%、F + first-Q 40.7%、Mean-Q rollout 37.0%。跨 V0/V1/V2/V2-EMA 的固定 E10，**F + first-Q** 的 24 配置均值最高（44.8%），因此它是当前描述性默认主测试方式。Mean-Q 的最高固定配置为 V1-G3: 27/50 (54%)。
+V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G tail 28.3%、F + first-Q 40.7%、Mean-Q rollout 37.0%。跨 V0/V1/V2/V2-EMA 的固定 E10，**F + first-Q** 的 24 配置均值最高（44.8%），因此它仍是当前固定协议下的描述性默认主测试方式。若只看本轮调权重的观察峰值，则是 **C3 Z-score First-Q2 alpha=0.1：62%**；它必须先在独立 dev pairs 选定 alpha，才能进入正式测试。Mean-Q 的最高固定配置为 V1-G3: 27/50 (54%)。
 
 ### 3. 原因分析
 
@@ -270,6 +276,7 @@ V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G ta
 | tail 效果异质 | F+G 对 F-only：15 升 / 3 平 / 6 降；均值 +1.1 pp | 不能默认 tail 必然增益；以 F + first-Q 为候选并校准 G |
 | Mean-Q 完整覆盖 | 24 配置均值 41.8%；V1-G3: 27/50 (54%) | 按完整四版本结果决定主评测或消融地位 |
 | checkpoint 选择偏差 | 同一 O50 上看 E3–E10 再取最大 | dev pairs 选 epoch/alpha，正式 O50 只跑锁定配置 |
+| alpha 峰值敏感 | C3 Z-score α=.075/.10/.15 为 54%/62%/46% | 先做独立 dev 选择与多 planning seed；不能把 α=.10 当作稳定常数 |
 | 单 seed | 全部训练 seed=3072 | 至少 3 个训练 seeds，保存逐-pair outcome |
 
 下一轮优先目标：
@@ -282,9 +289,9 @@ V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G ta
 
 ## 审计边界
 
-- 477/477 格共享 episode-selection 文件 SHA-256 `e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7` 与 action normalization SHA-256 `57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723`。
+- 基础账 477/477 格、C2/C3 endpoint 8/8 格和 alpha sweep 20/20 格共享 episode-selection 文件 SHA-256 `e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7`；总覆盖为 505 格、25,250 个逐-pair outcome。基础账 action normalization SHA-256 为 `57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723`。
 - fixed 新评分 launcher 另有 valid-row-ranks SHA-256 `88c204770f33c0b0220057d45b187766e3cfc54912e3f5ca49f2aa93d16437e9`；它是规范化索引哈希，不是 episode-selection 文件哈希，二者不能混写。
-- 每格成功数都由 50 个布尔 outcome 重算；CSV `reports/artifacts/actor_free_td_lewm_complete_cube_seed3072/all_o50_results.csv`（SHA-256 `0e5b541bdb11cf6d647fc1e679499a02c3aa430d64e37c8819d02c44e1dcb900`）与 JSON `reports/artifacts/actor_free_td_lewm_complete_cube_seed3072/reconciliation_ledger.json`（SHA-256 `2f1985d5703e795f48bd8b850d470f76e35c998447112c86065e8bdcbbe1372b`）共同保留 477 格 / 23,850 个 outcomes。
+- 每格成功数都由 50 个布尔 outcome 重算；基础 CSV/JSON 保留 477 格 / 23,850 个 outcomes，严格 C2/C3 endpoint 保留 8 格 / 400 个 outcomes，alpha sweep 的 CSV 与 posthoc validation 保留 20 格 / 1,000 个 outcomes。三部分合计 505 格 / 25,250 个 outcomes。
 - EMA E3 的 G1/F+G 与 G2/F-only 使用隔离 retry attempt_02；原失败调度证据保留，不把失败单元伪装成原调度成功。
 - 原固定 E10 Mean-Q 覆盖 V0/V1/V2/V2-EMA × C/D/F/G1/G2/G3，共 24 格且无缺格；新增 First-Q2/State-V 不适用处用中性 `—`，不参与赢家计算。
 - 主结果表只展示 E10；E3–E10 全轨迹仍保存在 `all_o50_results.csv`，没有因版式精简而删除。
