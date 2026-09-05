@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate V1-C3 State-V alone or combined with V1-C first-Q2."""
+"""Evaluate V1-C3 State-V alone or combined with V1-C first-Q/Q2."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Evaluate V1-C3 after a full five-block frozen-LeWM rollout, "
-            "using EMA State-V alone or State-V plus retained V1-C first-Q2."
+            "using EMA State-V alone or State-V plus retained V1-C first-Q/Q2."
         )
     )
     parser.add_argument("--config", required=True)
@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-path", required=True)
     parser.add_argument("--checkpoint-epoch", type=int)
     parser.add_argument("--score-mode", choices=sorted(STATE_V_SCORE_MODES))
+    parser.add_argument("--g-first-weight", type=float, default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--video", action="store_true")
     mode = parser.add_mutually_exclusive_group()
@@ -51,6 +52,7 @@ def main() -> None:
                 smoke=args.smoke,
                 pilot=args.pilot,
                 score_mode=args.score_mode,
+                g_first_weight=args.g_first_weight,
             )
         )
     result = evaluate_actor_free_td_lewm_v1_c3(
@@ -63,6 +65,7 @@ def main() -> None:
         smoke=args.smoke,
         pilot=args.pilot,
         score_mode=args.score_mode,
+        g_first_weight=args.g_first_weight,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 

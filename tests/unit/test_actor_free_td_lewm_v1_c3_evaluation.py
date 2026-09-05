@@ -13,9 +13,10 @@ import torch
 from torch import nn
 
 from tdwm.adapters.actor_free_td_lewm_v1_c3 import (
+    DEFAULT_STATE_V_FIRST_Q_WEIGHT,
     METHOD,
     STATE_V_FIRST_Q2_SCORE_MODE,
-    STATE_V_FIRST_Q2_WEIGHT,
+    STATE_V_FIRST_Q_SCORE_MODE,
     STATE_V_SCORE_MODE,
     ActorFreeTDLeWMV1C3,
     assert_constant_shift_preserves_selection,
@@ -26,7 +27,10 @@ from tdwm.evaluation.actor_free_td_lewm_v1_c3 import (
     FORMAL_O50_PLANNING,
     FORMAL_SELECTION_SHA256,
     STATE_V_FIRST_Q2_SCORE_DEFINITION,
+    STATE_V_FIRST_Q_SCORE_DEFINITION,
     STATE_V_SCORE_DEFINITION,
+    actor_free_td_lewm_v1_c3_output_directory_name,
+    configure_actor_free_td_lewm_v1_c3_evaluation_mode,
     load_actor_free_td_lewm_v1_c3_evaluation_protocol,
     validate_actor_free_td_lewm_v1_c3_checkpoint_protocol,
     validate_actor_free_td_lewm_v1_c3_evaluation_protocol,
@@ -276,12 +280,13 @@ def test_state_v_plus_first_q2_combines_normalized_v_with_online_g_first_action(
         world.action_encoder.projection.weight[0, 0] = 1.0
     critic = _RecordingCritic()
     predictor = _RecordingPredictor()
+    alpha = 0.5
     adapter = ActorFreeTDLeWMV1C3(
         world,
         critic,
         predictor,
         score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
-        g_first_weight=STATE_V_FIRST_Q2_WEIGHT,
+        g_first_weight=alpha,
     )
     actions = torch.zeros(1, 4, 5, 25)
     actions[0, :, 0, 0] = torch.tensor([0.0, 3.0, 1.0, 2.0])
@@ -299,13 +304,13 @@ def test_state_v_plus_first_q2_combines_normalized_v_with_online_g_first_action(
     )
 
     state_v = torch.tensor([[3.0, 0.0, 2.0, 1.0]])
-    q_first = torch.tensor([[0.0, 3.0, 1.0, 2.0]])
+    q_first = (192.0**0.5) * torch.tensor([[0.0, 3.0, 1.0, 2.0]])
 
     def zscore(value: torch.Tensor) -> torch.Tensor:
         centered = value - value.mean(dim=1, keepdim=True)
         return centered / centered.square().mean(dim=1, keepdim=True).sqrt()
 
-    expected = zscore(state_v) - STATE_V_FIRST_Q2_WEIGHT * zscore(q_first)
+    expected = zscore(state_v) - alpha * zscore(q_first)
     assert torch.allclose(costs, expected)
     assert world.seen_actions is not None and torch.equal(world.seen_actions, actions)
     assert predictor.seen_state is not None
@@ -315,22 +320,87 @@ def test_state_v_plus_first_q2_combines_normalized_v_with_online_g_first_action(
     assert critic.seen_state is not None and torch.equal(critic.seen_state, terminal)
 
 
-def test_state_v_plus_first_q2_requires_online_g_and_fixed_weight() -> None:
+def test_state_v_plus_first_q_combines_raw_v_with_online_g_first_action() -> None:
+    terminal = torch.zeros(1, 4, 192)
+    terminal[0, :, 0] = torch.tensor([4.0, 1.0, 3.0, 2.0])
+    world = _RecordingWorld(terminal).eval().requires_grad_(False)
+    with torch.no_grad():
+        world.action_encoder.projection.weight.zero_()
+        world.action_encoder.projection.bias.zero_()
+        world.action_encoder.projection.weight[0, 0] = 1.0
+    predictor = _RecordingPredictor()
+    alpha = 0.5
+    adapter = ActorFreeTDLeWMV1C3(
+        world,
+        _RecordingCritic(),
+        predictor,
+        score_mode=STATE_V_FIRST_Q_SCORE_MODE,
+        g_first_weight=alpha,
+    )
+    actions = torch.zeros(1, 4, 5, 25)
+    actions[0, :, 0, 0] = torch.tensor([0.0, 3.0, 1.0, 2.0])
+    actions[0, :, 1:, :] = torch.randn(4, 4, 25)
+    goal = torch.zeros(1, 192)
+    goal[0, 0] = 1.0
+
+    costs = adapter.get_cost(
+        {
+            "pixels": torch.zeros(1, 4, 3, 1),
+            "emb": torch.zeros(1, 3, 192),
+            "goal_emb": goal,
+        },
+        actions,
+    )
+
+    state_v = torch.tensor([[3.0, 0.0, 2.0, 1.0]])
+    q_first = (192.0**0.5) * torch.tensor([[0.0, 3.0, 1.0, 2.0]])
+    assert torch.equal(costs, state_v - alpha * q_first)
+    assert world.seen_actions is not None and torch.equal(world.seen_actions, actions)
+    assert predictor.seen_state is not None
+    assert torch.equal(predictor.seen_state, torch.zeros(1, 4, 192))
+    assert predictor.seen_action is not None
+    assert torch.equal(predictor.seen_action[..., 0], actions[..., 0, 0])
+
+
+@pytest.mark.parametrize(
+    "score_mode", [STATE_V_FIRST_Q_SCORE_MODE, STATE_V_FIRST_Q2_SCORE_MODE]
+)
+def test_state_v_first_action_scores_require_online_g(score_mode: str) -> None:
     world = _RecordingWorld(torch.zeros(1, 2, 192))
     critic = _RecordingCritic()
     with pytest.raises(ValueError, match="retained online G"):
         ActorFreeTDLeWMV1C3(
             world,
             critic,
-            score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
-            g_first_weight=STATE_V_FIRST_Q2_WEIGHT,
+            score_mode=score_mode,
+            g_first_weight=0.5,
         )
-    with pytest.raises(ValueError, match="weight 0.25"):
+
+
+@pytest.mark.parametrize(
+    "bad_weight", [None, True, -0.1, float("nan"), float("inf")]
+)
+@pytest.mark.parametrize(
+    "score_mode", [STATE_V_FIRST_Q_SCORE_MODE, STATE_V_FIRST_Q2_SCORE_MODE]
+)
+def test_state_v_first_action_scores_reject_invalid_weight(
+    score_mode: str, bad_weight: float | None
+) -> None:
+    with pytest.raises(ValueError, match="finite and non-negative"):
         ActorFreeTDLeWMV1C3(
-            world,
-            critic,
+            _RecordingWorld(torch.zeros(1, 2, 192)),
+            _RecordingCritic(),
             _RecordingPredictor(),
-            score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+            score_mode=score_mode,
+            g_first_weight=bad_weight,
+        )
+
+
+def test_state_v_only_rejects_first_action_weight() -> None:
+    with pytest.raises(ValueError, match="only valid for a first-action"):
+        ActorFreeTDLeWMV1C3(
+            _RecordingWorld(torch.zeros(1, 2, 192)),
+            _RecordingCritic(),
             g_first_weight=0.5,
         )
 
@@ -361,29 +431,67 @@ def test_v1_c3_protocol_locks_state_v_only_formal_o50() -> None:
     assert protocol["inference_objective"]["terminal_goal_distance_used"] is False
 
 
-def test_v1_c3_first_q2_override_is_fixed_and_auditable() -> None:
-    from tdwm.evaluation.actor_free_td_lewm_v1_c3 import (
-        actor_free_td_lewm_v1_c3_output_directory_name,
-        configure_actor_free_td_lewm_v1_c3_evaluation_mode,
+@pytest.mark.parametrize(
+    ("score_mode", "weight", "weight_slug", "definition", "note_fragment"),
+    [
+        (
+            STATE_V_FIRST_Q_SCORE_MODE,
+            0.5,
+            "0p5",
+            STATE_V_FIRST_Q_SCORE_DEFINITION,
+            "raw EMA State-V",
+        ),
+        (
+            STATE_V_FIRST_Q2_SCORE_MODE,
+            1.0,
+            "1",
+            STATE_V_FIRST_Q2_SCORE_DEFINITION,
+            "candidate-normalized EMA State-V",
+        ),
+    ],
+)
+def test_v1_c3_first_action_overrides_are_tunable_and_auditable(
+    score_mode: str,
+    weight: float,
+    weight_slug: str,
+    definition: dict,
+    note_fragment: str,
+) -> None:
+    configured = configure_actor_free_td_lewm_v1_c3_evaluation_mode(
+        _protocol(),
+        smoke=False,
+        pilot=False,
+        score_mode=score_mode,
+        g_first_weight=weight,
     )
+    validate_actor_free_td_lewm_v1_c3_evaluation_protocol(configured)
+    inference = configured["inference_objective"]
+    assert inference["score_mode"] == score_mode
+    assert inference["score_definition"] == definition
+    assert inference["parent_g_used"] is True
+    assert inference["parent_g"] == "online_predictor"
+    assert inference["g_first_weight"] == weight
+    assert inference["terminal_goal_distance_used"] is False
+    assert note_fragment in configured["provenance"]["note"]
+    assert actor_free_td_lewm_v1_c3_output_directory_name(
+        _protocol(),
+        smoke=False,
+        pilot=False,
+        score_mode=score_mode,
+        g_first_weight=weight,
+    ).endswith(f"{score_mode}_alpha_{weight_slug}_formal")
 
+
+def test_v1_c3_first_q2_default_preserves_completed_alpha_0p25_run() -> None:
     configured = configure_actor_free_td_lewm_v1_c3_evaluation_mode(
         _protocol(),
         smoke=False,
         pilot=False,
         score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
     )
-    validate_actor_free_td_lewm_v1_c3_evaluation_protocol(configured)
-    inference = configured["inference_objective"]
-    assert inference["score_mode"] == STATE_V_FIRST_Q2_SCORE_MODE
-    assert inference["score_definition"] == STATE_V_FIRST_Q2_SCORE_DEFINITION
-    assert inference["parent_g_used"] is True
-    assert inference["parent_g"] == "online_predictor"
-    assert inference["g_first_weight"] == STATE_V_FIRST_Q2_WEIGHT
-    assert inference["terminal_goal_distance_used"] is False
-    assert "combines candidate-normalized EMA State-V" in configured["provenance"][
-        "note"
-    ]
+    assert configured["inference_objective"]["g_first_weight"] == (
+        DEFAULT_STATE_V_FIRST_Q_WEIGHT
+    )
     assert actor_free_td_lewm_v1_c3_output_directory_name(
         _protocol(),
         smoke=False,
@@ -463,7 +571,7 @@ def test_v1_c3_checkpoint_loader_restores_and_freezes_every_module(
         assert all(not parameter.requires_grad for parameter in module.parameters())
 
 
-def test_v1_c3_cli_exposes_only_pre_registered_state_v_scores(
+def test_v1_c3_cli_exposes_tunable_pre_registered_state_v_scores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = importlib.util.spec_from_file_location("v1_c3_evaluation_cli", SCRIPT_PATH)
@@ -484,7 +592,7 @@ def test_v1_c3_cli_exposes_only_pre_registered_state_v_scores(
 
     args = module.parse_args()
     assert args.score_mode is None
-    assert not hasattr(args, "g_first_weight")
+    assert args.g_first_weight is None
 
     monkeypatch.setattr(
         sys,
@@ -496,7 +604,11 @@ def test_v1_c3_cli_exposes_only_pre_registered_state_v_scores(
             "--checkpoint-path",
             "checkpoint.pt",
             "--score-mode",
-            STATE_V_FIRST_Q2_SCORE_MODE,
+            STATE_V_FIRST_Q_SCORE_MODE,
+            "--g-first-weight",
+            "0.5",
         ],
     )
-    assert module.parse_args().score_mode == STATE_V_FIRST_Q2_SCORE_MODE
+    parsed = module.parse_args()
+    assert parsed.score_mode == STATE_V_FIRST_Q_SCORE_MODE
+    assert parsed.g_first_weight == 0.5

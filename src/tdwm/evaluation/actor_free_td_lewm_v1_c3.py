@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from tdwm.adapters.actor_free_td_lewm_v1_c3 import (
+    DEFAULT_STATE_V_FIRST_Q_WEIGHT,
     DEPLOYMENT_CHECKPOINT_VERSION,
     IMPLEMENTATION_VERSION,
     METHOD,
@@ -22,12 +23,15 @@ from tdwm.adapters.actor_free_td_lewm_v1_c3 import (
     PARENT_CHECKPOINT_SHA256,
     PARENT_METHOD,
     STATE_V_CONSTANT_SANITY_OFFSET,
+    STATE_V_FIRST_ACTION_SCORE_MODES,
     STATE_V_FIRST_Q2_SCORE_MODE,
-    STATE_V_FIRST_Q2_WEIGHT,
+    STATE_V_FIRST_Q_SCORE_MODE,
+    STATE_V_SCORE_MODE,
     STATE_V_SCORE_MODES,
     VARIANT,
     load_actor_free_td_lewm_v1_c3_checkpoint,
     make_actor_free_td_lewm_v1_c3_policy,
+    normalize_state_v_first_q_weight,
     validate_actor_free_td_lewm_v1_c3_payload,
 )
 from tdwm.adapters.frozen_actor_free_td_common import is_lower_sha256
@@ -89,6 +93,34 @@ STATE_V_SCORE_DEFINITION = {
     "executed_action_block": "first_block_only",
     "replanning": "every_action_block",
 }
+STATE_V_FIRST_Q_SCORE_DEFINITION = {
+    "formula": (
+        "target_state_v(F_frozen_rollout_5(z0,A1:A5),z_goal) "
+        "- g_first_weight * q_first"
+    ),
+    "optimization": "cem_minimize",
+    "f_rollout": "full_five_action_blocks_A1_through_A5",
+    "state_input": "terminal_imagined_frozen_lewm_latent",
+    "goal_input": "frozen_lewm_encoded_goal_latent",
+    "critic": "ema_target_state_value",
+    "online_critic_used": False,
+    "parent_online_g_used": True,
+    "parent_target_g_used": False,
+    "terminal_latent_l2_used": False,
+    "q_first": "dot(G_online(z0, frozen_E_A(A1), w_goal), w_goal)",
+    "q_first_state": "current_frozen_lewm_encoder_state_z0",
+    "q_first_action": "first_candidate_raw_action_block_A1",
+    "q_first_action_processing": "frozen_shared_lewm_action_encoder_to_192d",
+    "q_first_task": "sqrt_dim_l2_normalized_goal_vector",
+    "q_first_discount": "none",
+    "normalization": "none_raw_scores",
+    "raw_state_v_constant_shift_sanity": (
+        "25_plus_value_has_identical_combined_ranking"
+    ),
+    "raw_state_v_constant_shift": STATE_V_CONSTANT_SANITY_OFFSET,
+    "executed_action_block": "first_block_only",
+    "replanning": "every_action_block",
+}
 STATE_V_FIRST_Q2_SCORE_DEFINITION = {
     "formula": (
         "zscore_samples(target_state_v(F_frozen_rollout_5(z0,A1:A5),z_goal)) "
@@ -121,6 +153,45 @@ STATE_V_FIRST_Q2_SCORE_DEFINITION = {
     "executed_action_block": "first_block_only",
     "replanning": "every_action_block",
 }
+
+
+def _state_v_score_definition(score_mode: str) -> dict[str, Any]:
+    if score_mode == STATE_V_SCORE_MODE:
+        return STATE_V_SCORE_DEFINITION
+    if score_mode == STATE_V_FIRST_Q_SCORE_MODE:
+        return STATE_V_FIRST_Q_SCORE_DEFINITION
+    if score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+        return STATE_V_FIRST_Q2_SCORE_DEFINITION
+    raise ValueError(f"Unsupported V1-C3 score mode {score_mode!r}.")
+
+
+def _resolve_state_v_first_q_weight(
+    protocol: Mapping[str, Any],
+    *,
+    score_mode: str,
+    g_first_weight: float | None,
+) -> float | None:
+    if score_mode not in STATE_V_FIRST_ACTION_SCORE_MODES:
+        if g_first_weight is not None:
+            raise ValueError(
+                "g_first_weight is only valid for a V1-C3 first-action score."
+            )
+        return None
+    inference = protocol.get("inference_objective", {})
+    configured = (
+        inference.get("g_first_weight") if isinstance(inference, Mapping) else None
+    )
+    raw_weight = g_first_weight
+    if raw_weight is None:
+        raw_weight = (
+            configured if configured is not None else DEFAULT_STATE_V_FIRST_Q_WEIGHT
+        )
+    return normalize_state_v_first_q_weight(raw_weight)
+
+
+def _state_v_first_q_weight_slug(weight: float) -> str:
+    value = format(normalize_state_v_first_q_weight(weight), ".15g").lower()
+    return value.replace("+", "").replace("-", "m").replace(".", "p")
 
 
 def _require_exact_values(
@@ -312,25 +383,27 @@ def validate_actor_free_td_lewm_v1_c3_evaluation_protocol(
             f"inference_objective.score_mode must be one of "
             f"{sorted(STATE_V_SCORE_MODES)}."
         )
+    uses_parent_g = score_mode in STATE_V_FIRST_ACTION_SCORE_MODES
     inference_expected = {
         "score_mode": score_mode,
-        "score_definition": (
-            STATE_V_FIRST_Q2_SCORE_DEFINITION
-            if score_mode == STATE_V_FIRST_Q2_SCORE_MODE
-            else STATE_V_SCORE_DEFINITION
-        ),
+        "score_definition": _state_v_score_definition(score_mode),
         "learned_actor": False,
-        "parent_g_used": score_mode == STATE_V_FIRST_Q2_SCORE_MODE,
+        "parent_g_used": uses_parent_g,
         "terminal_goal_distance_used": False,
         "critic": "ema_target",
         "replanning": "every_action_block",
     }
-    if score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+    if uses_parent_g:
+        weight = normalize_state_v_first_q_weight(inference.get("g_first_weight"))
         inference_expected.update(
             {
                 "parent_g": "online_predictor",
-                "g_first_weight": STATE_V_FIRST_Q2_WEIGHT,
+                "g_first_weight": weight,
             }
+        )
+    elif "parent_g" in inference or "g_first_weight" in inference:
+        raise ValueError(
+            "State-V-only inference must not contain parent_g or g_first_weight."
         )
     _require_exact_values(
         inference,
@@ -370,6 +443,7 @@ def configure_actor_free_td_lewm_v1_c3_evaluation_mode(
     smoke: bool,
     pilot: bool,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> dict[str, Any]:
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
@@ -382,31 +456,42 @@ def configure_actor_free_td_lewm_v1_c3_evaluation_mode(
             f"Unsupported V1-C3 score mode {selected_score_mode!r}; expected one "
             f"of {sorted(STATE_V_SCORE_MODES)}."
         )
+    weight = _resolve_state_v_first_q_weight(
+        configured,
+        score_mode=selected_score_mode,
+        g_first_weight=g_first_weight,
+    )
+    uses_parent_g = selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES
     inference = configured["inference_objective"]
     inference.update(
         {
             "score_mode": selected_score_mode,
-            "score_definition": deepcopy(
-                STATE_V_FIRST_Q2_SCORE_DEFINITION
-                if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE
-                else STATE_V_SCORE_DEFINITION
-            ),
+            "score_definition": deepcopy(_state_v_score_definition(selected_score_mode)),
             "learned_actor": False,
-            "parent_g_used": selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE,
+            "parent_g_used": uses_parent_g,
             "terminal_goal_distance_used": False,
             "critic": "ema_target",
             "replanning": "every_action_block",
         }
     )
-    if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+    if uses_parent_g:
+        assert weight is not None
         inference["parent_g"] = "online_predictor"
-        inference["g_first_weight"] = STATE_V_FIRST_Q2_WEIGHT
-        configured["provenance"]["note"] = (
-            "C3+First-Q2 planning combines candidate-normalized EMA State-V at "
-            "the terminal latent of a full frozen-F five-block rollout with the "
-            "candidate-normalized retained online-G readout at real z0 and A1; "
-            "target G and terminal latent L2 remain excluded."
-        )
+        inference["g_first_weight"] = weight
+        if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+            configured["provenance"]["note"] = (
+                "C3+First-Q2 planning combines candidate-normalized EMA State-V "
+                "at the terminal latent of a full frozen-F five-block rollout "
+                "with the candidate-normalized retained online-G readout at real "
+                "z0 and A1; target G and terminal latent L2 remain excluded."
+            )
+        else:
+            configured["provenance"]["note"] = (
+                "C3+First-Q planning combines raw EMA State-V at the terminal "
+                "latent of a full frozen-F five-block rollout with the raw retained "
+                "online-G readout at real z0 and A1; target G, candidate score "
+                "normalization, and terminal latent L2 remain excluded."
+            )
     else:
         inference.pop("parent_g", None)
         inference.pop("g_first_weight", None)
@@ -436,6 +521,7 @@ def actor_free_td_lewm_v1_c3_output_directory_name(
     smoke: bool,
     pilot: bool,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> str:
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
@@ -445,11 +531,14 @@ def actor_free_td_lewm_v1_c3_output_directory_name(
     )
     if selected_score_mode not in STATE_V_SCORE_MODES:
         raise ValueError(f"Unsupported V1-C3 score mode {selected_score_mode!r}.")
-    suffix = (
-        "_alpha_0p25"
-        if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE
-        else ""
+    weight = _resolve_state_v_first_q_weight(
+        protocol,
+        score_mode=selected_score_mode,
+        g_first_weight=g_first_weight,
     )
+    suffix = ""
+    if weight is not None:
+        suffix = f"_alpha_{_state_v_first_q_weight_slug(weight)}"
     return (
         f"{protocol['method']}_cube_o50_{selected_score_mode}{suffix}_{run_mode}"
     )
@@ -536,6 +625,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
     pilot: bool = False,
     checkpoint_epoch: int | None = None,
     score_mode: str | None = None,
+    g_first_weight: float | None = None,
 ) -> dict[str, Any]:
     """Run the audited public Stable World Model CEM/O50 evaluation."""
 
@@ -545,6 +635,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
         smoke=smoke,
         pilot=pilot,
         score_mode=score_mode,
+        g_first_weight=g_first_weight,
     )
     if checkpoint_epoch is not None and (smoke or pilot):
         raise ValueError("--checkpoint-epoch is only valid for full O50 evaluation.")
@@ -625,7 +716,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
     world_model = restored.world_model.to(device).eval().requires_grad_(False)
     target_critic = restored.target_critic.to(device).eval().requires_grad_(False)
     predictor = None
-    if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+    if selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
         predictor = restored.predictor.to(device).eval().requires_grad_(False)
     image = protocol["image_preprocessing"]
     image_transform = transforms.Compose(
@@ -701,6 +792,10 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "normalization": {"action": action_stats},
         "runtime": runtime,
     }
+    if selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
+        manifest["g_first_weight"] = protocol["inference_objective"][
+            "g_first_weight"
+        ]
     _write_json(output_dir / "protocol_manifest.json", manifest)
 
     world_cfg = protocol["world"]
@@ -774,8 +869,10 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
     }
-    if selected_score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
-        result["g_first_weight"] = STATE_V_FIRST_Q2_WEIGHT
+    if selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
+        result["g_first_weight"] = protocol["inference_objective"][
+            "g_first_weight"
+        ]
         result["raw_state_v_constant_shift_sanity"] = (
             "checked_on_first_CEM_cost_call"
         )
@@ -792,6 +889,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
 __all__ = [
     "FORMAL_O50_PLANNING",
     "FORMAL_SELECTION_SHA256",
+    "STATE_V_FIRST_Q_SCORE_DEFINITION",
     "STATE_V_FIRST_Q2_SCORE_DEFINITION",
     "STATE_V_SCORE_DEFINITION",
     "actor_free_td_lewm_v1_c3_output_directory_name",

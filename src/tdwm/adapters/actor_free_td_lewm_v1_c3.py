@@ -3,15 +3,17 @@
 V1-C3 is an actor-free continuation of the frozen V1-C checkpoint.  The
 checkpoint retains V1-C's frozen LeWM and online/EMA G pair.  The original
 State-V ablation deliberately uses neither G nor latent distance.  The paired
-``state_v_plus_first_q2`` ablation keeps the same full frozen-F rollout and
-adds only V1-C's online first-action Q after independently normalizing the
-State-V and Q signals over each CEM candidate set.
+first-action ablations keep the same full frozen-F rollout and add only V1-C's
+online first-action Q.  ``state_v_plus_first_q`` combines the raw signals;
+``state_v_plus_first_q2`` normalizes them independently over each CEM
+candidate set before combining them.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,10 +53,32 @@ PARENT_CHECKPOINT_SHA256 = (
     "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3"
 )
 STATE_V_SCORE_MODE = "state_v_terminal"
+STATE_V_FIRST_Q_SCORE_MODE = "state_v_plus_first_q"
 STATE_V_FIRST_Q2_SCORE_MODE = "state_v_plus_first_q2"
-STATE_V_SCORE_MODES = frozenset({STATE_V_SCORE_MODE, STATE_V_FIRST_Q2_SCORE_MODE})
-STATE_V_FIRST_Q2_WEIGHT = 0.25
+STATE_V_FIRST_ACTION_SCORE_MODES = frozenset(
+    {STATE_V_FIRST_Q_SCORE_MODE, STATE_V_FIRST_Q2_SCORE_MODE}
+)
+STATE_V_SCORE_MODES = frozenset(
+    {STATE_V_SCORE_MODE, *STATE_V_FIRST_ACTION_SCORE_MODES}
+)
+DEFAULT_STATE_V_FIRST_Q_WEIGHT = 0.25
+# Backward-compatible name retained for the already completed alpha=0.25 run.
+STATE_V_FIRST_Q2_WEIGHT = DEFAULT_STATE_V_FIRST_Q_WEIGHT
 STATE_V_CONSTANT_SANITY_OFFSET = 25.0
+
+
+def normalize_state_v_first_q_weight(value: float | None) -> float:
+    """Return a finite non-negative first-action weight for a C3 score."""
+
+    if value is None or isinstance(value, bool):
+        raise ValueError("g_first_weight must be finite and non-negative.")
+    try:
+        weight = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("g_first_weight must be finite and non-negative.") from error
+    if not math.isfinite(weight) or weight < 0.0:
+        raise ValueError("g_first_weight must be finite and non-negative.")
+    return 0.0 if weight == 0.0 else weight
 
 
 @dataclass(frozen=True)
@@ -398,7 +422,7 @@ def assert_constant_shift_preserves_selection(
 
 
 class ActorFreeTDLeWMV1C3(nn.Module):
-    """Full frozen-F rollout scored by State-V, optionally plus first-Q2."""
+    """Full frozen-F rollout scored by State-V, optionally plus first-Q."""
 
     supported_score_modes = STATE_V_SCORE_MODES
     default_score_mode = STATE_V_SCORE_MODE
@@ -428,17 +452,16 @@ class ActorFreeTDLeWMV1C3(nn.Module):
                 f"{sorted(self.supported_score_modes)}."
             )
         self.score_mode = score_mode
-        if score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+        if score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
             if predictor is None:
-                raise ValueError("state_v_plus_first_q2 requires the retained online G.")
-            if g_first_weight != STATE_V_FIRST_Q2_WEIGHT:
-                raise ValueError(
-                    "state_v_plus_first_q2 requires the pre-registered weight 0.25."
-                )
+                raise ValueError(f"{score_mode} requires the retained online G.")
+            normalized_weight = normalize_state_v_first_q_weight(g_first_weight)
         elif g_first_weight is not None:
-            raise ValueError("g_first_weight is only valid for state_v_plus_first_q2.")
+            raise ValueError("g_first_weight is only valid for a first-action score.")
+        else:
+            normalized_weight = None
         self.predictor = predictor
-        self.g_first_weight = g_first_weight
+        self.g_first_weight = normalized_weight
         self.lewm_history_size = int(lewm_history_size)
         self.rollout_horizon = int(rollout_horizon)
         self.run_constant_shift_sanity = bool(run_constant_shift_sanity)
@@ -489,7 +512,7 @@ class ActorFreeTDLeWMV1C3(nn.Module):
             )
 
         current = None
-        if self.score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
+        if self.score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
             current = self._current_state_for_samples(
                 dict(info_dict),
                 batch=batch,
@@ -524,13 +547,15 @@ class ActorFreeTDLeWMV1C3(nn.Module):
             return state_v
 
         if current is None or self.predictor is None or self.g_first_weight is None:
-            raise RuntimeError("V1-C3 first-Q2 components were not initialized.")
+            raise RuntimeError("V1-C3 first-action components were not initialized.")
         task = project_tasks_to_sphere_v1(goal)
         q_first = self._goal_score(
             current,
             action_candidates[..., 0, :],
             task,
         )
+        if self.score_mode == STATE_V_FIRST_Q_SCORE_MODE:
+            return state_v - self.g_first_weight * q_first
         return _normalize_cem_candidate_scores(state_v) - self.g_first_weight * (
             _normalize_cem_candidate_scores(q_first)
         )
@@ -590,13 +615,13 @@ class ActorFreeTDLeWMV1C3(nn.Module):
         samples: int,
         reference: torch.Tensor,
     ) -> torch.Tensor:
-        """Return the real current encoder state used by V1-C First-Q2."""
+        """Return the real current encoder state used by V1-C First-Q/Q2."""
 
         embedding = info.get("emb")
         if embedding is None:
             pixels = info.get("pixels")
             if not torch.is_tensor(pixels):
-                raise ValueError("pixels or cached emb is required for first-Q2.")
+                raise ValueError("pixels or cached emb is required for first-Q/Q2.")
             initial = {
                 key: value[:, 0]
                 for key, value in info.items()
@@ -778,6 +803,7 @@ def make_actor_free_td_lewm_v1_c3_policy(
 __all__ = [
     "ActorFreeTDLeWMV1C3",
     "ActorFreeTDLeWMV1C3Checkpoint",
+    "DEFAULT_STATE_V_FIRST_Q_WEIGHT",
     "DEPLOYMENT_CHECKPOINT_VERSION",
     "IMPLEMENTATION_VERSION",
     "METHOD",
@@ -786,6 +812,8 @@ __all__ = [
     "PARENT_CHECKPOINT_SHA256",
     "PARENT_METHOD",
     "STATE_V_CONSTANT_SANITY_OFFSET",
+    "STATE_V_FIRST_ACTION_SCORE_MODES",
+    "STATE_V_FIRST_Q_SCORE_MODE",
     "STATE_V_FIRST_Q2_SCORE_MODE",
     "STATE_V_FIRST_Q2_WEIGHT",
     "STATE_V_SCORE_MODE",
@@ -794,5 +822,6 @@ __all__ = [
     "assert_constant_shift_preserves_selection",
     "load_actor_free_td_lewm_v1_c3_checkpoint",
     "make_actor_free_td_lewm_v1_c3_policy",
+    "normalize_state_v_first_q_weight",
     "validate_actor_free_td_lewm_v1_c3_payload",
 ]
