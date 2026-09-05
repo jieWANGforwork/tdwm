@@ -164,6 +164,41 @@ C3 的同一组 50 个 pair 早期诊断为 E3 28/50 (56%)，最终 endpoint 为
 - C3 训练主要读取真实 encoder latent，推理却在 `F^5` imagined terminal latent 上读 State-V。下一轮应把 stop-gradient 的 F-imagined states 按受控比例混入 State-V 训练，直接缩小这一 terminal-state OOD 间隙。
 - 以上比较均为一个 training seed 和同一组 50 pair 的描述性消融，不构成多 seed 总体最优或因果证明。
 
+## First-Q 权重扫描
+
+本轮没有重新训练模型，只在固定 checkpoint 上改变推理评分的权重 `alpha`。C3 两行都使用同一个 V1-C3 E12 checkpoint，训练 loss 仍为 `L_C3`；原 First-Q 使用同一个 V1-C E10 checkpoint，训练 loss 仍为 `L_C`。三种 CEM cost 分别为：
+
+$$J_{C3\text{-}raw}=\bar V_\psi(F^5(z_0,A_{1:5}),z_g)-\alpha Q_G(z_0,A_1,g),$$
+
+$$J_{C3\text{-}z}=Z_{cand}(\bar V_\psi(F^5(z_0,A_{1:5}),z_g))-\alpha Z_{cand}(Q_G(z_0,A_1,g)),$$
+
+$$J_{V1C}=\lVert F^5(z_0,A_{1:5})-z_g\rVert_2^2-\alpha Q_G(z_0,A_1,g),$$
+
+其中 `Q_G(z0,A1,g)=G_phi(z0,E_A(A1),w(g))^T w(g)`，使用 retained online G、真实当前 latent `z0` 和第一个候选 action block；F 仍完整 rollout 五步。`Z_cand` 只在当前 CEM candidate set 内计算 population z-score。`alpha=0` 不重复运行：C3 等价于既有 State-V 结果，V1-C 等价于既有 F-only 结果。
+
+下表把粗扫和针对 C3 Z-score 的边界细扫放在同一张表中。粗体是每行最佳；`◆` 是每个 alpha 列中已有方法的最佳；并列全部保留。DOCX 中黄底表示行最佳、蓝底表示列最佳、青色表示两者同时成立。
+
+| 固定 checkpoint 与评分 | 训练 loss | alpha=0 | 0.025 | 0.05 | 0.075 | 0.1 | 0.15 | 0.2 | 0.25 | 0.5 | 1 | 2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| V1-C3 E12 · Raw State-V + First-Q | `L_C3` | ◆ **26/50 (52%)** | — | — | — | **26/50 (52%)** | — | — | 22/50 (44%) | 21/50 (42%) | 21/50 (42%) | 22/50 (44%) |
+| V1-C3 E12 · Z-score State-V + First-Q2 | `L_C3` | ◆ 26/50 (52%) | ◆ 25/50 (50%) | ◆ 28/50 (56%) | ◆ 27/50 (54%) | ◆ **31/50 (62%)** | ◆ 23/50 (46%) | ◆ 28/50 (56%) | 26/50 (52%) | 24/50 (48%) | 24/50 (48%) | ◆ 25/50 (50%) |
+| V1-C E10 · Original First-Q | `L_C` | 23/50 (46%) | — | — | — | 24/50 (48%) | — | — | ◆ **28/50 (56%)** | ◆ 27/50 (54%) | ◆ **28/50 (56%)** | ◆ 25/50 (50%) |
+
+### 配对结果与结论
+
+| 对比 | 成功数变化 | 仅新方法成功 | 仅参照成功 | Exact McNemar p |
+| --- | ---: | ---: | ---: | ---: |
+| C3 Z-score alpha=0.1 vs C3 State-V alpha=0 | 26 -> 31 (+10 pp) | 6 | 1 | 0.125 |
+| C3 Z-score alpha=0.1 vs V1-C First-Q alpha=0.25 | 28 -> 31 (+6 pp) | 4 | 1 | 0.375 |
+| C3 Z-score alpha=0.1 vs Legacy Hybrid F+G | 27 -> 31 (+8 pp) | 8 | 4 | 0.3877 |
+
+- **本轮最高观察值是 C3 Z-score alpha=0.1 的 31/50 (62%)。** 它比 C3 State-V 增加 5 个成功 pair，也是现有固定表与本轮扫描中观察到的最高单格，但配对检验没有达到常用 0.05 阈值。
+- **有效因素是尺度校准，不是简单叠加 Q。** C3 Raw 在 alpha=0.1 只与 State-V 持平，alpha>=0.25 时降到 42%-44%；这说明原始 State-V 与 Q 的数值尺度不匹配。候选内 z-score 后，小权重 Q 才能提供互补的第一步可达性信号。
+- **alpha=0.1 是尖锐的局部峰值，而非平滑平台。** 相邻 alpha=0.075、0.15 分别只有 54%、46%，alpha=0.05 与 0.2 都为 56%。CEM 的精英排序会因小幅权重变化而离散改变，因此不能把 0.1 当作已证明的稳健常数。
+- **原 V1-C First-Q 对权重相对宽容。** alpha=0.25 和 1 都为 28/50 (56%)，alpha=0.5 为 27/50；但它没有达到 C3 Z-score alpha=0.1 的观察值。
+- **alpha 是在同一组 O50 上挑出的，62% 属于探索性调参结果。** 它不能无偏替代预先固定的正式 endpoint。下一步应在独立 dev pairs 上选 alpha，再在未见过的 test pairs 和多个 planning seeds 上确认；若保留 C3，还应改善 State-V 与 First-Q 的校准以降低这种尖峰敏感性。
+- 历史 C3 Z-score alpha=0.25 为 27/50，本轮复跑为 26/50；两次有 3 个 pair 的结果翻转，净差 1 个成功。后续结论不应过度解释 1-2 个 episode 的差异，并应固定确定性设置或报告 planning 重复试验。
+
 ## 训练 / validation loss 证据
 
 训练总 loss 含不同辅助项，绝对数值不能直接给 C–G3 排名，只用于判断各自是否收敛。Legacy 与 V1 曲线保留在历史来源文档；V0、V2、V2-EMA 的逐 epoch 数值和全部 E3–E10 O50 轨迹继续保留在总账 artifacts 中，但不再塞进主结果表。
