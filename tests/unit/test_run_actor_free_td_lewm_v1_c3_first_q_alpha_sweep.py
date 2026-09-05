@@ -71,6 +71,21 @@ def test_build_jobs_creates_three_matched_alpha_grids(tmp_path: Path) -> None:
         assert job.checkpoint_sha256 == module._file_sha256(Path(job.checkpoint))
 
 
+def test_build_jobs_preserves_virtual_environment_python_symlink(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    inputs = _inputs(tmp_path)
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(inputs["python"])
+    inputs["python"] = venv_python
+
+    jobs = module.build_jobs(**inputs, alphas=(0.25,))
+
+    assert all(job.argv[0] == str(venv_python.absolute()) for job in jobs)
+
+
 @pytest.mark.parametrize("alphas", [(), (0.1, 0.1), (-0.1,), (float("nan"),)])
 def test_build_jobs_rejects_invalid_alpha_grid(
     tmp_path: Path, alphas: tuple[float, ...]

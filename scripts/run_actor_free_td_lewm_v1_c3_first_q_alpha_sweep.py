@@ -111,7 +111,9 @@ def build_jobs(
     repository = Path(repository).expanduser().resolve()
     output_root = Path(output_root).expanduser().resolve()
     dataset = Path(dataset).expanduser().resolve()
-    python = Path(python).expanduser().resolve()
+    # Preserve a virtual-environment interpreter path. Resolving its symlink can
+    # select the base interpreter and lose the environment's installed packages.
+    python = Path(os.path.abspath(Path(python).expanduser()))
     checkpoints = {
         "c3": Path(c3_checkpoint).expanduser().resolve(),
         "v1_c": Path(v1_c_checkpoint).expanduser().resolve(),
