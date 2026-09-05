@@ -1,0 +1,562 @@
+{
+  "dataset": {
+    "conversion_manifest": {
+      "conversion": {
+        "api": "swm.data.convert",
+        "conversion_performed_in_this_run": false,
+        "execution_elapsed_seconds": 4.190842866897583,
+        "mode": "error",
+        "stable_worldmodel_version": "0.1.1"
+      },
+      "destination": {
+        "format": "lance",
+        "image_codec": "jpeg",
+        "jpeg_quality": 100,
+        "name": "cube_single_expert_jpeg100.lance",
+        "size_bytes": 36244499909
+      },
+      "schema_version": 1,
+      "source": {
+        "name": "cube_single_expert_chunk1.h5",
+        "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+        "size_bytes": 74104077358
+      },
+      "verification": {
+        "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+        "episodes": 10000,
+        "numeric_columns": {
+          "action": {
+            "destination_dtype": "float32",
+            "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+            "exact": true,
+            "float32_cast_exact": true,
+            "maximum_absolute_error": 0.0,
+            "mean_absolute_error": 0.0,
+            "passed": true,
+            "policy": "exact",
+            "shape": [
+              2010000,
+              5
+            ],
+            "source_dtype": "float32",
+            "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+          },
+          "observation": {
+            "destination_dtype": "float32",
+            "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+            "exact": false,
+            "float32_cast_exact": true,
+            "maximum_absolute_error": 2.3840729657109705e-07,
+            "mean_absolute_error": 1.7392796837827026e-08,
+            "passed": true,
+            "policy": "float32_cast_exact",
+            "shape": [
+              2010000,
+              28
+            ],
+            "source_dtype": "float64",
+            "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+          }
+        },
+        "pixels": {
+          "lossless": false,
+          "mae": 0.6259754206858524,
+          "maximum_absolute_error": 74.0,
+          "mse": 2.83425218231824,
+          "psnr_db": 43.606418711608875,
+          "samples": 128
+        },
+        "transitions": 2010000
+      }
+    },
+    "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+    "cross_split_overlap_source": "inherited_sequence_clip_split",
+    "cross_split_transition_overlap": 987281,
+    "format": "lance",
+    "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+    "sequence_samples": 1070000,
+    "size_bytes": 36244499909,
+    "split": {
+      "array_hash_algorithm": "dtype_text_then_shape_text_then_c_order_bytes",
+      "binding": "externally_supplied_exact_artifact",
+      "file_sha256": "4594afb3603b4258431ff9076c82acbe3ddcaccb277940b825a99017ce83d830",
+      "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_cdfg1_eac18ce_20260829/shared/split_indices_seed3072_numsteps19.npz",
+      "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+      "train_samples": 963000,
+      "validation_array_key": "validation_indices",
+      "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+      "validation_samples": 107000
+    },
+    "train_transition_population": {
+      "duplicate_global_row_count": 1647732,
+      "duplicate_record_count": 12686223,
+      "expanded_record_count": 14445000,
+      "max_multiplicity": 15,
+      "size": 1758777,
+      "unique_record_count": 1758777
+    },
+    "validation_transition_population": {
+      "duplicate_global_row_count": 421362,
+      "duplicate_record_count": 606496,
+      "expanded_record_count": 1605000,
+      "max_multiplicity": 9,
+      "size": 998504,
+      "unique_record_count": 998504
+    }
+  },
+  "deployment_checkpoint_version": 1,
+  "frozen_latent_store": {
+    "action_block_dim": 25,
+    "action_dim": 5,
+    "column_normalization_path": "/root/autodl-tmp/tdwm/outputs/pretrained_f_lewm_baseline_eac18ce_20260829/column_normalization.json",
+    "column_normalization_sha256": "7fd14e6a72841a36abd8f1d4aedf4f17f4f71ca508cacefe331e989664954818",
+    "dataset_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+    "dataset_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+    "dataset_source_sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+    "embed_dim": 192,
+    "extraction_precision": "bfloat16",
+    "frame_skip": 5,
+    "git_revision": "1deb01f5f115dfe9bd918935e206983f2f9ff080",
+    "history_frames": 3,
+    "image_preprocessing": {
+      "input_dtype": "uint8",
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "resize_mode": "bilinear_antialias",
+      "scale": "divide_by_255",
+      "size": 224,
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ]
+    },
+    "input_file_sha256": {
+      "action_blocks": "c0af424e0d8211770c5afd940caf4101b9c653713192c4ae1c27471e1e56f272",
+      "episode_ids": "51f34ef0751396cc99758ae3d4e6df0bf4a846460487ac1f0210c536b881193b",
+      "latents": "18310b1ca9d07bae157df81d76222ec6c4d5433696a9bc4d06e3e4357c10e0ec"
+    },
+    "manifest_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_cdfg1_eac18ce_20260829/shared/frozen_latent_store_epoch10/manifest.json",
+    "manifest_sha256": "fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e",
+    "online_cache_parity_audit": {
+      "cache_row_shape": [
+        "batch",
+        192
+      ],
+      "cache_value": "float32_copy_of_model_encode_emb_at_time_zero",
+      "extra_encoder_call_for_parity": false,
+      "formal_preprocessing_smoke": {
+        "comparison": "torch.equal",
+        "extra_encoder_calls": 0,
+        "formal_reference": "tdwm.training.gt_lewm_support.preprocess_image_batch",
+        "global_rows": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "max_abs_difference": 0.0,
+        "rows_compared": 512,
+        "status": "passed"
+      },
+      "latent_encoder_input_keys": [
+        "pixels"
+      ],
+      "online_shape": [
+        "batch",
+        1,
+        192
+      ],
+      "stable_worldmodel_0_1_1_semantics": "emb depends only on pixels; action only creates act_emb; proprio is unused",
+      "status": "passed_by_construction_for_every_global_row"
+    },
+    "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_cdfg1_eac18ce_20260829/shared/frozen_latent_store_epoch10",
+    "pretrained_checkpoint_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+    "stable_worldmodel_version": "0.1.1",
+    "total_rows": 2010000
+  },
+  "implementation_version": "v1",
+  "method": "actor_free_td_lewm_v1_c2",
+  "method_family": "actor_free_td_lewm_v1",
+  "model": {
+    "config": {
+      "_target_": "stable_worldmodel.wm.lewm.LeWM",
+      "action_encoder": {
+        "_target_": "stable_worldmodel.wm.lewm.module.Embedder",
+        "emb_dim": 192,
+        "input_dim": 25
+      },
+      "encoder": {
+        "_target_": "stable_pretraining.backbone.utils.vit_hf",
+        "image_size": 224,
+        "patch_size": 14,
+        "pretrained": false,
+        "size": "tiny",
+        "use_mask_token": false
+      },
+      "pred_proj": {
+        "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+        "hidden_dim": 2048,
+        "input_dim": 192,
+        "norm_fn": {
+          "_partial_": true,
+          "_target_": "torch.nn.BatchNorm1d"
+        },
+        "output_dim": 192
+      },
+      "predictor": {
+        "_target_": "stable_worldmodel.wm.lewm.module.Predictor",
+        "depth": 6,
+        "dim_head": 64,
+        "dropout": 0.1,
+        "emb_dropout": 0.0,
+        "heads": 16,
+        "hidden_dim": 192,
+        "input_dim": 192,
+        "mlp_dim": 2048,
+        "num_frames": 3,
+        "output_dim": 192
+      },
+      "projector": {
+        "_target_": "stable_worldmodel.wm.lewm.module.MLP",
+        "hidden_dim": 2048,
+        "input_dim": 192,
+        "norm_fn": {
+          "_partial_": true,
+          "_target_": "torch.nn.BatchNorm1d"
+        },
+        "output_dim": 192
+      }
+    },
+    "initialization": {
+      "epoch_and_global_step": "reset",
+      "frozen": true,
+      "online_predictor_state_sha256": "b4c76f99e2ea1b3f73a9183a3f5b2add2d0d64c7f3c90c3714f3769312b617be",
+      "optimizer_state": "reset",
+      "parameter_state": "strict_all_model_parameters",
+      "parent_checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/c/seed_3072/checkpoints/actor_free_td_lewm_v1_c/c/epoch_10.pt",
+      "parent_checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+      "parent_epoch": 10,
+      "parent_global_step": 127960,
+      "parent_method": "actor_free_td_lewm_v1_c",
+      "parent_seed": 3072,
+      "predictor_config_sha256": "6b6d0645fcc8ccb172d9189fac1e2672eeec204ef5e829407d31f8425dcb0836",
+      "scheduler_state": "reset",
+      "source_checkpoint_path": "/root/autodl-tmp/tdwm/outputs/pretrained_f_lewm_baseline_eac18ce_20260829/seed_3072/checkpoints/exports/checkpoints/epoch_10/weights.pt",
+      "source_checkpoint_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+      "source_epoch": 10,
+      "source_final_epoch": 10,
+      "source_global_step": 127960,
+      "source_method": "lewm",
+      "source_run_name": "epoch_10",
+      "source_seed": 3072,
+      "source_training_manifest_path": "/root/autodl-tmp/tdwm/outputs/pretrained_f_lewm_baseline_eac18ce_20260829/seed_3072/training_manifest.json",
+      "source_training_manifest_sha256": "b03a4a6abaf44b06d13599bc2cf4c946f5c5b66eed538ad800f55c1685983c3c",
+      "source_training_result_path": "/root/autodl-tmp/tdwm/outputs/pretrained_f_lewm_baseline_eac18ce_20260829/seed_3072/training_result.json",
+      "source_training_result_sha256": "bf80cb2e688a86c5f09e3674187d51ecff71d2bf3a50d25a4a5280be0075ceab",
+      "source_training_run_dir": "/root/autodl-tmp/tdwm/outputs/pretrained_f_lewm_baseline_eac18ce_20260829/seed_3072",
+      "strategy": "v1_c_deployment_parameter_initialization",
+      "target_predictor_state_sha256": "54536191f4f795cb8320316316840b632ad53d0f715d81213a1239ea56f8a4df",
+      "world_model_state_sha256": "0ef286ac11ae41fbda29b97b781c0bf81332a5ceed1924d0d21d5756566bbe25"
+    },
+    "lewm_parameters": 18034628,
+    "predictor_parameters": 379072,
+    "trainable_lewm_parameters": 0
+  },
+  "neighbor_index": null,
+  "objective_version": 0,
+  "protocol": {
+    "context": {
+      "g_state_frames": 1,
+      "lewm_rollout_history_frames": 3
+    },
+    "dataset": {
+      "accepted_size_bytes": [
+        101942558720,
+        74104077358
+      ],
+      "expected_episodes": 10000,
+      "expected_size_bytes": 101942558720,
+      "expected_transitions": 2010000,
+      "file": "ogbench/cube_single_expert.h5",
+      "identifier": "quentinll/lewm-cube",
+      "keys_to_cache": [],
+      "keys_to_load": [
+        "action"
+      ],
+      "keys_to_merge": {},
+      "lance": {
+        "image_codec": "jpeg",
+        "jpeg_quality": 100,
+        "manifest_suffix": ".manifest.json",
+        "minimum_pixel_verification_samples": 128,
+        "numeric_verification": {
+          "action": "exact",
+          "observation": "float32_cast_exact"
+        },
+        "source": {
+          "file": "cube_single_expert_chunk1.h5",
+          "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+          "size_bytes": 74104077358
+        },
+        "stable_worldmodel_version": "0.1.1",
+        "suffix": ".lance"
+      },
+      "optimized_layout": {
+        "file": "cube_single_expert_chunk1.h5",
+        "lossless": true,
+        "pixels_chunk_frames": 1,
+        "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245"
+      }
+    },
+    "display_name": "Actor-Free TD-JEPA V1-C2 Planner-Aligned Goal-Projected TD",
+    "environment": "cube",
+    "id": "actor_free_td_lewm_v1_c2_cube_v1",
+    "image_preprocessing": {
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "size": 224,
+      "source": "stable_pretraining.data.dataset_stats.ImageNet",
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ]
+    },
+    "implementation_version": "v1",
+    "initialization": "v1_c_deployment_parameter_initialization",
+    "joint_objective": {
+      "base_td_population": "all_transitions",
+      "candidate_td_targets": "none",
+      "final_weight_normalization": "mean_one_over_all_transitions",
+      "first_q_alignment": {
+        "candidate_count": 16,
+        "candidate_sampling_seed_offset": 370009,
+        "candidate_source": "cem_initial_gaussian_no_actor",
+        "force_first_candidate_to_mean": true,
+        "goal_population": "goal_derived_tasks_with_valid_five_block_context",
+        "initial_mean": 0.0,
+        "initial_variance": 1.0,
+        "loss": "teacher_student_cross_entropy",
+        "max_goal_examples_per_batch": 8,
+        "rollout_horizon": 5,
+        "score_standardization": "population_z_score_over_candidates",
+        "standardization_epsilon": 1e-06,
+        "student": "first_action_goal_projection",
+        "student_gradient": "online_predictor_only",
+        "student_temperature": 1.0,
+        "subset_selection": "first_valid_in_random_replay_batch",
+        "teacher": "frozen_lewm_terminal_goal_cost",
+        "teacher_cost_reducer": "final_predicted_latent_summed_mse",
+        "teacher_gradient": "stop_gradient",
+        "teacher_temperature": 1.0,
+        "version": 1,
+        "weight": 1.0
+      },
+      "goal_projection_prediction_gradient": "online_predictor",
+      "goal_projection_target": "detached_td_target_projection",
+      "goal_projection_weight": 1.0,
+      "goal_signal": "matched_future_latent",
+      "goal_subset": "goal_derived_tasks_only",
+      "objective": "goal_projected_td_plus_first_q_alignment",
+      "projection_population": "goal_derived_tasks_only",
+      "random_task_weight": 1.0,
+      "weight_gradient": "stop_gradient"
+    },
+    "loader": {
+      "batch_size": 256,
+      "device_image_preprocessing": false,
+      "frozen_latent_mmap": true,
+      "pin_memory": true,
+      "prefetch_factor": 2,
+      "sampling_unit": "transition",
+      "train_drop_last": true,
+      "train_sampling": "random_with_replacement",
+      "transition_population": "unique_legal_td_rows_from_exact_clip_split",
+      "validation_drop_last": false,
+      "validation_sampling": "sequential_without_replacement",
+      "validation_workers": 2,
+      "workers": 6
+    },
+    "logging": {
+      "flush_every_n_steps": 50,
+      "type": "csv"
+    },
+    "method": "actor_free_td_lewm_v1_c2",
+    "method_family": "actor_free_td_lewm_v1",
+    "model": {
+      "embed_dim": 192,
+      "encoder_size": "tiny",
+      "parameters": 18034628,
+      "patch_size": 14,
+      "predictor_depth": 6,
+      "predictor_dim_head": 64,
+      "predictor_dropout": 0.1,
+      "predictor_embedding_dropout": 0.0,
+      "predictor_heads": 16,
+      "predictor_mlp_dim": 2048,
+      "projector_hidden_dim": 2048
+    },
+    "normalization": {
+      "boundary_nan_policy": "preserve_then_zero_invalid_action_values_for_forward",
+      "columns": [
+        "action",
+        "observation"
+      ],
+      "fit_population": "complete_dataset"
+    },
+    "optimizer": {
+      "predictor_learning_rate": 0.0001,
+      "type": "AdamW",
+      "weight_decay": 0.001,
+      "world_model_learning_rate": 0.0
+    },
+    "predictor": {
+      "action_dim": 192,
+      "action_embedding_dim": 192,
+      "action_encoder_source": "world_model.action_encoder",
+      "action_encoder_trainable": false,
+      "action_processing": "frozen_shared_lewm_action_encoder",
+      "actor": "none",
+      "architecture": "td_jepa_forward_map_v1",
+      "bootstrap_action": "dataset_next_action",
+      "embedding_layers": 2,
+      "gamma": 0.95,
+      "goal_conditioning": "task_input",
+      "hidden_dim": 256,
+      "hidden_layers": 1,
+      "loss_warmup_fraction": 0.0,
+      "num_parallel": 1,
+      "objective_version": 0,
+      "output_dim": 192,
+      "raw_action_dim": 25,
+      "reward": "none",
+      "shared_lewm_action_encoder": true,
+      "state_dim": 192,
+      "state_parameterization": "symmetric_shared_frozen_lewm_latent",
+      "target_ema_decay": 0.995,
+      "task_dim": 192
+    },
+    "pretrained_world_model": {
+      "checkpoint_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+      "frozen": true,
+      "source_epoch": 10,
+      "source_method": "lewm",
+      "source_seed": 3072
+    },
+    "provenance": {
+      "base_protocol": "configs/experiment/actor_free_td_lewm_v1_c_cube_train.yaml",
+      "note": "V1-C2 strictly initializes all model parameters from V1-C epoch 10, keeps LeWM and its action encoder frozen, and fine-tunes only G with the original C loss plus planner-candidate First-Q alignment.",
+      "predecessor": "actor_free_td_lewm_v1_c",
+      "status": "implementation_ready_untrained"
+    },
+    "runtime": {
+      "import": "import stable_worldmodel as swm",
+      "stable_worldmodel_version": "0.1.1"
+    },
+    "scheduler": {
+      "interval": "optimizer_step",
+      "type": "linear_warmup_cosine_annealing",
+      "warmup_fraction": 0.01
+    },
+    "schema_version": 1,
+    "seeds": [
+      3072
+    ],
+    "sequence": {
+      "frame_skip": 5,
+      "history_frames": 3,
+      "num_steps": 19,
+      "prediction_frames": 1
+    },
+    "source_v1_c": {
+      "checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+      "deployment_checkpoint_version": 1,
+      "epoch_and_global_step": "reset",
+      "implementation_version": "v1",
+      "method": "actor_free_td_lewm_v1_c",
+      "method_family": "actor_free_td_lewm_v1",
+      "objective_version": 0,
+      "optimizer_state": "reset",
+      "parameter_state": "strict_all_model_parameters",
+      "scheduler_state": "reset",
+      "source_epoch": 10,
+      "source_global_step": 127960,
+      "source_seed": 3072,
+      "variant": "c"
+    },
+    "split": {
+      "exact_indices_artifact": "split_indices.npz",
+      "implementation": "torch.utils.data.random_split",
+      "seed_source": "training_seed",
+      "train_fraction": 0.9,
+      "unit": "sequence_clip",
+      "validation_fraction": 0.1
+    },
+    "stage": "full_training",
+    "task_sampling": {
+      "goal_probability": 0.5,
+      "goal_sampling_seed_offset": 170003,
+      "goal_source": "uniform_reachable_future_frozen_latent_same_clip",
+      "mix_unit": "transition_minibatch",
+      "normalization": "sqrt_dim_l2_sphere",
+      "random_source": "isotropic_gaussian_sphere",
+      "sampling": "per_transition_bernoulli",
+      "task_sampling_seed_offset": 270007
+    },
+    "training": {
+      "checkpoint_every_epochs": 1,
+      "epochs": 10,
+      "gradient_clip_norm": 1.0,
+      "model_compile": false,
+      "model_compile_mode": "reduce-overhead",
+      "optimizer_steps_per_epoch": 12796,
+      "precision": "bf16-mixed",
+      "resume": true,
+      "scheduler_epochs": 10
+    },
+    "variant": "c2"
+  },
+  "protocol_path": "/root/autodl-tmp/tdwm-v1-c2-f1089a4/configs/experiment/actor_free_td_lewm_v1_c2_cube_train.yaml",
+  "protocol_sha256": "72a432986ae7bf5544048f14e47bd0fd12f11eb7e3b48cda3900d1a2fa659495",
+  "runtime": {
+    "compatibility_adapter": {},
+    "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+    "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+    "python": "3.12.3",
+    "stable_worldmodel": "0.1.1",
+    "tdwm_git_revision": "f1089a4d4c5422c0c3fee551ef88ebdc011da757",
+    "torch": "2.8.0+cu128"
+  },
+  "seed": 3072,
+  "training": {
+    "available_batches_per_epoch": 12796,
+    "configured_optimizer_steps": 127960,
+    "data_source": "frozen_latent_store",
+    "first_q_alignment_training": true,
+    "formal_optimizer_steps": 127960,
+    "optimizer_steps_per_epoch": 12796,
+    "resumed_from": null,
+    "sampling_unit": "transition",
+    "shared_action_encoder_forward_during_training": true,
+    "train_sampling": "random_with_replacement",
+    "transition_batch_size": 256,
+    "validation_batches": 3901,
+    "validation_goal_sampling": "uniform_reachable_future_fixed_per_epoch",
+    "validation_primary_objective": "common_base_td_all_variants",
+    "validation_skipped": false,
+    "validation_task_sampling": "bernoulli_mixture_fixed_per_epoch",
+    "world_model_visual_encode_during_training": false
+  },
+  "variant": "c2"
+}

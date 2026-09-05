@@ -1,0 +1,457 @@
+{
+  "dataset": {
+    "conversion_manifest": {
+      "conversion": {
+        "api": "swm.data.convert",
+        "conversion_performed_in_this_run": false,
+        "execution_elapsed_seconds": 4.190842866897583,
+        "mode": "error",
+        "stable_worldmodel_version": "0.1.1"
+      },
+      "destination": {
+        "format": "lance",
+        "image_codec": "jpeg",
+        "jpeg_quality": 100,
+        "name": "cube_single_expert_jpeg100.lance",
+        "size_bytes": 36244499909
+      },
+      "schema_version": 1,
+      "source": {
+        "name": "cube_single_expert_chunk1.h5",
+        "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+        "size_bytes": 74104077358
+      },
+      "verification": {
+        "episode_lengths_sha256": "1490cde580c39d3c4bddf1d97f181bdf61416a267b1a25f899227b1bae0a3132",
+        "episodes": 10000,
+        "numeric_columns": {
+          "action": {
+            "destination_dtype": "float32",
+            "destination_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4",
+            "exact": true,
+            "float32_cast_exact": true,
+            "maximum_absolute_error": 0.0,
+            "mean_absolute_error": 0.0,
+            "passed": true,
+            "policy": "exact",
+            "shape": [
+              2010000,
+              5
+            ],
+            "source_dtype": "float32",
+            "source_sha256": "97c421cf765dd7ffe518def46e445de6b56956ca2a69b22773384caadc8bf7a4"
+          },
+          "observation": {
+            "destination_dtype": "float32",
+            "destination_sha256": "e8607506b3cb3f96cf0bcb2120604bbd85baebe62a9ae744d03d30bba73d4e89",
+            "exact": false,
+            "float32_cast_exact": true,
+            "maximum_absolute_error": 2.3840729657109705e-07,
+            "mean_absolute_error": 1.7392796837827026e-08,
+            "passed": true,
+            "policy": "float32_cast_exact",
+            "shape": [
+              2010000,
+              28
+            ],
+            "source_dtype": "float64",
+            "source_sha256": "5e0b8056f32f64218cbbb8265d62c3978412f1d2a3e8b93adec7a63c7ad380d0"
+          }
+        },
+        "pixels": {
+          "lossless": false,
+          "mae": 0.6259754206858524,
+          "maximum_absolute_error": 74.0,
+          "mse": 2.83425218231824,
+          "psnr_db": 43.606418711608875,
+          "samples": 128
+        },
+        "transitions": 2010000
+      }
+    },
+    "conversion_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+    "cross_split_transition_overlap": 987281,
+    "format": "lance",
+    "path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance",
+    "sequence_samples": 1070000,
+    "size_bytes": 36244499909,
+    "split": {
+      "array_hash_algorithm": "dtype_text_then_shape_text_then_c_order_bytes",
+      "binding": "externally_supplied_exact_artifact",
+      "file_sha256": "4594afb3603b4258431ff9076c82acbe3ddcaccb277940b825a99017ce83d830",
+      "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_cdfg1_eac18ce_20260829/shared/split_indices_seed3072_numsteps19.npz",
+      "train_indices_sha256": "a1665554b6f5dc1c4aa37768cd7008fdc96f6a55ec5e8e12d9a93afa99880561",
+      "train_samples": 963000,
+      "validation_array_key": "validation_indices",
+      "validation_indices_sha256": "e5aed8baa556f3f868ed471c511488df2117332837303ba958df278b34a61a6c",
+      "validation_samples": 107000
+    },
+    "train_transition_population": {
+      "duplicate_global_row_count": 1647732,
+      "duplicate_record_count": 12686223,
+      "expanded_record_count": 14445000,
+      "max_multiplicity": 15,
+      "size": 1758777,
+      "unique_record_count": 1758777
+    },
+    "validation_transition_population": {
+      "duplicate_global_row_count": 421362,
+      "duplicate_record_count": 606496,
+      "expanded_record_count": 1605000,
+      "max_multiplicity": 9,
+      "size": 998504,
+      "unique_record_count": 998504
+    }
+  },
+  "deployment_checkpoint_version": 1,
+  "frozen_latent_store": {
+    "action_block_dim": 25,
+    "action_dim": 5,
+    "column_normalization_path": "/root/autodl-tmp/tdwm/outputs/pretrained_f_lewm_baseline_eac18ce_20260829/column_normalization.json",
+    "column_normalization_sha256": "7fd14e6a72841a36abd8f1d4aedf4f17f4f71ca508cacefe331e989664954818",
+    "dataset_manifest_path": "/root/autodl-tmp/tdwm/data/lewm-cube/cube_single_expert_jpeg100.lance.manifest.json",
+    "dataset_manifest_sha256": "9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd",
+    "dataset_source_sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+    "embed_dim": 192,
+    "extraction_precision": "bfloat16",
+    "frame_skip": 5,
+    "git_revision": "1deb01f5f115dfe9bd918935e206983f2f9ff080",
+    "history_frames": 3,
+    "image_preprocessing": {
+      "input_dtype": "uint8",
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "resize_mode": "bilinear_antialias",
+      "scale": "divide_by_255",
+      "size": 224,
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ]
+    },
+    "input_file_sha256": {
+      "action_blocks": "c0af424e0d8211770c5afd940caf4101b9c653713192c4ae1c27471e1e56f272",
+      "episode_ids": "51f34ef0751396cc99758ae3d4e6df0bf4a846460487ac1f0210c536b881193b",
+      "latents": "18310b1ca9d07bae157df81d76222ec6c4d5433696a9bc4d06e3e4357c10e0ec"
+    },
+    "manifest_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_cdfg1_eac18ce_20260829/shared/frozen_latent_store_epoch10/manifest.json",
+    "manifest_sha256": "fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e",
+    "online_cache_parity_audit": {
+      "cache_row_shape": [
+        "batch",
+        192
+      ],
+      "cache_value": "float32_copy_of_model_encode_emb_at_time_zero",
+      "extra_encoder_call_for_parity": false,
+      "formal_preprocessing_smoke": {
+        "comparison": "torch.equal",
+        "extra_encoder_calls": 0,
+        "formal_reference": "tdwm.training.gt_lewm_support.preprocess_image_batch",
+        "global_rows": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "max_abs_difference": 0.0,
+        "rows_compared": 512,
+        "status": "passed"
+      },
+      "latent_encoder_input_keys": [
+        "pixels"
+      ],
+      "online_shape": [
+        "batch",
+        1,
+        192
+      ],
+      "stable_worldmodel_0_1_1_semantics": "emb depends only on pixels; action only creates act_emb; proprio is unused",
+      "status": "passed_by_construction_for_every_global_row"
+    },
+    "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_cdfg1_eac18ce_20260829/shared/frozen_latent_store_epoch10",
+    "pretrained_checkpoint_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+    "stable_worldmodel_version": "0.1.1",
+    "total_rows": 2010000
+  },
+  "implementation_version": "v1",
+  "method": "actor_free_td_lewm_v1_c3",
+  "method_family": "actor_free_td_lewm_v1",
+  "model": {
+    "critic_parameters": 180992,
+    "target_critic_parameters": 180992,
+    "trainable_modules": [
+      "state_critic"
+    ],
+    "trainable_parent_parameters": 0
+  },
+  "objective_version": 1,
+  "protocol": {
+    "dataset": {
+      "accepted_size_bytes": [
+        101942558720,
+        74104077358
+      ],
+      "expected_episodes": 10000,
+      "expected_size_bytes": 101942558720,
+      "expected_transitions": 2010000,
+      "file": "ogbench/cube_single_expert.h5",
+      "identifier": "quentinll/lewm-cube",
+      "keys_to_cache": [],
+      "keys_to_load": [
+        "action"
+      ],
+      "keys_to_merge": {},
+      "lance": {
+        "image_codec": "jpeg",
+        "jpeg_quality": 100,
+        "manifest_suffix": ".manifest.json",
+        "minimum_pixel_verification_samples": 128,
+        "numeric_verification": {
+          "action": "exact",
+          "observation": "float32_cast_exact"
+        },
+        "source": {
+          "file": "cube_single_expert_chunk1.h5",
+          "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245",
+          "size_bytes": 74104077358
+        },
+        "stable_worldmodel_version": "0.1.1",
+        "suffix": ".lance"
+      },
+      "optimized_layout": {
+        "file": "cube_single_expert_chunk1.h5",
+        "lossless": true,
+        "pixels_chunk_frames": 1,
+        "sha256": "3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245"
+      }
+    },
+    "display_name": "Actor-Free TD-JEPA V1-C3 RP1 State-Value TD",
+    "environment": "cube",
+    "goal_sampling": {
+      "cross_episode_probability": 0.0,
+      "cross_episode_reason": "omitted_because_paper_does_not_specify_unreachable_label",
+      "distribution": "uniform_temporal_offset_over_available_horizon",
+      "goal_sampling_seed_offset": 470003,
+      "source": "same_episode_reachable_future_frozen_latent"
+    },
+    "id": "actor_free_td_lewm_v1_c3_cube_v1",
+    "image_preprocessing": {
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "size": 224,
+      "source": "stable_pretraining.data.dataset_stats.ImageNet",
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ]
+    },
+    "implementation_version": "v1",
+    "initialization": "v1_c_deployment_frozen_parent_plus_new_state_value",
+    "loader": {
+      "batch_size": 1024,
+      "frozen_latent_mmap": true,
+      "pin_memory": true,
+      "prefetch_factor": 2,
+      "sampling_unit": "block_boundary_anchor",
+      "train_drop_last": true,
+      "train_sampling": "random_with_replacement",
+      "transition_population": "unique_legal_td_rows_from_exact_v1_c_clip_split",
+      "validation_drop_last": false,
+      "validation_sampling": "sequential_without_replacement",
+      "validation_workers": 2,
+      "workers": 6
+    },
+    "logging": {
+      "flush_every_n_steps": 50,
+      "type": "csv"
+    },
+    "method": "actor_free_td_lewm_v1_c3",
+    "method_family": "actor_free_td_lewm_v1",
+    "model": {
+      "embed_dim": 192,
+      "encoder_size": "tiny",
+      "parameters": 18034628,
+      "patch_size": 14,
+      "predictor_depth": 6,
+      "predictor_dim_head": 64,
+      "predictor_dropout": 0.1,
+      "predictor_embedding_dropout": 0.0,
+      "predictor_heads": 16,
+      "predictor_mlp_dim": 2048,
+      "projector_hidden_dim": 2048
+    },
+    "objective": {
+      "bootstrap_branch": "discounted_primitive_step_cost_plus_ema_state_value",
+      "exact_goal_branch": "delta_if_goal_inside_n_step_backup",
+      "frozen_modules": [
+        "lewm_encoder",
+        "lewm_predictor",
+        "lewm_action_encoder",
+        "online_g",
+        "target_g"
+      ],
+      "name": "rp1_state_value_n_step_expectile_huber_td",
+      "target_gradient": "stop_gradient",
+      "trainable_modules": [
+        "state_critic"
+      ]
+    },
+    "objective_version": 1,
+    "optimizer": {
+      "critic_learning_rate": 0.001,
+      "final_learning_rate": 0.0001,
+      "learning_rate_source": "local_prelock_from_documented_rp1_critic_schedule",
+      "type": "AdamW",
+      "weight_decay": 0.0001
+    },
+    "pretrained_world_model": {
+      "checkpoint_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+      "frozen": true,
+      "source_epoch": 10,
+      "source_method": "lewm",
+      "source_seed": 3072
+    },
+    "runtime": {
+      "import": "import stable_worldmodel as swm",
+      "stable_worldmodel_version": "0.1.1"
+    },
+    "scheduler": {
+      "interval": "optimizer_step",
+      "type": "cosine_annealing"
+    },
+    "schema_version": 1,
+    "seeds": [
+      3072
+    ],
+    "sequence": {
+      "frame_skip": 5,
+      "history_frames": 3,
+      "num_steps": 19,
+      "prediction_frames": 1
+    },
+    "source_v1_c": {
+      "checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+      "deployment_checkpoint_version": 1,
+      "epoch_and_global_step": "reset",
+      "implementation_version": "v1",
+      "method": "actor_free_td_lewm_v1_c",
+      "method_family": "actor_free_td_lewm_v1",
+      "objective_version": 0,
+      "optimizer_state": "not_loaded",
+      "parameter_state": "strict_all_model_parameters_frozen",
+      "scheduler_state": "not_loaded",
+      "source_epoch": 10,
+      "source_global_step": 127960,
+      "source_seed": 3072,
+      "variant": "c"
+    },
+    "split": {
+      "exact_indices_artifact": "split_indices.npz",
+      "implementation": "inherited_v1_c_exact_split_artifact",
+      "seed_source": "training_seed",
+      "train_fraction": 0.9,
+      "unit": "sequence_clip",
+      "validation_fraction": 0.1
+    },
+    "stage": "full_training",
+    "state_critic": {
+      "action_input": "none",
+      "actor": "none",
+      "architecture": "rp1_mrn_quasimetric",
+      "backup_horizon_primitive_steps": 50,
+      "block_primitive_steps": 5,
+      "depth": 2,
+      "embedding_dim": 128,
+      "expectile": 0.03,
+      "gamma_per_primitive_step": 0.98,
+      "goal_identity_value": "exact_zero_by_architecture",
+      "hidden_dim": 256,
+      "huber_beta": 1.0,
+      "huber_beta_source": "local_prelock_paper_does_not_report",
+      "input": "current_and_goal_frozen_lewm_latents",
+      "output": "nonnegative_primitive_temporal_cost_to_go",
+      "state_dim": 192,
+      "target_ema_source": "nearest_documented_rp1_co_trained_critic_value",
+      "target_ema_update_rate": 0.005
+    },
+    "training": {
+      "checkpoint_every_epochs": 1,
+      "epochs": 12,
+      "gradient_clip_norm": 1.0,
+      "model_compile": false,
+      "optimizer_steps_per_epoch": 1000,
+      "precision": "bf16-mixed",
+      "resume": true,
+      "scheduler_epochs": 12,
+      "total_optimizer_steps": 12000
+    },
+    "validation": {
+      "delta_bins_primitive_steps": [
+        0,
+        10,
+        25,
+        50,
+        75
+      ],
+      "mc_target": "exact_same_episode_primitive_temporal_offset",
+      "metrics": [
+        "mc_mse",
+        "mc_mae",
+        "spearman",
+        "delta_binned_calibration",
+        "td_residual",
+        "goal_identity_value",
+        "monotonic_ranking_accuracy",
+        "finite_fraction"
+      ]
+    },
+    "variant": "c3"
+  },
+  "protocol_path": "/root/autodl-tmp/tdwm-v1-c3-33157d9/configs/experiment/actor_free_td_lewm_v1_c3_cube_train.yaml",
+  "protocol_sha256": "638a94abc9accbe9c044d23d269f8330954dcfcb7eb65df1d74796c44aabcbdd",
+  "runtime": {
+    "compatibility_adapter": {},
+    "cuda_device": "NVIDIA GeForce RTX 4080 SUPER",
+    "platform": "Linux-5.15.0-83-generic-x86_64-with-glibc2.35",
+    "python": "3.12.3",
+    "stable_worldmodel": "0.1.1",
+    "tdwm_git_revision": "33157d97ebfb0c0887a99db114262f05f837c5e4",
+    "torch": "2.8.0+cu128"
+  },
+  "seed": 3072,
+  "source_v1_c": {
+    "online_g_state_sha256": "b4c76f99e2ea1b3f73a9183a3f5b2add2d0d64c7f3c90c3714f3769312b617be",
+    "parent_checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_cg3_3c4e62e_20260830/c/seed_3072/checkpoints/actor_free_td_lewm_v1_c/c/epoch_10.pt",
+    "parent_checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+    "parent_epoch": 10,
+    "parent_global_step": 127960,
+    "parent_method": "actor_free_td_lewm_v1_c",
+    "predictor_config_sha256": "6b6d0645fcc8ccb172d9189fac1e2672eeec204ef5e829407d31f8425dcb0836",
+    "strategy": "strict_frozen_v1_c_epoch_10_parent",
+    "target_g_state_sha256": "54536191f4f795cb8320316316840b632ad53d0f715d81213a1239ea56f8a4df",
+    "world_model_state_sha256": "0ef286ac11ae41fbda29b97b781c0bf81332a5ceed1924d0d21d5756566bbe25"
+  },
+  "training": {
+    "batch_size": 1024,
+    "data_source": "frozen_latent_store",
+    "epochs": 12,
+    "formal_optimizer_steps": 12000,
+    "optimizer_steps_per_epoch": 1000,
+    "primitive_step_time_units": true,
+    "resumed_from": null,
+    "same_episode_goals_only": true
+  },
+  "variant": "c3"
+}

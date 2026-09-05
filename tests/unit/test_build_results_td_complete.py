@@ -130,6 +130,56 @@ def _tiny_png() -> bytes:
     )
 
 
+def _write_endpoint_training_fixture(root: Path) -> Path:
+    specifications = {
+        "v1_c2": (
+            10,
+            {
+                "train/loss_epoch": lambda epoch: 1000.0 - 10.0 * epoch,
+                "validation/loss": lambda epoch: 100.0 - 2.0 * epoch,
+                "train/first_q_alignment_loss_epoch": lambda epoch: 3.2
+                - 0.005 * epoch,
+                "train/first_q_alignment_top1_agreement_epoch": lambda epoch: 0.08
+                + 0.001 * epoch,
+            },
+        ),
+        "v1_c3": (
+            12,
+            {
+                "train/loss_epoch": lambda epoch: 0.4 - 0.005 * epoch,
+                "validation/loss": lambda epoch: 0.32 - 0.002 * epoch,
+                "validation/mc_mae": lambda epoch: 12.8 - 0.05 * epoch,
+                "validation/td_residual_mae": lambda epoch: 9.9 - 0.04 * epoch,
+                "validation/spearman": lambda epoch: 0.64 + 0.0005 * epoch,
+            },
+        ),
+    }
+    training_sources = {}
+    for method, (epoch_count, metrics) in specifications.items():
+        path = root / "training" / method / "metrics.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(
+                stream, fieldnames=("epoch", "step", *metrics), lineterminator="\n"
+            )
+            writer.writeheader()
+            for epoch in range(epoch_count):
+                writer.writerow(
+                    {
+                        "epoch": epoch,
+                        "step": (epoch + 1) * 100,
+                        **{name: function(epoch) for name, function in metrics.items()},
+                    }
+                )
+        training_sources[method] = {
+            "archive_directory": f"training/{method}",
+            "files_sha256": {"metrics.csv": hashlib.sha256(path.read_bytes()).hexdigest()},
+        }
+    ledger = root / "reconciliation_ledger.json"
+    ledger.write_text(json.dumps({"training_sources": training_sources}))
+    return ledger
+
+
 def _ledger_row(identity: tuple[str, str, int, str]) -> dict[str, str]:
     version, variant, epoch, mode = identity
     count = _success_count(version, variant, mode)
@@ -249,6 +299,65 @@ def test_missing_endpoint_ledger_produces_neutral_placeholders_only() -> None:
     assert counts[c3_index] == (None,) * 7
     assert matrix[c2_index][2:] == ("—",) * 7
     assert "尚未提供严格 endpoint ledger" in markdown
+
+
+def test_endpoint_training_metrics_are_hash_bound_complete_and_reported(
+    tmp_path: Path,
+) -> None:
+    ledger = _write_endpoint_training_fixture(tmp_path)
+    evidence = report.load_endpoint_training_evidence(ledger)
+
+    assert evidence is not None
+    assert evidence.c2_epochs == tuple(range(1, 11))
+    assert evidence.c3_epochs == tuple(range(1, 13))
+    assert evidence.c2_validation_loss[-1] == pytest.approx(82.0)
+    assert evidence.c3_spearman[-1] == pytest.approx(0.6455)
+    chart = report.build_endpoint_training_chart(evidence)
+    assert chart.startswith(b"\x89PNG\r\n\x1a\n")
+
+    markdown = report.build_markdown(
+        _cells(),
+        _ledger_evidence(),
+        _endpoint_cells_with_c3_outcomes(),
+        _c3_epoch3_diagnostic(),
+        endpoint_training_evidence=evidence,
+        endpoint_training_chart_path="figures/endpoint.png",
+    )
+    assert "First-Q ranking CE" in markdown
+    assert "figures/endpoint.png" in markdown
+    assert "自适应权重或梯度平衡" in markdown
+    assert "First-Q 为" in markdown and "First-Q2 为" in markdown
+    assert "stop-gradient 的 F-imagined states" in markdown
+    assert "McNemar" in markdown and "独立 dev pairs" in markdown
+
+
+def test_endpoint_training_metrics_fail_closed_on_malformed_declared_curve(
+    tmp_path: Path,
+) -> None:
+    ledger = _write_endpoint_training_fixture(tmp_path)
+    path = tmp_path / "training/v1_c2/metrics.csv"
+    rows = list(csv.DictReader(path.open(newline="", encoding="utf-8")))
+    rows[-1]["validation/loss"] = ""
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=rows[0], lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+    ledger_data = json.loads(ledger.read_text())
+    ledger_data["training_sources"]["v1_c2"]["files_sha256"]["metrics.csv"] = (
+        hashlib.sha256(path.read_bytes()).hexdigest()
+    )
+    ledger.write_text(json.dumps(ledger_data))
+
+    with pytest.raises(report.CompleteResultsError, match="missing logical epochs"):
+        report.load_endpoint_training_evidence(ledger)
+
+
+def test_endpoint_training_evidence_is_optional_when_not_declared(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "reconciliation_ledger.json"
+    ledger.write_text(json.dumps({"training_sources": {}}))
+    assert report.load_endpoint_training_evidence(ledger) is None
 
 
 def test_partial_endpoint_extension_is_rejected() -> None:
@@ -549,3 +658,51 @@ def test_docx_can_preserve_previous_reference_pages(tmp_path: Path) -> None:
     assert "PRESERVED PREVIOUS RESULTS TD CONTENT" in text
     assert "Complete 26-method, seven-score results and analysis" in text
     assert "How the seven evaluation methods are run" in text
+
+
+def test_docx_includes_endpoint_training_diagnostics_without_changing_master(
+    tmp_path: Path,
+) -> None:
+    from docx import Document
+
+    evidence = report.load_endpoint_training_evidence(
+        _write_endpoint_training_fixture(tmp_path)
+    )
+    assert evidence is not None
+    png = _tiny_png()
+    payload = report.build_docx(
+        _cells(),
+        _ledger_evidence(),
+        _endpoint_cells_with_c3_outcomes(),
+        c3_epoch3_diagnostic=_c3_epoch3_diagnostic(),
+        endpoint_training_evidence=evidence,
+        endpoint_training_chart=png,
+        v0_training_chart=png,
+        v2_training_chart=png,
+        training_chart=png,
+        score_chart=png,
+    )
+    document = Document(io.BytesIO(payload))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    headers = [[cell.text for cell in table.rows[0].cells] for table in document.tables]
+    master_header = [
+        "Version",
+        "Method",
+        "Training loss",
+        "F-only",
+        "G-only",
+        "F+G tail",
+        "First-Q",
+        "Mean-Q",
+        "First-Q2",
+        "State-V",
+    ]
+    master = document.tables[headers.index(master_header)]
+
+    assert "Endpoint interpretation and next steps" in text
+    assert "robust cross-readout ranking gain" in text
+    assert "held-out development pairs" in text
+    assert "V1-C2/C3 endpoint training evidence" in text
+    assert "adaptive or gradient-balanced weighting" in text
+    assert len(master.rows) == 27
+    assert all(len(row.cells) == 10 for row in master.rows)

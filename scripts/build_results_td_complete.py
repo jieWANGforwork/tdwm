@@ -68,6 +68,7 @@ DEFAULT_CHART_DIR = (
     REPOSITORY_ROOT
     / "reports/artifacts/actor_free_td_lewm_complete_cube_seed3072/figures"
 )
+ENDPOINT_TRAINING_CHART_FILENAME = "v1_c2_c3_training_validation_diagnostics.png"
 DEFAULT_V0_TRAINING_CSV = DEFAULT_LEDGER.parent / "v0_training_loss_curves.csv"
 DEFAULT_V2_TRAINING_CSV = DEFAULT_LEDGER.parent / "v2_training_loss_curves.csv"
 
@@ -315,6 +316,27 @@ class EndpointAnalysis:
     state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p: float | None
 
 
+@dataclass(frozen=True)
+class EndpointTrainingEvidence:
+    """Hash-bound C2/C3 epoch aggregates used by the endpoint diagnostic chart."""
+
+    c2_metrics_path: str
+    c2_metrics_sha256: str
+    c2_epochs: tuple[int, ...]
+    c2_train_loss: tuple[float, ...]
+    c2_validation_loss: tuple[float, ...]
+    c2_alignment_loss: tuple[float, ...]
+    c2_alignment_top1: tuple[float, ...]
+    c3_metrics_path: str
+    c3_metrics_sha256: str
+    c3_epochs: tuple[int, ...]
+    c3_train_loss: tuple[float, ...]
+    c3_validation_loss: tuple[float, ...]
+    c3_mc_mae: tuple[float, ...]
+    c3_td_residual_mae: tuple[float, ...]
+    c3_spearman: tuple[float, ...]
+
+
 def _sha(value: str, *, context: str, allow_empty: bool = False) -> str:
     value = value.strip()
     if allow_empty and value == "":
@@ -411,6 +433,235 @@ def load_ledger_evidence(csv_path: str | Path, json_path: str | Path) -> LedgerE
         json_sha256=_file_sha256(json_source),
         cell_count=csv_cell_count,
         outcome_count=sum(len(cell["outcomes"]) for cell in json_cells),
+    )
+
+
+def _load_epoch_metric_series(
+    path: Path,
+    *,
+    method_key: str,
+    expected_epoch_count: int,
+    columns: Sequence[str],
+) -> Mapping[str, tuple[float, ...]]:
+    """Load one finite epoch aggregate per required Lightning metric."""
+
+    context = f"endpoint training metrics {method_key}"
+    try:
+        with path.open(newline="", encoding="utf-8") as stream:
+            reader = csv.DictReader(stream)
+            fieldnames = tuple(reader.fieldnames or ())
+            rows = tuple(dict(row) for row in reader)
+    except (OSError, UnicodeError, csv.Error) as exc:
+        raise CompleteResultsError(f"{context} is unreadable: {path}.") from exc
+    required = {"epoch", *columns}
+    missing = sorted(required - set(fieldnames))
+    if missing:
+        raise CompleteResultsError(
+            f"{context} is missing required columns: {missing}."
+        )
+    if not rows:
+        raise CompleteResultsError(f"{context} contains no rows.")
+
+    expected_epochs = tuple(range(expected_epoch_count))
+    parsed: dict[str, tuple[float, ...]] = {}
+    for column in columns:
+        by_epoch: dict[int, float] = {}
+        for row_index, row in enumerate(rows):
+            raw_value = row.get(column, "")
+            if raw_value in (None, ""):
+                continue
+            raw_epoch = row.get("epoch", "")
+            if raw_epoch in (None, ""):
+                raise CompleteResultsError(
+                    f"{context} row {row_index} has {column} without an epoch."
+                )
+            epoch = _int(str(raw_epoch), context=f"{context}.epoch")
+            if epoch not in expected_epochs:
+                raise CompleteResultsError(
+                    f"{context}.{column} has out-of-range epoch {epoch}."
+                )
+            if epoch in by_epoch:
+                raise CompleteResultsError(
+                    f"{context}.{column} has duplicate aggregate at epoch {epoch + 1}."
+                )
+            by_epoch[epoch] = _float(
+                str(raw_value), context=f"{context}.{column}.epoch_{epoch + 1}"
+            )
+        if tuple(sorted(by_epoch)) != expected_epochs:
+            missing_epochs = [
+                epoch + 1 for epoch in expected_epochs if epoch not in by_epoch
+            ]
+            raise CompleteResultsError(
+                f"{context}.{column} is missing logical epochs {missing_epochs}."
+            )
+        parsed[column] = tuple(by_epoch[epoch] for epoch in expected_epochs)
+    return parsed
+
+
+def _require_metric_range(
+    values: Sequence[float],
+    *,
+    context: str,
+    lower: float,
+    upper: float | None = None,
+    lower_inclusive: bool = True,
+) -> None:
+    for value in values:
+        lower_ok = value >= lower if lower_inclusive else value > lower
+        upper_ok = upper is None or value <= upper
+        if not lower_ok or not upper_ok:
+            interval = (
+                f"{'[' if lower_inclusive else '('}{lower}, {upper}]"
+                if upper is not None
+                else f">{'=' if lower_inclusive else ''} {lower}"
+            )
+            raise CompleteResultsError(
+                f"{context} must stay in {interval}; found {value}."
+            )
+
+
+def load_endpoint_training_evidence(
+    endpoint_ledger_path: str | Path,
+) -> EndpointTrainingEvidence | None:
+    """Load C2/C3 curves only when both hash-bound training sources are declared.
+
+    The strict endpoint loader audits the archive as a whole.  This report-level
+    reader repeats the metrics-specific checks so a malformed, duplicated or
+    incomplete epoch aggregate can never be turned into a plausible-looking
+    chart.  An endpoint ledger with no declared training sources is valid but
+    produces no chart.
+    """
+
+    supplied = Path(endpoint_ledger_path).expanduser().resolve()
+    ledger_path = (
+        supplied / "reconciliation_ledger.json" if supplied.is_dir() else supplied
+    )
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise CompleteResultsError(
+            f"Endpoint extension ledger is unreadable: {ledger_path}."
+        ) from exc
+    if not isinstance(ledger, Mapping):
+        raise CompleteResultsError("Endpoint extension ledger root must be an object.")
+    raw_sources = ledger.get("training_sources")
+    if not isinstance(raw_sources, Mapping):
+        raise CompleteResultsError(
+            "Endpoint extension training_sources must be an object."
+        )
+    if not raw_sources:
+        return None
+    expected_methods = {"v1_c2", "v1_c3"}
+    if set(raw_sources) != expected_methods:
+        raise CompleteResultsError(
+            "Declared endpoint training sources must contain both v1_c2 and v1_c3."
+        )
+
+    metrics_paths: dict[str, Path] = {}
+    metrics_hashes: dict[str, str] = {}
+    for method_key in sorted(expected_methods):
+        source = raw_sources[method_key]
+        if not isinstance(source, Mapping):
+            raise CompleteResultsError(
+                f"Endpoint training source {method_key} must be an object."
+            )
+        expected_directory = f"training/{method_key}"
+        if source.get("archive_directory") != expected_directory:
+            raise CompleteResultsError(
+                f"Endpoint training source {method_key} must use {expected_directory}."
+            )
+        raw_hashes = source.get("files_sha256")
+        if not isinstance(raw_hashes, Mapping) or "metrics.csv" not in raw_hashes:
+            raise CompleteResultsError(
+                f"Endpoint training source {method_key} does not declare metrics.csv."
+            )
+        metrics_sha = _sha(
+            str(raw_hashes["metrics.csv"]),
+            context=f"endpoint training source {method_key}.metrics.csv",
+        )
+        metrics_path = ledger_path.parent / expected_directory / "metrics.csv"
+        if not metrics_path.is_file():
+            raise CompleteResultsError(
+                f"Declared endpoint training metrics are missing: {metrics_path}."
+            )
+        actual_sha = _file_sha256(metrics_path)
+        if actual_sha != metrics_sha:
+            raise CompleteResultsError(
+                f"Declared endpoint training metrics hash changed for {method_key}."
+            )
+        metrics_paths[method_key] = metrics_path
+        metrics_hashes[method_key] = metrics_sha
+
+    c2 = _load_epoch_metric_series(
+        metrics_paths["v1_c2"],
+        method_key="v1_c2",
+        expected_epoch_count=10,
+        columns=(
+            "train/loss_epoch",
+            "validation/loss",
+            "train/first_q_alignment_loss_epoch",
+            "train/first_q_alignment_top1_agreement_epoch",
+        ),
+    )
+    c3 = _load_epoch_metric_series(
+        metrics_paths["v1_c3"],
+        method_key="v1_c3",
+        expected_epoch_count=12,
+        columns=(
+            "train/loss_epoch",
+            "validation/loss",
+            "validation/mc_mae",
+            "validation/td_residual_mae",
+            "validation/spearman",
+        ),
+    )
+    for context, values in (
+        ("C2 train loss", c2["train/loss_epoch"]),
+        ("C2 validation loss", c2["validation/loss"]),
+        ("C2 alignment loss", c2["train/first_q_alignment_loss_epoch"]),
+        ("C3 train loss", c3["train/loss_epoch"]),
+        ("C3 validation loss", c3["validation/loss"]),
+    ):
+        _require_metric_range(
+            values, context=context, lower=0.0, lower_inclusive=False
+        )
+    for context, values in (
+        ("C3 MC MAE", c3["validation/mc_mae"]),
+        ("C3 TD residual MAE", c3["validation/td_residual_mae"]),
+    ):
+        _require_metric_range(values, context=context, lower=0.0)
+    _require_metric_range(
+        c2["train/first_q_alignment_top1_agreement_epoch"],
+        context="C2 First-Q top-1 agreement",
+        lower=0.0,
+        upper=1.0,
+    )
+    _require_metric_range(
+        c3["validation/spearman"],
+        context="C3 validation Spearman",
+        lower=-1.0,
+        upper=1.0,
+    )
+    return EndpointTrainingEvidence(
+        c2_metrics_path=_display_path(metrics_paths["v1_c2"]),
+        c2_metrics_sha256=metrics_hashes["v1_c2"],
+        c2_epochs=tuple(range(1, 11)),
+        c2_train_loss=c2["train/loss_epoch"],
+        c2_validation_loss=c2["validation/loss"],
+        c2_alignment_loss=c2["train/first_q_alignment_loss_epoch"],
+        c2_alignment_top1=c2[
+            "train/first_q_alignment_top1_agreement_epoch"
+        ],
+        c3_metrics_path=_display_path(metrics_paths["v1_c3"]),
+        c3_metrics_sha256=metrics_hashes["v1_c3"],
+        c3_epochs=tuple(range(1, 13)),
+        c3_train_loss=c3["train/loss_epoch"],
+        c3_validation_loss=c3["validation/loss"],
+        c3_mc_mae=c3["validation/mc_mae"],
+        c3_td_residual_mae=c3["validation/td_residual_mae"],
+        c3_spearman=c3["validation/spearman"],
     )
 
 
@@ -1481,11 +1732,202 @@ def build_training_chart_from_archive(path: str | Path, *, title: str) -> bytes:
     return v2_report._save_chart(image)
 
 
+def _linear_chart_scale(
+    values: Sequence[float],
+    *,
+    include_zero: bool = False,
+    percent: bool = False,
+) -> tuple[float, float, tuple[tuple[float, str], ...]]:
+    if not values or any(not math.isfinite(value) for value in values):
+        raise CompleteResultsError("Chart scale requires finite values.")
+    low = min(values)
+    high = max(values)
+    span = high - low
+    padding = span * 0.12 if span > 0 else max(abs(high) * 0.12, 0.1)
+    y_min = min(0.0, low - padding) if include_zero else low - padding
+    y_max = high + padding
+    if not y_max > y_min:
+        y_max = y_min + 1.0
+    ticks = []
+    for index in range(5):
+        value = y_min + index * (y_max - y_min) / 4
+        label = f"{value:.1f}%" if percent else f"{value:.3g}"
+        ticks.append((value, label))
+    return y_min, y_max, tuple(ticks)
+
+
+def _endpoint_training_summary_rows(
+    evidence: EndpointTrainingEvidence,
+) -> tuple[tuple[str, ...], ...]:
+    def relative_change(values: Sequence[float]) -> str:
+        start, end = float(values[0]), float(values[-1])
+        return f"{100.0 * (end / start - 1.0):+.1f}%"
+
+    def scalar_row(
+        method: str,
+        metric: str,
+        values: Sequence[float],
+        *,
+        digits: int,
+        change: str | None = None,
+    ) -> tuple[str, ...]:
+        return (
+            method,
+            metric,
+            f"{values[0]:.{digits}f}",
+            f"{values[-1]:.{digits}f}",
+            relative_change(values) if change is None else change,
+        )
+
+    c2_top1_delta = 100.0 * (
+        evidence.c2_alignment_top1[-1] - evidence.c2_alignment_top1[0]
+    )
+    c3_spearman_delta = evidence.c3_spearman[-1] - evidence.c3_spearman[0]
+    return (
+        scalar_row("V1-C2", "Train total loss", evidence.c2_train_loss, digits=2),
+        scalar_row(
+            "V1-C2", "Validation base TD loss", evidence.c2_validation_loss, digits=2
+        ),
+        scalar_row(
+            "V1-C2", "First-Q ranking CE", evidence.c2_alignment_loss, digits=4
+        ),
+        scalar_row(
+            "V1-C2",
+            "First-Q top-1 agreement",
+            tuple(100.0 * value for value in evidence.c2_alignment_top1),
+            digits=2,
+            change=f"{c2_top1_delta:+.2f} pp; random 6.25%",
+        ),
+        scalar_row("V1-C3", "Train TD loss", evidence.c3_train_loss, digits=4),
+        scalar_row(
+            "V1-C3", "Validation TD loss", evidence.c3_validation_loss, digits=4
+        ),
+        scalar_row("V1-C3", "Validation MC MAE", evidence.c3_mc_mae, digits=3),
+        scalar_row(
+            "V1-C3",
+            "Validation TD residual MAE",
+            evidence.c3_td_residual_mae,
+            digits=3,
+        ),
+        scalar_row(
+            "V1-C3",
+            "Validation Spearman",
+            evidence.c3_spearman,
+            digits=4,
+            change=f"{c3_spearman_delta:+.4f}",
+        ),
+    )
+
+
+def build_endpoint_training_chart(evidence: EndpointTrainingEvidence) -> bytes:
+    """Render one compact 2x2 C2/C3 convergence and calibration figure."""
+
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (2160, 1200), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text(
+        (70, 24),
+        "V1-C2 and V1-C3 training and validation diagnostics",
+        fill="#0B2545",
+        font=v2_report._chart_font(34, bold=True),
+    )
+
+    c2_loss_values = (
+        *evidence.c2_train_loss,
+        *evidence.c2_validation_loss,
+        *evidence.c2_alignment_loss,
+    )
+    log_min = math.floor(min(math.log10(value) for value in c2_loss_values))
+    log_max = math.ceil(max(math.log10(value) for value in c2_loss_values))
+    c2_log_ticks = tuple(
+        (10.0**power, f"1e{power}") for power in range(log_min, log_max + 1)
+    )
+    v2_report._draw_line_panel(
+        draw,
+        box=(45, 78, 1058, 618),
+        title="C2 loss scales",
+        x_values=evidence.c2_epochs,
+        series=(
+            ("Train", evidence.c2_train_loss, v2_report.CHART_COLORS[0]),
+            ("Val TD", evidence.c2_validation_loss, v2_report.CHART_COLORS[1]),
+            ("Rank CE", evidence.c2_alignment_loss, v2_report.CHART_COLORS[2]),
+        ),
+        y_min=10.0**log_min,
+        y_max=10.0**log_max,
+        y_ticks=c2_log_ticks,
+        y_transform=math.log10,
+        y_label="Loss (log scale)",
+    )
+
+    c2_top1 = tuple(100.0 * value for value in evidence.c2_alignment_top1)
+    c2_top1_values = (*c2_top1, 6.25)
+    y_min, y_max, ticks = _linear_chart_scale(c2_top1_values)
+    v2_report._draw_line_panel(
+        draw,
+        box=(1102, 78, 2115, 618),
+        title="C2 planner-ranking diagnostic",
+        x_values=evidence.c2_epochs,
+        series=(
+            ("Top-1", c2_top1, v2_report.CHART_COLORS[0]),
+            ("Random", (6.25,) * len(c2_top1), v2_report.CHART_COLORS[5]),
+        ),
+        y_min=y_min,
+        y_max=y_max,
+        y_ticks=ticks,
+        y_transform=lambda value: value,
+        y_label="Agreement (%)",
+    )
+
+    c3_loss_values = (*evidence.c3_train_loss, *evidence.c3_validation_loss)
+    y_min, y_max, ticks = _linear_chart_scale(c3_loss_values)
+    v2_report._draw_line_panel(
+        draw,
+        box=(45, 650, 1058, 1175),
+        title="C3 expectile-Huber TD loss",
+        x_values=evidence.c3_epochs,
+        series=(
+            ("Train", evidence.c3_train_loss, v2_report.CHART_COLORS[0]),
+            ("Validation", evidence.c3_validation_loss, v2_report.CHART_COLORS[1]),
+        ),
+        y_min=y_min,
+        y_max=y_max,
+        y_ticks=ticks,
+        y_transform=lambda value: value,
+        y_label="Loss",
+    )
+
+    c3_error_values = (*evidence.c3_mc_mae, *evidence.c3_td_residual_mae)
+    y_min, y_max, ticks = _linear_chart_scale(c3_error_values)
+    v2_report._draw_line_panel(
+        draw,
+        box=(1102, 650, 2115, 1175),
+        title="C3 validation error",
+        x_values=evidence.c3_epochs,
+        series=(
+            ("MC MAE", evidence.c3_mc_mae, v2_report.CHART_COLORS[0]),
+            ("TD MAE", evidence.c3_td_residual_mae, v2_report.CHART_COLORS[1]),
+        ),
+        y_min=y_min,
+        y_max=y_max,
+        y_ticks=ticks,
+        y_transform=lambda value: value,
+        y_label=(
+            f"MAE; Spearman {evidence.c3_spearman[0]:.3f} -> "
+            f"{evidence.c3_spearman[-1]:.3f}"
+        ),
+    )
+    return v2_report._save_chart(image)
+
+
 def build_markdown(
     cells: Sequence[ResultCell],
     ledger_evidence: LedgerEvidence,
     endpoint_cells: Sequence[Any] | None = None,
     c3_epoch3_diagnostic: Any | None = None,
+    *,
+    endpoint_training_evidence: EndpointTrainingEvidence | None = None,
+    endpoint_training_chart_path: str | None = None,
 ) -> str:
     analysis = _fixed_analysis(cells)
     endpoint_analysis = _endpoint_analysis(
@@ -1750,6 +2192,67 @@ def build_markdown(
                 f"C3 的同一组 50 个 pair 早期诊断为 E3 {endpoint_analysis.state_v_c3_epoch3_count}/50 ({endpoint_analysis.state_v_c3_epoch3_count * 2}%)，最终 endpoint 为 E12 {endpoint_analysis.state_v_c3_count}/50 ({endpoint_analysis.state_v_c3_count * 2}%)。配对列联为：两者均成功 {contingency['both_success']}、仅 E3 成功 {contingency['epoch3_only']}、仅 E12 成功 {contingency['epoch12_only']}、两者均失败 {contingency['both_failure']}；exact McNemar 双侧 p={endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p:.6g}。E3 只作为诊断，不进入 8-cell 主表或 endpoint 计数。",
                 "",
             ]
+        parent_f_only = int(
+            _find(
+                cells,
+                version="v1",
+                variant="c",
+                epoch=10,
+                mode="f_only",
+            )["success_count"]
+        )
+        parent_first_q = int(
+            _find(
+                cells,
+                version="v1",
+                variant="c",
+                epoch=10,
+                mode="f_plus_g_first",
+            )["success_count"]
+        )
+        assert endpoint_analysis.state_v_c3_count is not None
+        assert endpoint_analysis.first_q2_parent_count is not None
+        assert endpoint_analysis.first_q2_c2_count is not None
+        first_q_delta_pp = (
+            2 * endpoint_analysis.c2_shared_deltas["f_plus_g_first"]
+        )
+        first_q2_delta_pp = 2 * (
+            endpoint_analysis.first_q2_c2_count
+            - endpoint_analysis.first_q2_parent_count
+        )
+        c3_vs_f_pp = 2 * (
+            endpoint_analysis.state_v_c3_count - parent_f_only
+        )
+        c3_vs_first_q_pp = 2 * (
+            endpoint_analysis.state_v_c3_count - parent_first_q
+        )
+        lines += [
+            "#### Endpoint 专项解释与下一步",
+            "",
+            f"- **C2 的结果是混合的，而不是稳定的 ranking 增益。** 六种共享评分合计 {endpoint_analysis.c2_improved} 升 / {endpoint_analysis.c2_tied} 平 / {endpoint_analysis.c2_harmed} 降，平均变化 {endpoint_analysis.c2_mean_delta_percent:+.1f} pp；其中 First-Q 为 {first_q_delta_pp:+d} pp，First-Q2 为 {first_q2_delta_pp:+d} pp。即便个别格上升，单 seed 下也没有跨读出一致、可称为稳健的排序改善。",
+            f"- **C3 的最终 State-V 是 {endpoint_analysis.state_v_c3_count}/50。** 相对同一个 V1-C parent 的 F-only 为 {c3_vs_f_pp:+d} pp，相对 V1-C 的 First-Q 为 {c3_vs_first_q_pp:+d} pp；它说明独立时间价值读出有信号，但尚未稳定超过 parent 的最佳 first-action readout。",
+        ]
+        if (
+            endpoint_analysis.state_v_c3_epoch3_count is not None
+            and endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p
+            is not None
+        ):
+            p_value = (
+                endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p
+            )
+            significance = (
+                "没有达到常用 0.05 阈值"
+                if p_value >= 0.05
+                else "达到常用 0.05 阈值"
+            )
+            lines += [
+                f"- E3 与 E12 的同-pair exact McNemar p={p_value:.6g}，{significance}。因此不能在看过正式 O50 后把 E3 当成新的正式 endpoint；下一轮应在独立 dev pairs 上选择 epoch，或事先登记 early-stop 规则。",
+            ]
+        lines += [
+            "- C3 训练主要读取真实 encoder latent，推理却在 `F^5` imagined terminal latent 上读 State-V。下一轮应把 stop-gradient 的 F-imagined states 按受控比例混入 State-V 训练，直接缩小这一 terminal-state OOD 间隙。",
+            "- 以上比较均为一个 training seed 和同一组 50 pair 的描述性消融，不构成多 seed 总体最优或因果证明。",
+            "",
+        ]
     else:
         lines += [
             "V1-C First-Q2、V1-C2 的六种评分和 V1-C3 State-V 共 8 格尚未提供严格 endpoint ledger；主矩阵保留中性 `—`，本节不生成数值比较或改写原 477-cell 结论。",
@@ -1760,6 +2263,44 @@ def build_markdown(
         "",
         "训练总 loss 含不同辅助项，绝对数值不能直接给 C–G3 排名，只用于判断各自是否收敛。Legacy 与 V1 曲线保留在历史来源文档；V0、V2、V2-EMA 的逐 epoch 数值和全部 E3–E10 O50 轨迹继续保留在总账 artifacts 中，但不再塞进主结果表。",
         "",
+    ]
+    if endpoint_training_evidence is not None:
+        lines += [
+            "V1-C2/C3 的下表和图只读取 endpoint archive 中 hash-bound 的 `training/v1_c2/metrics.csv` 与 `training/v1_c3/metrics.csv`；每个必需指标每个 epoch 必须恰有一个有限 aggregate，否则报告构建失败。",
+            "",
+        ]
+        lines += _markdown_table(
+            ("方法", "指标", "首个 epoch", "最终 epoch", "变化"),
+            _endpoint_training_summary_rows(endpoint_training_evidence),
+        )
+        if endpoint_training_chart_path is not None:
+            lines += [
+                "",
+                f"![V1-C2 and V1-C3 training and validation diagnostics]({endpoint_training_chart_path})",
+            ]
+        c2_scale_ratio = 100.0 * (
+            endpoint_training_evidence.c2_alignment_loss[-1]
+            / endpoint_training_evidence.c2_train_loss[-1]
+        )
+        lines += [
+            "",
+            f"C2 的 validation base TD loss 从 {endpoint_training_evidence.c2_validation_loss[0]:.2f} 降至 {endpoint_training_evidence.c2_validation_loss[-1]:.2f}，但 First-Q ranking CE 仅从 {endpoint_training_evidence.c2_alignment_loss[0]:.4f} 到 {endpoint_training_evidence.c2_alignment_loss[-1]:.4f}，top-1 agreement 从 {100 * endpoint_training_evidence.c2_alignment_top1[0]:.2f}% 到 {100 * endpoint_training_evidence.c2_alignment_top1[-1]:.2f}%。E10 的 ranking CE 数值只相当于 train total loss 的 {c2_scale_ratio:.4f}%；这不能单独证明梯度不足，但与其几乎不动和 endpoint 无净增益一致。下一版应先做 loss 标准化，再使用自适应权重或梯度平衡，而不是继续固定权重 1。",
+            f"C3 的 validation TD loss 从 {endpoint_training_evidence.c3_validation_loss[0]:.4f} 降至 {endpoint_training_evidence.c3_validation_loss[-1]:.4f}，MC MAE 从 {endpoint_training_evidence.c3_mc_mae[0]:.3f} 到 {endpoint_training_evidence.c3_mc_mae[-1]:.3f}，TD residual MAE 从 {endpoint_training_evidence.c3_td_residual_mae[0]:.3f} 到 {endpoint_training_evidence.c3_td_residual_mae[-1]:.3f}，Spearman 从 {endpoint_training_evidence.c3_spearman[0]:.4f} 到 {endpoint_training_evidence.c3_spearman[-1]:.4f}。优化指标在缓慢改善，但正式控制 success 并未随训练后段单调提高，说明 value calibration 与 planner utility 仍需分开验证。",
+            "",
+            f"证据指纹：C2 `{endpoint_training_evidence.c2_metrics_path}` (`{endpoint_training_evidence.c2_metrics_sha256}`)；C3 `{endpoint_training_evidence.c3_metrics_path}` (`{endpoint_training_evidence.c3_metrics_sha256}`)。",
+            "",
+        ]
+    elif endpoint_analysis.available:
+        lines += [
+            "严格 endpoint 分数已接入，但 archive 没有同时声明 C2 与 C3 的训练 metrics；本报告不绘制或推断缺失的训练曲线。",
+            "",
+        ]
+    else:
+        lines += [
+            "尚未提供 endpoint ledger，因此 C2/C3 训练曲线保持缺失，不生成占位图或数值结论。",
+            "",
+        ]
+    lines += [
         "## 最佳训练方法与最佳测试评分",
         "",
         "### 固定 E10 四版本均值",
@@ -2075,8 +2616,6 @@ def _configure_primary_document(document: Any) -> None:
 
     from docx.enum.section import WD_ORIENT
     from docx.enum.style import WD_STYLE_TYPE
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Inches, Pt, RGBColor
 
@@ -2105,20 +2644,13 @@ def _configure_primary_document(document: Any) -> None:
     kicker.paragraph_format.space_before = Pt(4)
     kicker.paragraph_format.space_after = Pt(4)
 
-    v2_report._set_header_text(
+    _set_section_running_matter(
         section,
-        f"Results TD complete ledger · Cube O50 · {COMPLETE_CELL_COUNT} verified cells",
+        header_text=(
+            f"Results TD complete ledger · Cube O50 · {COMPLETE_CELL_COUNT} verified cells"
+        ),
+        footer_prefix="Complete fixed-E10 decision report · Page ",
     )
-    for footer in (section.footer, section.even_page_footer):
-        footer.is_linked_to_previous = False
-        paragraph = footer.paragraphs[0]
-        paragraph.text = ""
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        footer_run = paragraph.add_run("Complete fixed-E10 decision report · Page ")
-        v2_report._v1._set_run_font(footer_run, size=8.5, color="6B7280")
-        field = OxmlElement("w:fldSimple")
-        field.set(qn("w:instr"), "PAGE")
-        paragraph._p.append(field)
 
     core = document.core_properties
     core.title = "Results TD Complete Experiment Ledger"
@@ -2131,12 +2663,62 @@ def _configure_primary_document(document: Any) -> None:
     )
 
 
+def _set_section_running_matter(
+    section: Any, *, header_text: str, footer_prefix: str
+) -> None:
+    """Populate default, even and first-page headers for renderer consistency."""
+
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    for header in (
+        section.header,
+        section.even_page_header,
+        section.first_page_header,
+    ):
+        header.is_linked_to_previous = False
+        paragraph = header.paragraphs[0]
+        paragraph.text = ""
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        run = paragraph.add_run(header_text)
+        v2_report._v1._set_run_font(run, size=8.5, color="6B7280")
+    for footer in (
+        section.footer,
+        section.even_page_footer,
+        section.first_page_footer,
+    ):
+        footer.is_linked_to_previous = False
+        paragraph = footer.paragraphs[0]
+        paragraph.text = ""
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        run = paragraph.add_run(footer_prefix)
+        v2_report._v1._set_run_font(run, size=8.5, color="6B7280")
+        field = OxmlElement("w:fldSimple")
+        field.set(qn("w:instr"), "PAGE")
+        paragraph._p.append(field)
+
+
+def _use_minimal_appendix_running_matter(document: Any) -> None:
+    """Keep preserved pages intact and make every appended page style identical."""
+
+    for section in document.sections:
+        header_text = " ".join(
+            paragraph.text for paragraph in section.header.paragraphs
+        )
+        if not header_text.startswith("Results TD complete ledger"):
+            continue
+        _set_section_running_matter(section, header_text="", footer_prefix="")
+
+
 def build_docx(
     cells: Sequence[ResultCell],
     ledger_evidence: LedgerEvidence,
     endpoint_cells: Sequence[Any] | None = None,
     *,
     c3_epoch3_diagnostic: Any | None = None,
+    endpoint_training_evidence: EndpointTrainingEvidence | None = None,
+    endpoint_training_chart: bytes | None = None,
     v0_training_chart: bytes,
     v2_training_chart: bytes,
     training_chart: bytes,
@@ -2193,9 +2775,12 @@ def build_docx(
         # Preserve the previous Legacy and V0/V1 pages verbatim, then start a
         # fresh landscape section for the complete 477-cell decision report.
         v2_report._v1._configure_append_section(document)
-        v2_report._set_header_text(
+        _set_section_running_matter(
             document.sections[-1],
-            f"Results TD complete ledger · Cube O50 · {COMPLETE_CELL_COUNT} verified cells",
+            header_text=(
+                f"Results TD complete ledger · Cube O50 · {COMPLETE_CELL_COUNT} verified cells"
+            ),
+            footer_prefix="Validated result archive · Page ",
         )
         for paragraph in document.paragraphs:
             if paragraph.text.startswith("Locked protocol:"):
@@ -2359,7 +2944,6 @@ def build_docx(
     _add_heading(
         document,
         "26-method, seven-score master comparison and color legend",
-        page_break=True,
     )
     _add_body(
         document,
@@ -2500,6 +3084,76 @@ def build_docx(
                 f"p={endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p:.6g}. "
                 "E3 is diagnostic only and is excluded from the eight-cell master table.",
             )
+        parent_f_only = int(
+            _find(cells, version="v1", variant="c", epoch=10, mode="f_only")[
+                "success_count"
+            ]
+        )
+        parent_first_q = int(
+            _find(
+                cells,
+                version="v1",
+                variant="c",
+                epoch=10,
+                mode="f_plus_g_first",
+            )["success_count"]
+        )
+        assert endpoint_analysis.state_v_c3_count is not None
+        assert endpoint_analysis.first_q2_parent_count is not None
+        assert endpoint_analysis.first_q2_c2_count is not None
+        first_q_delta_pp = (
+            2 * endpoint_analysis.c2_shared_deltas["f_plus_g_first"]
+        )
+        first_q2_delta_pp = 2 * (
+            endpoint_analysis.first_q2_c2_count
+            - endpoint_analysis.first_q2_parent_count
+        )
+        _add_heading(document, "Endpoint interpretation and next steps", level=3)
+        _add_body(
+            document,
+            f"C2 is mixed across the six shared scores: {endpoint_analysis.c2_improved} "
+            f"up, {endpoint_analysis.c2_tied} tied and {endpoint_analysis.c2_harmed} "
+            f"down, with mean delta {endpoint_analysis.c2_mean_delta_percent:+.1f} pp. "
+            f"First-Q changes {first_q_delta_pp:+d} pp and First-Q2 changes "
+            f"{first_q2_delta_pp:+d} pp. This single-seed evidence does not establish "
+            "a robust cross-readout ranking gain.",
+            bold=True,
+        )
+        _add_body(
+            document,
+            f"Final C3 State-V changes "
+            f"{2 * (endpoint_analysis.state_v_c3_count - parent_f_only):+d} pp versus "
+            f"V1-C F-only and {2 * (endpoint_analysis.state_v_c3_count - parent_first_q):+d} "
+            "pp versus V1-C First-Q. Train State-V next on a controlled mixture of real "
+            "latents and stopped-gradient F-imagined terminal latents to reduce the "
+            "train/inference OOD gap.",
+        )
+        if (
+            endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p
+            is not None
+        ):
+            p_value = (
+                endpoint_analysis.state_v_c3_epoch3_vs_epoch12_exact_mcnemar_p
+            )
+            _add_body(
+                document,
+                f"The paired E3/E12 exact McNemar p-value is {p_value:.6g}. "
+                + (
+                    "It is not significant at 0.05, so E3 must not replace the final "
+                    "endpoint post hoc. Select epochs on held-out development pairs or "
+                    "pre-register the early-stop rule."
+                    if p_value >= 0.05
+                    else "Epoch selection must still use held-out development pairs or a "
+                    "pre-registered early-stop rule rather than the formal O50 set."
+                ),
+            )
+        _add_body(
+            document,
+            "All endpoint comparisons are descriptive: one training seed and the same 50 "
+            "formal pairs do not establish multi-seed superiority or causality.",
+            color="7A5A00",
+            bold=True,
+        )
     else:
         _add_body(
             document,
@@ -2769,7 +3423,8 @@ def build_docx(
         "Training totals are method-specific and cannot be ranked by absolute height. "
         "Use them only as within-method convergence diagnostics. The following charts "
         "show V0, V2 and V2-EMA; the preserved opening pages contain the Legacy and V1 "
-        "curves. All numeric rows and E3-E10 O50 trajectories remain in the companion ledgers.",
+        "curves. When hash-bound endpoint training metrics are present, the final compact "
+        "figure adds C2/C3 convergence and diagnostics.",
     )
     v2_report._add_picture(
         document,
@@ -2796,6 +3451,51 @@ def build_docx(
             title="Figure 4. V2-EMA First-Q and Mean-Q trajectories (E3-E10)",
             description="Formal O50 checkpoint trajectories for the two added evaluation scores across C, D, F, G1, G2 and G3.",
         )
+    if endpoint_training_evidence is not None:
+        _add_heading(document, "V1-C2/C3 endpoint training evidence", level=2)
+        _add_table(
+            document,
+            ("Method", "Metric", "First epoch", "Final epoch", "Change"),
+            _endpoint_training_summary_rows(endpoint_training_evidence),
+            (1900, 4100, 2600, 2600, 3200),
+        )
+        c2_scale_ratio = 100.0 * (
+            endpoint_training_evidence.c2_alignment_loss[-1]
+            / endpoint_training_evidence.c2_train_loss[-1]
+        )
+        _add_body(
+            document,
+            f"C2 ranking CE ends at {endpoint_training_evidence.c2_alignment_loss[-1]:.4f} "
+            f"versus train total {endpoint_training_evidence.c2_train_loss[-1]:.2f} "
+            f"({c2_scale_ratio:.4f}% by raw value), while top-1 agreement changes only "
+            f"from {100 * endpoint_training_evidence.c2_alignment_top1[0]:.2f}% to "
+            f"{100 * endpoint_training_evidence.c2_alignment_top1[-1]:.2f}%. This does "
+            "not prove a gradient-scale cause, but supports testing normalized losses and "
+            "adaptive or gradient-balanced weighting instead of another fixed weight.",
+            bold=True,
+        )
+        if endpoint_training_chart is not None:
+            figure_number = 5 if score_chart is not None else 4
+            v2_report._add_picture(
+                document,
+                endpoint_training_chart,
+                title=(
+                    f"Figure {figure_number}. V1-C2 and V1-C3 training, validation and "
+                    "diagnostic trajectories"
+                ),
+                description=(
+                    "C2 covers E1-E10 and C3 covers E1-E12. Loss magnitudes are only "
+                    "comparable within a method; C2 top-1 random reference is 6.25%."
+                ),
+            )
+    elif endpoint_analysis.available:
+        _add_body(
+            document,
+            "The strict endpoint scores are present, but the archive does not declare both "
+            "C2 and C3 training metrics. No training chart or inferred values are added.",
+            color="7A5A00",
+            bold=True,
+        )
 
     for version, modes, label in (
         ("v2", ORIGINAL_MODES, "V2"),
@@ -2810,11 +3510,26 @@ def build_docx(
             bold=True,
         )
         for index, mode in enumerate(modes):
+            if label == "V2-EMA" and mode == "f_plus_g":
+                v2_report._v1._configure_append_section(document)
+                _set_section_running_matter(
+                    document.sections[-1],
+                    header_text=(
+                        "Results TD complete ledger · Cube O50 · "
+                        f"{COMPLETE_CELL_COUNT} verified cells"
+                    ),
+                    footer_prefix="Validated result archive · Page ",
+                )
+            trajectory_heading = {
+                "f_plus_g": "F and G tail",
+                "f_plus_g_first": "F with first-Q",
+            }.get(mode, MODE_LABELS[mode])
             _add_heading(
                 document,
-                MODE_LABELS[mode],
+                trajectory_heading,
                 level=2,
-                page_break=index > 0,
+                page_break=index > 0
+                and not (label == "V2-EMA" and mode == "f_plus_g"),
             )
             _add_table(
                 document,
@@ -2844,6 +3559,14 @@ def build_docx(
         ("Method", "Score", "Mean", "Sigma pp", "Best", "E10"),
         _ema_new_stability_rows(cells),
         (1500, 3600, 2100, 2200, 2900, 2100),
+    )
+    v2_report._v1._configure_append_section(document)
+    _set_section_running_matter(
+        document.sections[-1],
+        header_text=(
+            f"Results TD complete ledger · Cube O50 · {COMPLETE_CELL_COUNT} verified cells"
+        ),
+        footer_prefix="Validated result archive · Page ",
     )
     _add_heading(document, "V2-EMA training variants", level=2)
     _add_table(
@@ -2903,6 +3626,8 @@ def build_docx(
             bold=True,
         )
 
+    if base_document is not None:
+        _use_minimal_appendix_running_matter(document)
     stream = io.BytesIO()
     document.save(stream)
     payload = stream.getvalue()
@@ -2963,6 +3688,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ledger_evidence = load_ledger_evidence(args.ledger, args.reconciliation_ledger)
     endpoint_cells: Sequence[Any] | None = None
     c3_epoch3_diagnostic: Any | None = None
+    endpoint_training_evidence: EndpointTrainingEvidence | None = None
     if args.endpoint_extension_ledger is not None:
         from tdwm.results.actor_free_td_lewm_v1_c2_c3 import (
             load_endpoint_extension,
@@ -2971,6 +3697,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         endpoint_extension = load_endpoint_extension(args.endpoint_extension_ledger)
         endpoint_cells = endpoint_extension.cells
         c3_epoch3_diagnostic = endpoint_extension.c3_epoch3_diagnostic
+        endpoint_training_evidence = load_endpoint_training_evidence(
+            args.endpoint_extension_ledger
+        )
     if args.validate_only:
         endpoint_message = (
             " and 8 strict endpoint cells"
@@ -2999,17 +3728,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     training_chart = v2_report.build_training_loss_chart(base_inputs)
     score_chart = v2_report.build_new_score_chart(base_inputs)
+    endpoint_training_chart = (
+        None
+        if endpoint_training_evidence is None
+        else build_endpoint_training_chart(endpoint_training_evidence)
+    )
+    chart_dir = Path(args.chart_dir)
+    endpoint_chart_path = chart_dir / ENDPOINT_TRAINING_CHART_FILENAME
     markdown = build_markdown(
         cells,
         ledger_evidence,
         endpoint_cells,
         c3_epoch3_diagnostic,
+        endpoint_training_evidence=endpoint_training_evidence,
+        endpoint_training_chart_path=(
+            None
+            if endpoint_training_chart is None
+            else _display_path(endpoint_chart_path)
+        ),
     )
     document = build_docx(
         cells,
         ledger_evidence,
         endpoint_cells,
         c3_epoch3_diagnostic=c3_epoch3_diagnostic,
+        endpoint_training_evidence=endpoint_training_evidence,
+        endpoint_training_chart=endpoint_training_chart,
         v0_training_chart=v0_training_chart,
         v2_training_chart=v2_training_chart,
         training_chart=training_chart,
@@ -3019,7 +3763,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     markdown_path = Path(args.markdown_output)
     docx_path = Path(args.docx_output)
     root_docx_path = Path(args.root_docx_output)
-    chart_dir = Path(args.chart_dir)
     _atomic_write(markdown_path, markdown.encode("utf-8"))
     _atomic_write(docx_path, document)
     _atomic_write(root_docx_path, document)
@@ -3027,6 +3770,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     _atomic_write(chart_dir / "v2_ema_new_score_trajectories.png", score_chart)
     _atomic_write(chart_dir / "v0_training_validation_loss.png", v0_training_chart)
     _atomic_write(chart_dir / "v2_training_validation_loss.png", v2_training_chart)
+    if endpoint_training_chart is not None:
+        _atomic_write(endpoint_chart_path, endpoint_training_chart)
     print(f"Wrote {markdown_path}")
     print(f"Wrote {docx_path}")
     print(f"Updated {root_docx_path}")

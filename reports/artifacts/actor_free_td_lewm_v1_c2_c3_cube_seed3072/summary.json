@@ -1,0 +1,174 @@
+{
+  "cell_count": 8,
+  "diagnostics": {
+    "v1_c3_epoch3_state_v": {
+      "cell": {
+        "action_normalization_sha256": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+        "cell_id": "v1__c3__state_v_terminal__e03_diagnostic",
+        "checkpoint_epoch": 3,
+        "checkpoint_global_step": 3000,
+        "checkpoint_path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c3_33157d9_20260905/seed_3072/checkpoints/actor_free_td_lewm_v1_c3/c3/epoch_03.pt",
+        "checkpoint_sha256": "fbd75f1cd555926f06615561a6aa13e03f825babfc2cc60cfbe9165cf6161021",
+        "evaluation_commit": "33157d97ebfb0c0887a99db114262f05f837c5e4",
+        "method": "actor_free_td_lewm_v1_c3",
+        "method_key": "v1_c3",
+        "outcomes": [
+          false,
+          true,
+          true,
+          false,
+          true,
+          true,
+          false,
+          true,
+          true,
+          false,
+          false,
+          false,
+          true,
+          true,
+          false,
+          false,
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false,
+          false,
+          true,
+          true,
+          false,
+          false,
+          false,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false,
+          true,
+          false,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true
+        ],
+        "parent_v1_c_checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+        "planning_seed": 42,
+        "raw_score_mode": "state_v_terminal",
+        "score_mode": "state_v",
+        "selection_ranks_sha256": "88c204770f33c0b0220057d45b187766e3cfc54912e3f5ca49f2aa93d16437e9",
+        "selection_sha256": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+        "source_directory": "diagnostics/v1__c3__state_v_terminal__e03_diagnostic",
+        "source_files_sha256": {
+          "action_normalization.json": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+          "episode_selection.json": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+          "protocol_manifest.json": "634c92de7cd23740c01b139cf25bb2dd04357cba9a4d344931b87973cf1a0e2a",
+          "results.json": "590c68aae5d458ae17538a6cc3bea52c226297c64184012ba3b1f8e9167b567d"
+        },
+        "success_count": 28,
+        "success_rate": 0.56,
+        "success_rate_percent": 56.0,
+        "training_seed": 3072,
+        "variant": "c3"
+      },
+      "excluded_from_endpoint_cell_count": true,
+      "paired_comparison_to_v1_c3_epoch12": {
+        "both_failure": 20,
+        "both_success": 24,
+        "discordant_pairs": 6,
+        "epoch12_only": 2,
+        "epoch12_success_count": 26,
+        "epoch3_only": 4,
+        "epoch3_success_count": 28,
+        "exact_mcnemar_p_two_sided": 0.6875,
+        "pair_count": 50
+      },
+      "purpose": "early_epoch_diagnostic_not_endpoint"
+    }
+  },
+  "matrix": {
+    "v1_c": {
+      "first_q2": {
+        "episodes": 50,
+        "success_count": 26,
+        "success_rate": 0.52,
+        "success_rate_percent": 52.0
+      }
+    },
+    "v1_c2": {
+      "f_only": {
+        "episodes": 50,
+        "success_count": 23,
+        "success_rate": 0.46,
+        "success_rate_percent": 46.0
+      },
+      "f_plus_g": {
+        "episodes": 50,
+        "success_count": 23,
+        "success_rate": 0.46,
+        "success_rate_percent": 46.0
+      },
+      "f_plus_g_first": {
+        "episodes": 50,
+        "success_count": 26,
+        "success_rate": 0.52,
+        "success_rate_percent": 52.0
+      },
+      "first_q2": {
+        "episodes": 50,
+        "success_count": 26,
+        "success_rate": 0.52,
+        "success_rate_percent": 52.0
+      },
+      "g_only": {
+        "episodes": 50,
+        "success_count": 18,
+        "success_rate": 0.36,
+        "success_rate_percent": 36.0
+      },
+      "g_only_f_rollout_mean": {
+        "episodes": 50,
+        "success_count": 22,
+        "success_rate": 0.44,
+        "success_rate_percent": 44.0
+      }
+    },
+    "v1_c3": {
+      "state_v": {
+        "episodes": 50,
+        "success_count": 26,
+        "success_rate": 0.52,
+        "success_rate_percent": 52.0
+      }
+    }
+  },
+  "methods": [
+    "v1_c",
+    "v1_c2",
+    "v1_c3"
+  ],
+  "outcome_count": 400,
+  "schema_version": 1,
+  "score_modes": [
+    "f_only",
+    "g_only",
+    "f_plus_g",
+    "f_plus_g_first",
+    "g_only_f_rollout_mean",
+    "first_q2",
+    "state_v"
+  ],
+  "source": "actor_free_td_lewm_v1_c2_c3_endpoint_extension"
+}

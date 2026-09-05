@@ -1,0 +1,16 @@
+{
+  "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c3_33157d9_20260905/seed_3072/checkpoints/actor_free_td_lewm_v1_c3/c3/epoch_12.pt",
+  "deployment_checkpoint_sha256": "5e240053d7c33fc016ef2ff64f3a4a79706dbe10dfde347d5c5f3cd45043e5b2",
+  "frozen_latent_store_manifest_sha256": "fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e",
+  "global_step": 12000,
+  "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c3_33157d9_20260905/seed_3072/checkpoints/lightning/last.ckpt",
+  "logical_epoch": 12,
+  "method": "actor_free_td_lewm_v1_c3",
+  "parent_state_hashes_verified": true,
+  "protocol_sha256": "638a94abc9accbe9c044d23d269f8330954dcfcb7eb65df1d74796c44aabcbdd",
+  "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c3_33157d9_20260905/seed_3072",
+  "seed": 3072,
+  "source_v1_c_checkpoint_sha256": "88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3",
+  "validation_metrics": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c3_33157d9_20260905/seed_3072/validation_offline_metrics.json",
+  "variant": "c3"
+}
