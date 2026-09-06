@@ -341,6 +341,42 @@ def markdown_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> lis
     return lines
 
 
+def _result_cell(cell: Mapping[str, Any]) -> str:
+    return (
+        f"{cell['success_count']}/50 ({cell['success_rate_percent']}%)\n"
+        f"New +{len(cell['new_rescues'])} · Lost {len(cell['lost_f_successes'])}"
+    )
+
+
+def result_matrix_rows(cells: Mapping[str, Mapping[str, Any]]) -> tuple[tuple[str, ...], ...]:
+    """Return the O25 matrix in the report's method-by-score orientation."""
+    baseline = cells["f_only"]
+    baseline_text = f"{baseline['success_count']}/50 ({baseline['success_rate_percent']}%)\nBaseline"
+    baseline_reference = f"{baseline['success_count']}/50 ({baseline['success_rate_percent']}%)*\nBaseline reference"
+    return (
+        (
+            "V1-C E10",
+            baseline_text,
+            _result_cell(cells["g_only"]),
+            _result_cell(cells["f_plus_g"]),
+            _result_cell(cells["first_q"]),
+            _result_cell(cells["mean_q"]),
+            _result_cell(cells["first_q2"]),
+            "—",
+        ),
+        (
+            "V1-C3 E12",
+            baseline_reference,
+            "—",
+            "—",
+            "—",
+            "—",
+            "—",
+            _result_cell(cells["c3"]),
+        ),
+    )
+
+
 def build_markdown_section(summary: Mapping[str, Any], outcomes: Mapping[str, Sequence[bool]], paired_sha256: str) -> str:
     cells = summary["cells"]
     selection = summary["selection"]
@@ -386,15 +422,35 @@ def build_markdown_section(summary: Mapping[str, Any], outcomes: Mapping[str, Se
             )
         )
     lines += markdown_table(("评分", "CEM 最小化 cost", "H/RH", "执行与状态来源"), score_rows)
-    lines += ["", "### 七种评分结果与 F-only 配对覆盖", "", "下表中‘救回’是 F-only 失败而该方法成功；‘丢失’是 F-only 成功而该方法失败；`F∪方法`是使用真实成功标签事后选择得到的 oracle，并非已实现的门控器。O50 仅作既有结果参照，不能与 O25 直接比较难度。", ""]
-    result_rows = []
-    for spec in CELL_SPECS:
-        cell = cells[spec.key]
-        result_rows.append((spec.label, cell["training_loss"], f"{cell['success_count']}/50 ({cell['success_rate_percent']}%)", f"{cell['historical_o50_count']}/50 ({cell['historical_o50_rate_percent']}%)", str(len(cell["retained_f_successes"])), str(len(cell["new_rescues"])), str(len(cell["lost_f_successes"])), str(len(cell["both_fail"])), f"{cell['delta_vs_f_pp']:+d} pp", f"{cell['f_or_method_count']}/50 ({cell['f_or_method_rate_percent']}%)"))
-    lines += markdown_table(("评分", "训练 loss", "O25", "同 scorer 既有 O50", "保留 F 成功", "新救回", "丢失 F 成功", "两者均失败", "相对 F", "F∪方法 oracle"), result_rows)
+    lines += [
+        "",
+        "### 方法 × 测试方法 O25 结果矩阵",
+        "",
+        "第一列是训练方法；后续各列都是测试方法。每个非 F-only 已测单元格依次写 O25 成绩、相对 F-only 的新成功数（New）和丢失数（Lost）。F-only 是比较基线，因此只写基线成绩，不计算也不显示 New/Lost；未测组合写 `—`。",
+        "",
+    ]
+    lines += markdown_table(
+        (
+            "方法 / checkpoint",
+            "F-only",
+            "G-only",
+            "F+G tail",
+            "First-Q alpha=.25",
+            "Mean-Q",
+            "First-Q2 alpha=.25",
+            "C3 State-V + First-Q2 alpha=.10",
+        ),
+        result_matrix_rows(cells),
+    )
+    lines += [
+        "",
+        "`New` = F-only 失败而该测试方法成功；`Lost` = F-only 成功而该测试方法失败。* C3 冻结并沿用 V1-C 的 F，因此 C3 行的 F-only 是同一条 37/50 基线引用，不是另一次独立重跑。",
+    ]
     lines += ["", "### F-only 成功与失败 pair", "", f"- F-only 成功 37 个：{', '.join(summary['f_success_pair_ids'])}", f"- F-only 失败 13 个：{', '.join(summary['f_failure_pair_ids'])}", "", "### 每种方法相对 F-only 的逐-pair 转移", ""]
     transition_rows = []
     for spec in CELL_SPECS:
+        if spec.key == "f_only":
+            continue
         cell = cells[spec.key]
         transition_rows.append((spec.label, ", ".join(cell["new_rescues"]) or "无", ", ".join(cell["lost_f_successes"]) or "无", ", ".join(cell["both_fail"]) or "无"))
     lines += markdown_table(("评分", "新救回 F 失败", "丢失 F 成功", "两者均失败"), transition_rows)
@@ -597,27 +653,42 @@ def build_docx(base_path: Path, summary: Mapping[str, Any], outcomes: Mapping[st
     )
     _format_table(table, helpers, font_size=7.8)
 
-    document.add_heading("Seven scores and paired coverage relative to F-only", level=2)
+    document.add_heading("Methods by inference score, relative to F-only", level=2)
     document.add_paragraph(
-        "The first six V1-C E10 rows are the earlier O25 supplement. The final "
-        "V1-C3 E12 row is this round's O25 test of the historical O50 62% scorer."
+        "Each row is one trained method/checkpoint; every following column is an "
+        "inference score. Each measured non-F-only cell reports O25 success, newly "
+        "successful pairs, and lost F-only successes. A dash means not evaluated."
     )
-    legend = document.add_paragraph("Yellow fill marks the highest standalone O25 result; blue fill marks the highest F OR method oracle. Retained means both F and the method succeed; rescue means F fails and the method succeeds; lost means F succeeds and the method fails.")
+    legend = document.add_paragraph(
+        "New = F-only fails and the score succeeds. Lost = F-only succeeds and the "
+        "score fails. F-only is the reference, so its cells show only the baseline "
+        "result and never show New or Lost."
+    )
     for run in legend.runs:
         helpers._set_run_font(run, size=9.5, color="374151", bold=True)
-    result_rows = []
-    for spec in CELL_SPECS:
-        cell = cells[spec.key]
-        result_rows.append((f"V1-{spec.variant.upper()} E{spec.epoch}", spec.label, cell["training_loss"], f"{cell['success_count']}/50\n{cell['success_rate_percent']}%", f"{cell['historical_o50_count']}/50\n{cell['historical_o50_rate_percent']}%", str(len(cell["retained_f_successes"])), str(len(cell["new_rescues"])), str(len(cell["lost_f_successes"])), str(len(cell["both_fail"])), f"{cell['delta_vs_f_pp']:+d} pp", f"{cell['f_or_method_count']}/50\n{cell['f_or_method_rate_percent']}%"))
-    table = helpers._add_table(document, headers=("Checkpoint", "Score", "Loss", "O25", "Prior O50", "Retained", "Rescued", "Lost", "Both fail", "Delta F", "F OR method"), rows=result_rows, widths=(1600, 3000, 800, 1100, 1100, 1000, 900, 900, 1000, 900, 2100))
-    _format_table(table, helpers, font_size=7.1, centered_from=2)
-    max_success = max(cells[spec.key]["success_count"] for spec in CELL_SPECS)
-    max_union = max(cells[spec.key]["f_or_method_count"] for spec in CELL_SPECS)
-    for row, spec in zip(table.rows[1:], CELL_SPECS):
-        if cells[spec.key]["success_count"] == max_success:
-            helpers._shade_cell(row.cells[3], "FFF2CC")
-        if cells[spec.key]["f_or_method_count"] == max_union:
-            helpers._shade_cell(row.cells[10], "DDEBF7")
+    table = helpers._add_table(
+        document,
+        headers=(
+            "Method / checkpoint",
+            "F-only",
+            "G-only",
+            "F+G tail",
+            "First-Q\nalpha=.25",
+            "Mean-Q",
+            "First-Q2\nalpha=.25",
+            "C3 State-V + First-Q2\nalpha=.10",
+        ),
+        rows=result_matrix_rows(cells),
+        widths=(1900, 1500, 1650, 1700, 1650, 1650, 1750, 2600),
+    )
+    _format_table(table, helpers, font_size=7.1, centered_from=1)
+    helpers._shade_cell(table.rows[2].cells[7], "FFF2CC")
+    footnote = document.add_paragraph(
+        "* C3 freezes and reuses V1-C's F. Its F-only cell is therefore the same "
+        "37/50 baseline reference, not a separate C3 F-only rerun."
+    )
+    for run in footnote.runs:
+        helpers._set_run_font(run, size=8.3, color="5C6975")
 
     document.add_heading("Exact F-only successes and failures", level=2)
     document.add_paragraph("F-only succeeds on 37 pairs: " + ", ".join(summary["f_success_pair_ids"]))

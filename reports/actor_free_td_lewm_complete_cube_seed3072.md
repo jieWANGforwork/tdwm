@@ -329,19 +329,16 @@ V1-C 的六种 O25 评分共享同一个 E10 checkpoint 与训练目标 `L_C=mea
 | First-Q2 alpha=.25 | J = Zcand(J_F) - .25 Zcand(Q_G(z0,A1,g)) | H5/RH5 | A1-A5 后重规划 |
 | C3 State-V + First-Q2 alpha=.10 | J = Zcand(Vbar(F^5,z_goal)) - .10 Zcand(Q_G(z0,A1,g)) | H5/RH5 | A1-A5 后重规划；EMA State-V 读 F imagined terminal，online G 读真实 z0 |
 
-### 七种评分结果与 F-only 配对覆盖
+### 方法 × 测试方法 O25 结果矩阵
 
-下表中‘救回’是 F-only 失败而该方法成功；‘丢失’是 F-only 成功而该方法失败；`F∪方法`是使用真实成功标签事后选择得到的 oracle，并非已实现的门控器。O50 仅作既有结果参照，不能与 O25 直接比较难度。
+第一列是训练方法；后续各列都是测试方法。每个非 F-only 已测单元格依次写 O25 成绩、相对 F-only 的新成功数（New）和丢失数（Lost）。F-only 是比较基线，因此只写基线成绩，不计算也不显示 New/Lost；未测组合写 `—`。
 
-| 评分 | 训练 loss | O25 | 同 scorer 既有 O50 | 保留 F 成功 | 新救回 | 丢失 F 成功 | 两者均失败 | 相对 F | F∪方法 oracle |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| F-only | L_C | 37/50 (74%) | 23/50 (46%) | 37 | 0 | 0 | 13 | +0 pp | 37/50 (74%) |
-| G-only | L_C | 29/50 (58%) | 18/50 (36%) | 26 | 3 | 11 | 10 | -16 pp | 40/50 (80%) |
-| F+G tail | L_C | 35/50 (70%) | 22/50 (44%) | 29 | 6 | 8 | 7 | -4 pp | 43/50 (86%) |
-| First-Q alpha=.25 | L_C | 36/50 (72%) | 28/50 (56%) | 34 | 2 | 3 | 11 | -2 pp | 39/50 (78%) |
-| Mean-Q rollout | L_C | 30/50 (60%) | 21/50 (42%) | 29 | 1 | 8 | 12 | -14 pp | 38/50 (76%) |
-| First-Q2 alpha=.25 | L_C | 35/50 (70%) | 26/50 (52%) | 33 | 2 | 4 | 11 | -4 pp | 39/50 (78%) |
-| C3 State-V + First-Q2 alpha=.10 | L_C3 | 38/50 (76%) | 31/50 (62%) | 32 | 6 | 5 | 7 | +2 pp | 43/50 (86%) |
+| 方法 / checkpoint | F-only | G-only | F+G tail | First-Q alpha=.25 | Mean-Q | First-Q2 alpha=.25 | C3 State-V + First-Q2 alpha=.10 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| V1-C E10 | 37/50 (74%)<br>Baseline | 29/50 (58%)<br>New +3 · Lost 11 | 35/50 (70%)<br>New +6 · Lost 8 | 36/50 (72%)<br>New +2 · Lost 3 | 30/50 (60%)<br>New +1 · Lost 8 | 35/50 (70%)<br>New +2 · Lost 4 | — |
+| V1-C3 E12 | 37/50 (74%)*<br>Baseline reference | — | — | — | — | — | 38/50 (76%)<br>New +6 · Lost 5 |
+
+`New` = F-only 失败而该测试方法成功；`Lost` = F-only 成功而该测试方法失败。* C3 冻结并沿用 V1-C 的 F，因此 C3 行的 F-only 是同一条 37/50 基线引用，不是另一次独立重跑。
 
 ### F-only 成功与失败 pair
 
@@ -352,7 +349,6 @@ V1-C 的六种 O25 评分共享同一个 E10 checkpoint 与训练目标 `L_C=mea
 
 | 评分 | 新救回 F 失败 | 丢失 F 成功 | 两者均失败 |
 | --- | --- | --- | --- |
-| F-only | 无 | 无 | P01, P02, P07, P08, P12, P15, P18, P20, P23, P25, P28, P32, P39 |
 | G-only | P08, P20, P23 | P06, P10, P13, P17, P24, P26, P27, P30, P42, P43, P47 | P01, P02, P07, P12, P15, P18, P25, P28, P32, P39 |
 | F+G tail | P01, P02, P08, P20, P23, P32 | P05, P10, P17, P27, P33, P37, P38, P46 | P07, P12, P15, P18, P25, P28, P39 |
 | First-Q alpha=.25 | P01, P08 | P10, P27, P47 | P02, P07, P12, P15, P18, P20, P23, P25, P28, P32, P39 |
