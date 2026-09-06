@@ -11,6 +11,7 @@ O50, and O100.
 from __future__ import annotations
 
 import argparse
+import itertools
 import math
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -68,6 +69,9 @@ EXPECTED_ACTION_NORMALIZATION_SHA256 = (
 )
 EXPECTED_GOAL_OFFSET_BY_PROTOCOL = {"o25": 25, "o50": 50, "o100": 100}
 EXPECTED_EPISODE_BUDGET_BY_PROTOCOL = {"o25": 50, "o50": 100, "o100": 200}
+PROTOCOL_COST_WEIGHTS = {"o25": 2, "o50": 3, "o100": 5}
+MAX_GLOBAL_JOBS_PER_GPU = 2
+MAX_PROTOCOL_JOBS_PER_GPU = 1
 
 
 def _alpha_for(score_mode: str) -> float | None:
@@ -526,6 +530,88 @@ def _protocol_groups(jobs: Sequence[Job]) -> dict[str, list[Job]]:
     return groups
 
 
+def resolve_cost_weighted_gpu_allocation(
+    *,
+    gpus: Sequence[str],
+    max_concurrency: int,
+) -> tuple[dict[str, int], dict[str, list[str]]]:
+    """Allocate formal slots by measured protocol cost without oversubscription.
+
+    O100 is the long pole, so the fixed 2:3:5 O25/O50/O100 cost weights bias
+    slots toward it.  A GPU may serve at most two protocol runners globally,
+    while each runner is limited to one active process per assigned GPU.
+    """
+
+    normalized_gpus = tuple(str(gpu) for gpu in gpus)
+    if len(normalized_gpus) < 2:
+        raise ValueError("C4 formal weighted dispatch requires at least two GPUs.")
+    if len(set(normalized_gpus)) != len(normalized_gpus):
+        raise ValueError("C4 formal GPU identifiers must be unique.")
+    if max_concurrency < len(PROTOCOL_LABELS):
+        raise ValueError(
+            "max_concurrency must be at least three so every protocol runs."
+        )
+    safe_capacity = MAX_GLOBAL_JOBS_PER_GPU * len(normalized_gpus)
+    if max_concurrency > safe_capacity:
+        raise ValueError(
+            "max_concurrency would exceed two jobs per GPU "
+            f"({max_concurrency} > {safe_capacity})."
+        )
+
+    per_protocol_capacity = min(len(SCORE_MODES), len(normalized_gpus))
+    candidates: list[tuple[tuple[int, int, int], dict[str, int]]] = []
+    weight_total = sum(PROTOCOL_COST_WEIGHTS.values())
+    for values in itertools.product(
+        range(1, per_protocol_capacity + 1), repeat=len(PROTOCOL_LABELS)
+    ):
+        if sum(values) != max_concurrency:
+            continue
+        slots = dict(zip(PROTOCOL_LABELS, values, strict=True))
+        proportional_error = sum(
+            (
+                slots[label] * weight_total
+                - max_concurrency * PROTOCOL_COST_WEIGHTS[label]
+            )
+            ** 2
+            for label in PROTOCOL_LABELS
+        )
+        # Stable ties keep capacity on the more expensive protocols.
+        score = (proportional_error, -slots["o100"], -slots["o50"])
+        candidates.append((score, slots))
+    if not candidates:
+        raise ValueError(
+            "The requested concurrency cannot be assigned safely across all "
+            "three protocols with one process per protocol/GPU pair."
+        )
+    slots = min(candidates, key=lambda item: item[0])[1]
+
+    gpu_index = {gpu: index for index, gpu in enumerate(normalized_gpus)}
+    gpu_load = {gpu: 0 for gpu in normalized_gpus}
+    gpu_groups: dict[str, list[str]] = {}
+    for label in sorted(
+        PROTOCOL_LABELS,
+        key=lambda item: (-PROTOCOL_COST_WEIGHTS[item], item),
+    ):
+        available = sorted(
+            (gpu for gpu in normalized_gpus if gpu_load[gpu] < 2),
+            key=lambda gpu: (gpu_load[gpu], gpu_index[gpu]),
+        )
+        assigned = available[: slots[label]]
+        if len(assigned) != slots[label]:
+            raise ValueError(f"No safe GPU allocation remains for {label}.")
+        gpu_groups[label] = assigned
+        for gpu in assigned:
+            gpu_load[gpu] += 1
+
+    if (
+        sum(slots.values()) != max_concurrency
+        or any(load > MAX_GLOBAL_JOBS_PER_GPU for load in gpu_load.values())
+        or any(len(set(group)) != len(group) for group in gpu_groups.values())
+    ):
+        raise AssertionError("Internal C4 weighted GPU allocation is unsafe.")
+    return slots, {label: gpu_groups[label] for label in PROTOCOL_LABELS}
+
+
 def _run_protocol_group(
     *,
     protocol_label: str,
@@ -537,6 +623,7 @@ def _run_protocol_group(
     gpus: Sequence[str],
     max_concurrency: int,
     poll_seconds: float,
+    allocation_metadata: Mapping[str, Any],
 ) -> int:
     plan = StagePlan(
         stage="formal",
@@ -555,6 +642,7 @@ def _run_protocol_group(
         output_root=output_root / "_protocol_runners" / protocol_label,
         gpus=gpus,
         max_concurrency=max_concurrency,
+        max_jobs_per_gpu=MAX_PROTOCOL_JOBS_PER_GPU,
         formal_selection=None,
         expected_selection_file_sha256=(
             EXPECTED_SELECTION_FILE_SHA256_BY_PROTOCOL[protocol_label]
@@ -562,6 +650,7 @@ def _run_protocol_group(
         poll_seconds=poll_seconds,
         job_output_validator=validate_c4_job_output,
         launcher_metadata={
+            **allocation_metadata,
             "launcher": "actor_free_td_lewm_v1_c4_formal_evaluations",
             "matrix_protocol_label": protocol_label,
             "evaluation_protocol": protocol_label.upper(),
@@ -588,49 +677,39 @@ def run_c4_formal_evaluations(
 ) -> int:
     """Run protocol groups concurrently without mixing their rank selections."""
 
-    if max_concurrency <= 0:
-        raise ValueError("max_concurrency must be positive.")
     groups = _protocol_groups(jobs)
-    maximum_parallel_groups = min(
-        len(PROTOCOL_LABELS),
-        max_concurrency,
-        len(gpus) if gpus else len(PROTOCOL_LABELS),
+    slots, gpu_groups = resolve_cost_weighted_gpu_allocation(
+        gpus=gpus,
+        max_concurrency=max_concurrency,
     )
-    labels = list(PROTOCOL_LABELS)
-    failed = False
-    for offset in range(0, len(labels), maximum_parallel_groups):
-        batch = labels[offset : offset + maximum_parallel_groups]
-        base_slots, extra_slots = divmod(max_concurrency, len(batch))
-        slots = {
-            label: base_slots + (index < extra_slots)
-            for index, label in enumerate(batch)
+    allocation_metadata = {
+        "dispatch_policy": "fixed_cost_weighted_2_3_5",
+        "protocol_cost_weights": dict(PROTOCOL_COST_WEIGHTS),
+        "protocol_slots": dict(slots),
+        "protocol_gpus": {label: list(values) for label, values in gpu_groups.items()},
+        "global_max_jobs_per_gpu": MAX_GLOBAL_JOBS_PER_GPU,
+        "protocol_max_jobs_per_gpu": MAX_PROTOCOL_JOBS_PER_GPU,
+    }
+    with ThreadPoolExecutor(max_workers=len(PROTOCOL_LABELS)) as executor:
+        futures = {
+            label: executor.submit(
+                _run_protocol_group,
+                protocol_label=label,
+                jobs=groups[label],
+                repository=repository,
+                dataset=dataset,
+                checkpoint_manifest=checkpoint_manifest,
+                output_root=output_root,
+                gpus=gpu_groups[label],
+                max_concurrency=slots[label],
+                poll_seconds=poll_seconds,
+                allocation_metadata=allocation_metadata,
+            )
+            for label in PROTOCOL_LABELS
         }
-        if gpus:
-            gpu_groups = {
-                label: list(gpus[index :: len(batch)])
-                for index, label in enumerate(batch)
-            }
-        else:
-            gpu_groups = {label: [] for label in batch}
-        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-            futures = {
-                label: executor.submit(
-                    _run_protocol_group,
-                    protocol_label=label,
-                    jobs=groups[label],
-                    repository=repository,
-                    dataset=dataset,
-                    checkpoint_manifest=checkpoint_manifest,
-                    output_root=output_root,
-                    gpus=gpu_groups[label],
-                    max_concurrency=slots[label],
-                    poll_seconds=poll_seconds,
-                )
-                for label in batch
-            }
-            failed = any(future.result() != 0 for future in futures.values()) or failed
-        if failed:
-            break
+        # Each child manifest records the complete static allocation through
+        # launcher metadata assembled in _run_protocol_group.
+        failed = any(future.result() != 0 for future in futures.values())
     return 1 if failed else 0
 
 
@@ -649,7 +728,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--gpus", nargs="*", default=())
-    parser.add_argument("--max-concurrency", type=int, default=1)
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=3,
+        help=(
+            "Global evaluation slots. With five GPUs use 10: O100/O50/O25 "
+            "receive 5/3/2 slots, with at most two jobs per GPU."
+        ),
+    )
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     return parser
 

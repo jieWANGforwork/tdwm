@@ -144,7 +144,7 @@ def test_checkpoint_manifest_dynamically_hashes_and_locks_new_c4_checkpoint(
         LAUNCHER.write_checkpoint_manifest(tmp_path, checkpoint=checkpoint)
 
 
-def test_c4_dispatch_reuses_shared_runner_per_protocol_and_total_capacity(
+def test_c4_cost_weighted_dispatch_uses_safe_five_three_two_capacity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     jobs = _jobs(tmp_path)
@@ -161,22 +161,75 @@ def test_c4_dispatch_reuses_shared_runner_per_protocol_and_total_capacity(
         dataset=tmp_path / "cube.lance",
         checkpoint_manifest=tmp_path / "checkpoint_manifest.json",
         output_root=tmp_path / "outputs",
-        gpus=("0", "1", "2"),
-        max_concurrency=6,
+        gpus=("0", "1", "2", "3", "4"),
+        max_concurrency=10,
         poll_seconds=0.0,
     )
 
     assert result == 0
     assert len(calls) == 3
-    assert sum(call["max_concurrency"] for call in calls) == 6
-    assert {call["launcher_metadata"]["matrix_protocol_label"] for call in calls} == {
-        "o25",
-        "o50",
-        "o100",
+    by_protocol = {
+        call["launcher_metadata"]["matrix_protocol_label"]: call for call in calls
     }
-    assert sorted(gpu for call in calls for gpu in call["gpus"]) == ["0", "1", "2"]
+    assert {label: call["max_concurrency"] for label, call in by_protocol.items()} == {
+        "o25": 2,
+        "o50": 3,
+        "o100": 5,
+    }
+    assert {label: call["gpus"] for label, call in by_protocol.items()} == {
+        "o25": ["3", "4"],
+        "o50": ["0", "1", "2"],
+        "o100": ["0", "1", "2", "3", "4"],
+    }
+    assert all(call["max_jobs_per_gpu"] == 1 for call in calls)
+    assert all(
+        call["launcher_metadata"]["global_max_jobs_per_gpu"] == 2 for call in calls
+    )
+    gpu_load = {
+        gpu: sum(gpu in call["gpus"] for call in calls)
+        for gpu in ("0", "1", "2", "3", "4")
+    }
+    assert gpu_load == {gpu: 2 for gpu in gpu_load}
     assert all(len(call["jobs"]) == 6 for call in calls)
-    assert all(call["job_output_validator"] is LAUNCHER.validate_c4_job_output for call in calls)
+    assert all(
+        call["job_output_validator"] is LAUNCHER.validate_c4_job_output
+        for call in calls
+    )
+
+
+@pytest.mark.parametrize(
+    ("gpus", "max_concurrency", "message"),
+    (
+        (("0",), 2, "at least two"),
+        (("0", "0"), 3, "unique"),
+        (("0", "1", "2", "3", "4"), 11, "two jobs per GPU"),
+        (("0", "1", "2"), 2, "at least three"),
+    ),
+)
+def test_c4_cost_weighted_dispatch_rejects_unsafe_capacity(
+    gpus: tuple[str, ...], max_concurrency: int, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        LAUNCHER.resolve_cost_weighted_gpu_allocation(
+            gpus=gpus,
+            max_concurrency=max_concurrency,
+        )
+
+
+def test_c4_cost_weighted_dispatch_scales_without_exceeding_two_per_gpu() -> None:
+    slots, groups = LAUNCHER.resolve_cost_weighted_gpu_allocation(
+        gpus=("0", "1", "2", "3", "4"),
+        max_concurrency=8,
+    )
+
+    assert slots == {"o25": 2, "o50": 2, "o100": 4}
+    assert sum(slots.values()) == 8
+    assert all(len(groups[label]) == slots[label] for label in slots)
+    assert all(len(set(groups[label])) == len(groups[label]) for label in slots)
+    assert all(
+        sum(gpu in group for group in groups.values()) <= 2
+        for gpu in ("0", "1", "2", "3", "4")
+    )
 
 
 def _write_valid_output(
@@ -343,12 +396,12 @@ def test_c4_main_builds_all_jobs_and_forwards_gpu_controls(
             "0",
             "1",
             "--max-concurrency",
-            "8",
+            "4",
         ]
     )
 
     assert result == 13
     assert len(captured["jobs"]) == 18
     assert captured["gpus"] == ["0", "1"]
-    assert captured["max_concurrency"] == 8
+    assert captured["max_concurrency"] == 4
     assert captured["checkpoint_manifest"].is_file()

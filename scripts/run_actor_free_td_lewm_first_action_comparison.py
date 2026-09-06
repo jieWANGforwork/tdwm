@@ -771,6 +771,7 @@ def _launcher_payload(
     jobs: Sequence[Job],
     gpus: Sequence[str],
     max_concurrency: int,
+    max_jobs_per_gpu: int | None = None,
     expected_selection_file_sha256: str | None = None,
     launcher_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -799,6 +800,7 @@ def _launcher_payload(
         "output_root": str(output_root),
         "gpus": list(gpus),
         "max_concurrency": max_concurrency,
+        "max_jobs_per_gpu": max_jobs_per_gpu,
         "expected_selection_file_sha256": expected_selection_file_sha256,
         "formal_disjointness_verified": False,
         "created_at": utc_now(),
@@ -829,6 +831,7 @@ def run_jobs(
     output_root: str | Path,
     gpus: Sequence[str],
     max_concurrency: int,
+    max_jobs_per_gpu: int | None = None,
     formal_selection: str | Path | None,
     expected_selection_file_sha256: str | None = None,
     poll_seconds: float,
@@ -839,6 +842,22 @@ def run_jobs(
 ) -> int:
     if max_concurrency <= 0:
         raise ValueError("max_concurrency must be positive.")
+    normalized_gpus = tuple(str(gpu) for gpu in gpus)
+    if max_jobs_per_gpu is not None:
+        if max_jobs_per_gpu <= 0:
+            raise ValueError("max_jobs_per_gpu must be positive when provided.")
+        if not normalized_gpus:
+            raise ValueError("max_jobs_per_gpu requires explicit GPU identifiers.")
+        if len(set(normalized_gpus)) != len(normalized_gpus):
+            raise ValueError(
+                "GPU identifiers must be unique when max_jobs_per_gpu is set."
+            )
+        safe_capacity = len(normalized_gpus) * max_jobs_per_gpu
+        if max_concurrency > safe_capacity:
+            raise ValueError(
+                "max_concurrency exceeds the explicit per-GPU job capacity "
+                f"({max_concurrency} > {safe_capacity})."
+            )
     if poll_seconds < 0.0:
         raise ValueError("poll_seconds must be non-negative.")
     if formal_selection is not None and plan.stage != "development":
@@ -873,8 +892,9 @@ def run_jobs(
         checkpoint_manifest=checkpoint_manifest_path,
         output_root=output_root_path,
         jobs=jobs,
-        gpus=gpus,
+        gpus=normalized_gpus,
         max_concurrency=max_concurrency,
+        max_jobs_per_gpu=max_jobs_per_gpu,
         expected_selection_file_sha256=expected_selection_sha,
         launcher_metadata=launcher_metadata,
     )
@@ -886,17 +906,39 @@ def run_jobs(
     evidence: dict[str, dict[str, Any]] = {}
     failed = False
     launched = 0
+    gpu_cursor = 0
 
     try:
         while pending or active:
             while pending and len(active) < max_concurrency and not failed:
+                gpu: str | None = None
+                if normalized_gpus:
+                    if max_jobs_per_gpu is None:
+                        gpu = normalized_gpus[launched % len(normalized_gpus)]
+                    else:
+                        occupancy = {
+                            candidate: sum(
+                                running.gpu == candidate for running in active.values()
+                            )
+                            for candidate in normalized_gpus
+                        }
+                        for offset in range(len(normalized_gpus)):
+                            index = (gpu_cursor + offset) % len(normalized_gpus)
+                            candidate = normalized_gpus[index]
+                            if occupancy[candidate] < max_jobs_per_gpu:
+                                gpu = candidate
+                                gpu_cursor = (index + 1) % len(normalized_gpus)
+                                break
+                        if gpu is None:
+                            # All explicitly assigned GPU slots are occupied.  Poll
+                            # for a completion instead of oversubscribing a device.
+                            break
                 job = pending.pop(0)
                 output = Path(job.output_dir)
                 output.mkdir(parents=True, exist_ok=False)
                 log_path = Path(job.log_path)
                 log_path.parent.mkdir(parents=True, exist_ok=True)
                 log_handle = log_path.open("x", encoding="utf-8")
-                gpu = str(gpus[launched % len(gpus)]) if gpus else None
                 environment = os.environ.copy()
                 if gpu is not None:
                     environment["CUDA_VISIBLE_DEVICES"] = gpu

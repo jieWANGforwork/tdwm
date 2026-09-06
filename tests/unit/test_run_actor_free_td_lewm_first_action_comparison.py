@@ -603,6 +603,7 @@ def test_scheduler_runs_in_parallel_and_writes_logs_manifest_and_evidence(
         output_root=tmp_path / "comparison",
         gpus=("0", "1"),
         max_concurrency=2,
+        max_jobs_per_gpu=1,
         formal_selection=None,
         poll_seconds=0.0,
         popen=fake_popen,
@@ -617,9 +618,106 @@ def test_scheduler_runs_in_parallel_and_writes_logs_manifest_and_evidence(
     assert manifest["inference_only"] is True
     assert manifest["training_performed"] is False
     assert manifest["alpha_selection_performed"] is False
+    assert manifest["max_jobs_per_gpu"] == 1
     assert manifest["formal_disjointness_verified"] is False
     assert "does not claim" in manifest["note"]
     assert manifest["selection"]["identical_across_all_jobs"] is True
     assert all(value["state"] == "SUCCEEDED" for value in manifest["jobs"].values())
     for job in jobs:
         assert Path(job.log_path).read_text() == f"completed {job.job_id}\n"
+
+
+def test_scheduler_reuses_only_the_gpu_slot_that_actually_finished(
+    tmp_path: Path,
+) -> None:
+    checkpoint_manifest, plan, jobs = _jobs(
+        tmp_path,
+        stage="development",
+        variants=("c",),
+        alphas=(0.5,),
+    )
+    by_output = {job.output_dir: job for job in jobs}
+    occupancy = {"0": 0, "1": 0}
+    assignments: list[str] = []
+
+    class TrackedProcess:
+        next_pid = 80_000
+
+        def __init__(self, gpu: str, remaining_polls: int) -> None:
+            self.pid = type(self).next_pid
+            type(self).next_pid += 1
+            self.gpu = gpu
+            self.remaining_polls = remaining_polls
+            self.finished = False
+            occupancy[gpu] += 1
+            assert occupancy[gpu] == 1
+
+        def poll(self) -> int | None:
+            if self.remaining_polls:
+                self.remaining_polls -= 1
+                return None
+            if not self.finished:
+                occupancy[self.gpu] -= 1
+                self.finished = True
+            return 0
+
+    def fake_popen(argv: list[str], **kwargs: object) -> TrackedProcess:
+        output = argv[argv.index("--output-dir") + 1]
+        _write_job_output(by_output[output])
+        gpu = kwargs["env"]["CUDA_VISIBLE_DEVICES"]
+        assignments.append(gpu)
+        remaining_polls = 2 if len(assignments) == 1 else 0
+        return TrackedProcess(gpu, remaining_polls)
+
+    code = COMPARISON.run_jobs(
+        jobs=jobs,
+        plan=plan,
+        repository=ROOT,
+        dataset=tmp_path / "cube.lance",
+        checkpoint_manifest=checkpoint_manifest,
+        output_root=tmp_path / "bounded-comparison",
+        gpus=("0", "1"),
+        max_concurrency=2,
+        max_jobs_per_gpu=1,
+        formal_selection=None,
+        poll_seconds=0.0,
+        popen=fake_popen,
+        sleeper=lambda _: None,
+    )
+
+    assert code == 0
+    assert assignments == ["0", "1", "1"]
+    assert occupancy == {"0": 0, "1": 0}
+
+
+@pytest.mark.parametrize(
+    ("gpus", "max_concurrency", "max_jobs_per_gpu", "message"),
+    (
+        (("0", "0"), 2, 1, "unique"),
+        (("0", "1"), 3, 1, "per-GPU job capacity"),
+        ((), 1, 1, "requires explicit GPU"),
+        (("0",), 1, 0, "must be positive"),
+    ),
+)
+def test_scheduler_rejects_unsafe_explicit_per_gpu_limits(
+    tmp_path: Path,
+    gpus: tuple[str, ...],
+    max_concurrency: int,
+    max_jobs_per_gpu: int,
+    message: str,
+) -> None:
+    _, plan, _ = _jobs(tmp_path, stage="smoke", variants=("c",))
+    with pytest.raises(ValueError, match=message):
+        COMPARISON.run_jobs(
+            jobs=(),
+            plan=plan,
+            repository=ROOT,
+            dataset=tmp_path / "cube.lance",
+            checkpoint_manifest=tmp_path / "checkpoint.json",
+            output_root=tmp_path / "unsafe",
+            gpus=gpus,
+            max_concurrency=max_concurrency,
+            max_jobs_per_gpu=max_jobs_per_gpu,
+            formal_selection=None,
+            poll_seconds=0.0,
+        )
