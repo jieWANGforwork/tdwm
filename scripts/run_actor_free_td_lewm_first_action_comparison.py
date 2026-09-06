@@ -617,9 +617,17 @@ def validate_job_output(
                 raise ValueError(
                     f"{job.job_id} rollout-mean {label} contains first-action alpha."
                 )
-        for key, expected in ROLLOUT_MEAN_INFERENCE_METADATA_BY_VERSION[
-            job.version
-        ].items():
+        expected_inference_metadata = dict(
+            ROLLOUT_MEAN_INFERENCE_METADATA_BY_VERSION[job.version]
+        )
+        if planning.get("receding_horizon") == 5:
+            expected_inference_metadata.update(
+                {
+                    "executed_action_block": "all_five_blocks",
+                    "replanning": "every_five_action_blocks",
+                }
+            )
+        for key, expected in expected_inference_metadata.items():
             if inference.get(key) != expected:
                 raise ValueError(
                     f"{job.job_id} inference.{key}={inference.get(key)!r}, "
@@ -764,8 +772,9 @@ def _launcher_payload(
     gpus: Sequence[str],
     max_concurrency: int,
     expected_selection_file_sha256: str | None = None,
+    launcher_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": 1,
         "launcher": "actor_free_td_lewm_first_action_comparison",
         "inference_only": True,
@@ -800,6 +809,14 @@ def _launcher_payload(
             for job in jobs
         },
     }
+    if launcher_metadata is not None:
+        overlap = (set(payload) & set(launcher_metadata)) - {"launcher"}
+        if overlap:
+            raise ValueError(
+                f"launcher_metadata cannot replace existing fields: {sorted(overlap)}"
+            )
+        payload.update(dict(launcher_metadata))
+    return payload
 
 
 def run_jobs(
@@ -815,6 +832,8 @@ def run_jobs(
     formal_selection: str | Path | None,
     expected_selection_file_sha256: str | None = None,
     poll_seconds: float,
+    job_output_validator: Callable[..., dict[str, Any]] = validate_job_output,
+    launcher_metadata: Mapping[str, Any] | None = None,
     popen: Callable[..., Any] = subprocess.Popen,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> int:
@@ -857,6 +876,7 @@ def run_jobs(
         gpus=gpus,
         max_concurrency=max_concurrency,
         expected_selection_file_sha256=expected_selection_sha,
+        launcher_metadata=launcher_metadata,
     )
     payload["status"] = "RUNNING"
     atomic_write_json(manifest_path, payload)
@@ -929,7 +949,7 @@ def run_jobs(
                     failed = True
                     continue
                 try:
-                    job_evidence = validate_job_output(
+                    job_evidence = job_output_validator(
                         running.job,
                         expected_selection_file_sha256=expected_selection_sha,
                     )

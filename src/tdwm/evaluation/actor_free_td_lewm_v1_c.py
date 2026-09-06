@@ -16,6 +16,7 @@ from tdwm.adapters.actor_free_td_lewm_v1_c import (
     make_actor_free_td_lewm_v1_c_policy,
 )
 from tdwm.evaluation.frozen_actor_free_td_v1_common import (
+    FORMAL_O25_PLANNING,
     FORMAL_O50_PLANNING,
     configure_frozen_actor_free_td_v1_evaluation_mode,
     evaluate_frozen_actor_free_td_v1,
@@ -54,6 +55,7 @@ def evaluate_actor_free_td_lewm_v1_c(**kwargs) -> dict[str, Any]:
 
 __all__ = [
     "DEPLOYMENT_CHECKPOINT_VERSION",
+    "FORMAL_O25_PLANNING",
     "FORMAL_O50_PLANNING",
     "IMPLEMENTATION_VERSION",
     "METHOD",

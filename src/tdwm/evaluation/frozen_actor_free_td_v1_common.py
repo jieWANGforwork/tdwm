@@ -1,4 +1,4 @@
-"""Controlled Cube O50 evaluation for Actor-Free TD-LeWM V1 methods.
+"""Controlled Cube O25/O50 evaluation for Actor-Free TD-LeWM V1 methods.
 
 V1 is evaluated independently from the V0 raw-action predictor.
 Every C--G3 checkpoint deploys the same single symmetric goal-conditioned
@@ -77,6 +77,16 @@ FORMAL_O50_PLANNING = {
     "solver_batch_size": 1,
     "warm_start": True,
     "initial_distribution": "cem_gaussian_no_actor",
+}
+FORMAL_O25_PLANNING = {
+    **FORMAL_O50_PLANNING,
+    "receding_horizon": 5,
+    "episode_budget": 50,
+    "executed_environment_steps_before_replanning": 25,
+}
+FORMAL_EVALUATION_BY_PROTOCOL = {
+    "o25": {"episodes": 50, "goal_offset": 25},
+    "o50": {"episodes": 50, "goal_offset": 50},
 }
 FORMAL_HORIZON_BY_SCORE_MODE = {
     "f_only": 5,
@@ -173,6 +183,59 @@ def validate_v1_score_mode(score_mode: str) -> str:
     return score_mode
 
 
+def v1_evaluation_protocol_label(protocol: Mapping[str, Any]) -> str:
+    """Identify one exact formal V1 O25 or O50 evaluation envelope."""
+
+    evaluation = protocol.get("evaluation")
+    planning = protocol.get("planning")
+    if not isinstance(evaluation, Mapping) or not isinstance(planning, Mapping):
+        raise ValueError("V1 evaluation requires evaluation and planning mappings.")
+    observed = {
+        "episodes": evaluation.get("episodes"),
+        "goal_offset": evaluation.get("goal_offset"),
+        "episode_budget": planning.get("episode_budget"),
+    }
+    if any(type(value) is not int for value in observed.values()):
+        raise ValueError("Formal V1 evaluation counts must be exact integers.")
+    for label, expected_evaluation in FORMAL_EVALUATION_BY_PROTOCOL.items():
+        expected_budget = 50 if label == "o25" else 100
+        if observed == {**expected_evaluation, "episode_budget": expected_budget}:
+            return label
+    raise ValueError(
+        "Actor-Free TD-LeWM V1 accepts only the exact formal Cube O25/50 "
+        "or O50/50 evaluation protocol."
+    )
+
+
+def _execution_metadata(planning: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        receding_horizon = int(planning["receding_horizon"])
+        action_block = int(planning["action_block"])
+        horizon = int(planning["horizon"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("V1 execution metadata requires integer planning fields.") from error
+    if receding_horizon == 1:
+        executed_action_block = "first_block_only"
+        replanning = "every_action_block"
+        cem_execution = "execute_A1_from_minimum_total_cost_plan"
+    elif receding_horizon == 5 and horizon == 5:
+        executed_action_block = "all_five_blocks"
+        replanning = "every_five_action_blocks"
+        cem_execution = "execute_A1_through_A5_from_minimum_total_cost_plan"
+    else:
+        raise ValueError("Unsupported V1 execution/replanning cadence.")
+    return {
+        "receding_horizon": receding_horizon,
+        "executed_action_blocks_before_replanning": receding_horizon,
+        "executed_environment_steps_before_replanning": (
+            receding_horizon * action_block
+        ),
+        "executed_action_block": executed_action_block,
+        "replanning": replanning,
+        "cem_execution": cem_execution,
+    }
+
+
 def _resolve_g_first_weight(
     protocol: Mapping[str, Any],
     *,
@@ -256,6 +319,25 @@ def _configure_rollout_mean_score(
         inference["g_score"] = LEGACY_G_SCORE
 
 
+def _configure_execution_contract(protocol: dict[str, Any]) -> None:
+    planning = protocol.setdefault("planning", {})
+    inference = protocol.setdefault("inference_objective", {})
+    execution = _execution_metadata(planning)
+    inference["replanning"] = execution["replanning"]
+    definition = inference.get("score_definition")
+    if isinstance(definition, dict):
+        if inference.get("score_mode") in FIRST_ACTION_SCORE_MODES:
+            definition["cem_execution"] = execution["cem_execution"]
+        elif inference.get("score_mode") == ROLLOUT_MEAN_SCORE_MODE:
+            definition["executed_action_block"] = execution[
+                "executed_action_block"
+            ]
+            definition["replanning"] = execution["replanning"]
+            inference["executed_action_block"] = execution[
+                "executed_action_block"
+            ]
+
+
 def _first_action_output_metadata(
     protocol: Mapping[str, Any],
     planning: Mapping[str, Any],
@@ -279,6 +361,7 @@ def _rollout_mean_output_metadata(
     inference = protocol.get("inference_objective", {})
     if inference.get("score_mode") != ROLLOUT_MEAN_SCORE_MODE:
         return {}
+    execution = _execution_metadata(planning)
     return {
         "g_aggregation": inference["g_aggregation"],
         "state_source_for_q1": inference["state_source_for_q1"],
@@ -287,8 +370,8 @@ def _rollout_mean_output_metadata(
         "f_transition_used": True,
         "planning_horizon": planning["horizon"],
         "rollout_horizon": planning["horizon"],
-        "executed_action_block": "first_block_only",
-        "replanning": "every_action_block",
+        "executed_action_block": execution["executed_action_block"],
+        "replanning": execution["replanning"],
         "score_definition": deepcopy(inference["score_definition"]),
     }
 
@@ -352,14 +435,15 @@ def actor_free_td_v1_output_directory_name(
         score_mode=selected_mode,
         g_first_weight=g_first_weight,
     )
+    protocol_label = v1_evaluation_protocol_label(protocol)
     run_mode = "smoke" if smoke else "pilot" if pilot else "formal"
     if selected_mode in FIRST_ACTION_SCORE_MODES:
         assert weight is not None
         return (
-            f"{method}_cube_o50_{selected_mode}_alpha_"
+            f"{method}_cube_{protocol_label}_{selected_mode}_alpha_"
             f"{_g_first_weight_slug(weight)}_{run_mode}"
         )
-    return f"{method}_cube_o50_{selected_mode}_{run_mode}"
+    return f"{method}_cube_{protocol_label}_{selected_mode}_{run_mode}"
 
 
 def _validate_pretrained_protocol(protocol: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -425,7 +509,7 @@ def _validate_predictor_protocol(predictor: Mapping[str, Any]) -> None:
 
 
 def _validate_planning_protocol(
-    planning: Mapping[str, Any], *, score_mode: str
+    planning: Mapping[str, Any], *, score_mode: str, protocol_label: str
 ) -> None:
     missing = REQUIRED_PLANNING_KEYS - planning.keys()
     if missing:
@@ -433,17 +517,33 @@ def _validate_planning_protocol(
     if planning.get("solver") != "CEM":
         raise ValueError("V1 formal evaluation requires planning.solver='CEM'.")
     expected_horizon = FORMAL_HORIZON_BY_SCORE_MODE[score_mode]
-    if planning.get("horizon") != expected_horizon:
+    if (
+        type(planning.get("horizon")) is not int
+        or planning.get("horizon") != expected_horizon
+    ):
         raise ValueError(
             f"V1 score_mode={score_mode!r} requires planning.horizon="
             f"{expected_horizon}."
         )
-    for key, expected in FORMAL_O50_PLANNING.items():
+    expected_planning = (
+        FORMAL_O25_PLANNING if protocol_label == "o25" else FORMAL_O50_PLANNING
+    )
+    if protocol_label == "o25" and score_mode == "g_only":
+        expected_planning = {
+            **expected_planning,
+            "receding_horizon": 1,
+            "executed_environment_steps_before_replanning": 5,
+        }
+    for key, expected in expected_planning.items():
         if key == "horizon":
             continue
-        if planning.get(key) != expected:
+        actual = planning.get(key)
+        if actual != expected or (
+            type(expected) is int and type(actual) is not int
+        ):
             raise ValueError(
-                f"The formal Cube O50 protocol requires planning.{key}={expected!r}."
+                f"The formal Cube {protocol_label.upper()} protocol requires "
+                f"planning.{key}={expected!r}."
             )
     if planning["elites"] > planning["candidates"]:
         raise ValueError("CEM elites cannot exceed candidates.")
@@ -460,7 +560,7 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
     *,
     spec: FrozenActorFreeTDV1MethodSpec,
 ) -> None:
-    """Validate one formal V1 C--G3 Cube O50 protocol."""
+    """Validate one formal V1 C--G3 Cube O25 or O50 protocol."""
 
     require_exact_values(
         protocol,
@@ -529,6 +629,10 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
     if not isinstance(inference, Mapping):
         raise ValueError("protocol.inference_objective must be a mapping.")
     score_mode = validate_v1_score_mode(str(inference.get("score_mode", "")))
+    planning = protocol.get("planning")
+    if not isinstance(planning, Mapping):
+        raise ValueError("protocol.planning must be a mapping.")
+    execution = _execution_metadata(planning)
     require_exact_values(
         inference,
         {
@@ -562,11 +666,12 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
             score_mode=score_mode,
             g_first_weight=None,
         )
-        expected_definition = (
+        expected_definition = deepcopy(
             FIRST_Q2_SCORE_DEFINITION
             if score_mode == FIRST_Q2_SCORE_MODE
             else FIRST_ACTION_SCORE_DEFINITION
         )
+        expected_definition["cem_execution"] = execution["cem_execution"]
         if inference.get("score_definition") != expected_definition:
             raise ValueError(
                 "inference_objective.score_definition must exactly describe "
@@ -581,11 +686,21 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
     elif score_mode == ROLLOUT_MEAN_SCORE_MODE:
         if "g_first_weight" in inference:
             raise ValueError("g_first_weight requires a first-action score mode.")
+        expected_rollout_fields = deepcopy(ROLLOUT_MEAN_INFERENCE_FIELDS)
+        expected_rollout_fields["executed_action_block"] = execution[
+            "executed_action_block"
+        ]
+        expected_rollout_fields["replanning"] = execution["replanning"]
+        expected_rollout_definition = deepcopy(ROLLOUT_MEAN_SCORE_DEFINITION)
+        expected_rollout_definition["executed_action_block"] = execution[
+            "executed_action_block"
+        ]
+        expected_rollout_definition["replanning"] = execution["replanning"]
         require_exact_values(
             inference,
             {
-                **ROLLOUT_MEAN_INFERENCE_FIELDS,
-                "score_definition": ROLLOUT_MEAN_SCORE_DEFINITION,
+                **expected_rollout_fields,
+                "score_definition": expected_rollout_definition,
             },
             label="inference_objective",
         )
@@ -619,18 +734,30 @@ def validate_frozen_actor_free_td_v1_evaluation_protocol(
                 "be enabled during V1 evaluation."
             )
 
-    planning = protocol.get("planning")
-    if not isinstance(planning, Mapping):
-        raise ValueError("protocol.planning must be a mapping.")
-    _validate_planning_protocol(planning, score_mode=score_mode)
+    protocol_label = v1_evaluation_protocol_label(protocol)
+    require_exact_values(
+        protocol["evaluation"],
+        {
+            **FORMAL_EVALUATION_BY_PROTOCOL[protocol_label],
+            "start_goal_source": "same_dataset_episode",
+        },
+        label="evaluation",
+    )
+    _validate_planning_protocol(
+        planning,
+        score_mode=score_mode,
+        protocol_label=protocol_label,
+    )
     if planning.get("history_len") != context["plan_config_history_len"]:
         raise ValueError(
             "planning.history_len must match context.plan_config_history_len."
         )
 
-    evaluation = protocol.get("evaluation", {})
-    if evaluation.get("episodes") != 50 or evaluation.get("goal_offset") != 50:
-        raise ValueError("Actor-Free TD-LeWM V1 evaluation is locked to Cube O50/50.")
+    if inference.get("replanning") != execution["replanning"]:
+        raise ValueError(
+            "inference_objective.replanning differs from the formal PlanConfig "
+            "execution cadence."
+        )
 
 
 def load_frozen_actor_free_td_v1_evaluation_protocol(
@@ -656,6 +783,7 @@ def configure_frozen_actor_free_td_v1_evaluation_mode(
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
     configured = deepcopy(dict(protocol))
+    protocol_label = v1_evaluation_protocol_label(configured)
     selected_mode = validate_v1_score_mode(
         score_mode
         or str(configured.get("inference_objective", {}).get("score_mode", "f_plus_g"))
@@ -670,6 +798,14 @@ def configure_frozen_actor_free_td_v1_evaluation_mode(
     configured.setdefault("planning", {})["horizon"] = FORMAL_HORIZON_BY_SCORE_MODE[
         selected_mode
     ]
+    configured["planning"]["receding_horizon"] = (
+        1 if protocol_label == "o50" or selected_mode == "g_only" else 5
+    )
+    if protocol_label == "o25":
+        configured["planning"][
+            "executed_environment_steps_before_replanning"
+        ] = (configured["planning"]["receding_horizon"] * 5)
+    _configure_execution_contract(configured)
     if smoke:
         configured["id"] = f"{configured['id']}_smoke"
         configured["evaluation"]["episodes"] = 1
@@ -831,6 +967,7 @@ def evaluate_actor_free_td_predictor_runtime(
         protocol_path,
         spec=spec,
     )
+    protocol_label = v1_evaluation_protocol_label(formal_protocol)
     protocol = protocol_configurer(
         formal_protocol,
         smoke=smoke,
@@ -861,7 +998,9 @@ def evaluate_actor_free_td_predictor_runtime(
         map_location=device,
     )
     if checkpoint_epoch is not None and (smoke or pilot):
-        raise ValueError("checkpoint_epoch is only supported for full O50 evaluation.")
+        raise ValueError(
+            "checkpoint_epoch is only supported for full formal O25/O50 evaluation."
+        )
     require_formal_completion = not (smoke or pilot) and checkpoint_epoch is None
     checkpoint_validation = {
         "payload": payload,
@@ -976,13 +1115,19 @@ def evaluate_actor_free_td_predictor_runtime(
     }
     if checkpoint_epoch is not None:
         checkpoint_manifest["requested_checkpoint_epoch"] = checkpoint_epoch
-        checkpoint_manifest["checkpoint_role"] = "intermediate_epoch_o50"
+        checkpoint_manifest["checkpoint_role"] = (
+            f"intermediate_epoch_{protocol_label}"
+        )
     for key in checkpoint_provenance_keys:
         provenance = payload.get(key)
         if not isinstance(provenance, Mapping):
             raise ValueError(f"Checkpoint is missing {key}.")
         checkpoint_manifest[key] = deepcopy(provenance)
     manifest = {
+        "evaluation_protocol": protocol_label.upper(),
+        "protocol_label": protocol_label,
+        "goal_offset": evaluation["goal_offset"],
+        "episode_budget": planning["episode_budget"],
         "score_mode": protocol["inference_objective"]["score_mode"],
         "protocol": protocol,
         "formal_protocol": formal_protocol,
@@ -999,6 +1144,7 @@ def evaluate_actor_free_td_predictor_runtime(
     }
     manifest.update(_first_action_output_metadata(protocol, planning))
     manifest.update(_rollout_mean_output_metadata(protocol, planning))
+    manifest.update(_execution_metadata(planning))
     _write_json(output_dir / "protocol_manifest.json", manifest)
 
     world_cfg = protocol["world"]
@@ -1053,6 +1199,10 @@ def evaluate_actor_free_td_predictor_runtime(
         "method_family": formal_protocol["method_family"],
         "variant": spec.variant,
         "implementation_version": formal_protocol["implementation_version"],
+        "evaluation_protocol": protocol_label.upper(),
+        "protocol_label": protocol_label,
+        "goal_offset": evaluation["goal_offset"],
+        "episode_budget": planning["episode_budget"],
         "score_mode": protocol["inference_objective"]["score_mode"],
         "planning_horizon": planning["horizon"],
         "smoke": smoke,
@@ -1061,9 +1211,10 @@ def evaluate_actor_free_td_predictor_runtime(
     }
     result.update(_first_action_output_metadata(protocol, planning))
     result.update(_rollout_mean_output_metadata(protocol, planning))
+    result.update(_execution_metadata(planning))
     if checkpoint_epoch is not None:
         result["checkpoint_epoch"] = payload["epoch"]
-        result["checkpoint_role"] = "intermediate_epoch_o50"
+        result["checkpoint_role"] = f"intermediate_epoch_{protocol_label}"
         result["formal_completion_required"] = False
     _write_json(output_dir / "results.json", result)
     return _jsonable(result)
@@ -1118,6 +1269,7 @@ __all__ = [
     "FIRST_Q2_SCORE_MODE",
     "FIRST_Q2_STD_EPSILON",
     "FORMAL_HORIZON_BY_SCORE_MODE",
+    "FORMAL_O25_PLANNING",
     "FORMAL_O50_PLANNING",
     "ROLLOUT_MEAN_G_SCORE",
     "ROLLOUT_MEAN_INFERENCE_FIELDS",
@@ -1133,4 +1285,5 @@ __all__ = [
     "validate_frozen_actor_free_td_v1_evaluation_protocol",
     "validate_v1_raw_action_compatibility",
     "validate_v1_score_mode",
+    "v1_evaluation_protocol_label",
 ]
