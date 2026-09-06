@@ -284,7 +284,15 @@ def predict_frozen_lewm_aligned_state_v1_c4(
         )
     if not bool(torch.isfinite(predicted_sequence).all()):
         raise FloatingPointError("frozen LeWM produced a non-finite C4 state.")
-    return predicted_sequence[:, -1, :].detach()
+    # Lightning's bf16 autocast may make the frozen LeWM prediction bfloat16
+    # even though the immutable latent store is float32.  C4 treats both
+    # online branches as two views of the same latent space, so restore the
+    # frozen prediction to the cache tensor's exact device/dtype before the
+    # shared loss validates and consumes it.
+    return predicted_sequence[:, -1, :].to(
+        device=state_history.device,
+        dtype=state_history.dtype,
+    ).detach()
 
 
 def successor_td_target_v1_c4(

@@ -47,6 +47,13 @@ class _RecordingFrozenWorld(nn.Module):
         return state_history + action_embedding
 
 
+class _BFloat16FrozenWorld(_RecordingFrozenWorld):
+    def predict(
+        self, state_history: torch.Tensor, action_embedding: torch.Tensor
+    ) -> torch.Tensor:
+        return super().predict(state_history, action_embedding).to(torch.bfloat16)
+
+
 def _frozen_world() -> _RecordingFrozenWorld:
     return _RecordingFrozenWorld().requires_grad_(False).eval()
 
@@ -99,6 +106,24 @@ def test_frozen_f_predicts_the_same_time_as_real_c4_state_and_detaches() -> None
         world, state_history.detach(), previous_actions.detach(), changed_action
     )
     assert not torch.equal(prediction, changed)
+
+
+def test_frozen_f_prediction_restores_the_latent_store_dtype() -> None:
+    world = _BFloat16FrozenWorld().requires_grad_(False).eval()
+    state_history = torch.randn(2, 3, 192, dtype=torch.float32)
+    previous_actions = torch.randn(2, 2, 25, dtype=torch.float32)
+    predecessor_action = torch.randn(2, 25, dtype=torch.float32)
+
+    prediction = predict_frozen_lewm_aligned_state_v1_c4(
+        world,
+        state_history,
+        previous_actions,
+        predecessor_action,
+    )
+
+    assert prediction.dtype == state_history.dtype
+    assert prediction.device == state_history.device
+    assert not prediction.requires_grad
 
 
 def test_c4_target_includes_current_once_bootstraps_next_and_masks_terminal() -> None:
