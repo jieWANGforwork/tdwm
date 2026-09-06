@@ -742,7 +742,6 @@ def make_actor_free_td_lewm_v1_c3_policy(
         "frame_skip": ACTION_BLOCK_STEPS,
         "planning_seed": 42,
         "solver_batch_size": 1,
-        "receding_horizon": 1,
         "warm_start": True,
         "initial_distribution": "cem_gaussian_no_actor",
     }
@@ -751,6 +750,22 @@ def make_actor_free_td_lewm_v1_c3_policy(
             raise ValueError(
                 f"V1-C3 formal policy requires planning.{key}={expected_value!r}."
             )
+    receding_horizon = planning.get("receding_horizon")
+    if receding_horizon not in (1, 5) or type(receding_horizon) is not int:
+        raise ValueError(
+            "V1-C3 policy requires planning.receding_horizon=1 for O50 or 5 "
+            "for O25."
+        )
+    executed_steps = planning.get("executed_environment_steps_before_replanning")
+    if receding_horizon == 5 and executed_steps != 25:
+        raise ValueError(
+            "V1-C3 O25 policy requires exactly 25 environment steps before "
+            "replanning."
+        )
+    if receding_horizon == 1 and executed_steps not in (None, 5):
+        raise ValueError(
+            "V1-C3 O50 policy may only record 5 environment steps before replanning."
+        )
     formal_search = {"candidates": 300, "iterations": 30, "elites": 30}
     reduced_searches = (
         {"candidates": 8, "iterations": 1, "elites": 2},

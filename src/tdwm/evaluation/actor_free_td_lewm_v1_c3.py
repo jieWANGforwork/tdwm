@@ -1,4 +1,4 @@
-"""Controlled Cube O50 evaluation for V1-C3 terminal EMA State-V planning."""
+"""Controlled Cube O25/O50 evaluation for V1-C3 EMA State-V planning."""
 
 from __future__ import annotations
 
@@ -42,7 +42,11 @@ from tdwm.evaluation.frozen_actor_free_td_common import (
     _resolve_joint_checkpoint,
     _validate_dataset_protocol,
 )
-from tdwm.evaluation.frozen_actor_free_td_v1_common import _load_protocol_mapping
+from tdwm.evaluation.frozen_actor_free_td_v1_common import (
+    _execution_metadata,
+    _load_protocol_mapping,
+    v1_evaluation_protocol_label,
+)
 from tdwm.evaluation.lewm_checkpoint import (
     REQUIRED_PLANNING_KEYS,
     _git_revision,
@@ -57,9 +61,18 @@ from tdwm.methods.actor_free_td_lewm_v1 import (
     V1_STATE_DIM,
 )
 
-FORMAL_SELECTION_SHA256 = (
+FORMAL_O50_SELECTION_SHA256 = (
     "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7"
 )
+# Backward-compatible public name retained for the historical O50 protocol.
+FORMAL_SELECTION_SHA256 = FORMAL_O50_SELECTION_SHA256
+FORMAL_O25_SELECTION_SHA256 = (
+    "56546fe8725ce0e4670f308c5b325bd64ff2a792373add8c20ddbcab02da6b37"
+)
+FORMAL_SELECTION_SHA256_BY_PROTOCOL = {
+    "o25": FORMAL_O25_SELECTION_SHA256,
+    "o50": FORMAL_O50_SELECTION_SHA256,
+}
 FORMAL_O50_PLANNING = {
     "solver": "CEM",
     "horizon": 5,
@@ -76,6 +89,12 @@ FORMAL_O50_PLANNING = {
     "history_len": 1,
     "warm_start": True,
     "initial_distribution": "cem_gaussian_no_actor",
+}
+FORMAL_O25_PLANNING = {
+    **FORMAL_O50_PLANNING,
+    "receding_horizon": 5,
+    "episode_budget": 50,
+    "executed_environment_steps_before_replanning": 25,
 }
 STATE_V_SCORE_DEFINITION = {
     "formula": "target_state_v(F_frozen_rollout_5(z0,A1:A5),z_goal)",
@@ -163,6 +182,20 @@ def _state_v_score_definition(score_mode: str) -> dict[str, Any]:
     if score_mode == STATE_V_FIRST_Q2_SCORE_MODE:
         return STATE_V_FIRST_Q2_SCORE_DEFINITION
     raise ValueError(f"Unsupported V1-C3 score mode {score_mode!r}.")
+
+
+def _configured_state_v_score_definition(
+    score_mode: str,
+    *,
+    planning: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the score definition with the exact execution cadence recorded."""
+
+    definition = deepcopy(_state_v_score_definition(score_mode))
+    execution = _execution_metadata(planning)
+    definition["executed_action_block"] = execution["executed_action_block"]
+    definition["replanning"] = execution["replanning"]
+    return definition
 
 
 def _resolve_state_v_first_q_weight(
@@ -255,7 +288,7 @@ def _validate_state_critic(critic: Mapping[str, Any]) -> None:
 def validate_actor_free_td_lewm_v1_c3_evaluation_protocol(
     protocol: Mapping[str, Any],
 ) -> None:
-    """Fail closed unless the complete formal C3/O50 contract is present."""
+    """Fail closed unless a complete formal C3 O25 or O50 contract is present."""
 
     _require_exact_values(
         protocol,
@@ -357,20 +390,27 @@ def validate_actor_free_td_lewm_v1_c3_evaluation_protocol(
     missing = REQUIRED_PLANNING_KEYS - planning.keys()
     if missing:
         raise ValueError(f"Missing planning keys: {sorted(missing)}")
-    _require_exact_values(planning, FORMAL_O50_PLANNING, label="planning")
+    protocol_label = v1_evaluation_protocol_label(protocol)
+    expected_planning = (
+        FORMAL_O25_PLANNING if protocol_label == "o25" else FORMAL_O50_PLANNING
+    )
+    _require_exact_values(planning, expected_planning, label="planning")
     if planning.get("history_len") != context["plan_config_history_len"]:
         raise ValueError("planning.history_len must match the context lock.")
 
     evaluation = protocol.get("evaluation")
     if not isinstance(evaluation, Mapping):
         raise ValueError("protocol.evaluation must be a mapping.")
+    expected_goal_offset = 25 if protocol_label == "o25" else 50
     _require_exact_values(
         evaluation,
         {
             "episodes": 50,
-            "goal_offset": 50,
+            "goal_offset": expected_goal_offset,
             "start_goal_source": "same_dataset_episode",
-            "selection_sha256": FORMAL_SELECTION_SHA256,
+            "selection_sha256": FORMAL_SELECTION_SHA256_BY_PROTOCOL[
+                protocol_label
+            ],
         },
         label="evaluation",
     )
@@ -386,12 +426,15 @@ def validate_actor_free_td_lewm_v1_c3_evaluation_protocol(
     uses_parent_g = score_mode in STATE_V_FIRST_ACTION_SCORE_MODES
     inference_expected = {
         "score_mode": score_mode,
-        "score_definition": _state_v_score_definition(score_mode),
+        "score_definition": _configured_state_v_score_definition(
+            score_mode,
+            planning=planning,
+        ),
         "learned_actor": False,
         "parent_g_used": uses_parent_g,
         "terminal_goal_distance_used": False,
         "critic": "ema_target",
-        "replanning": "every_action_block",
+        "replanning": _execution_metadata(planning)["replanning"],
     }
     if uses_parent_g:
         weight = normalize_state_v_first_q_weight(inference.get("g_first_weight"))
@@ -448,6 +491,7 @@ def configure_actor_free_td_lewm_v1_c3_evaluation_mode(
     if smoke and pilot:
         raise ValueError("Smoke and pilot modes are mutually exclusive.")
     configured = deepcopy(dict(protocol))
+    planning = configured["planning"]
     selected_score_mode = score_mode or str(
         configured["inference_objective"]["score_mode"]
     )
@@ -466,12 +510,15 @@ def configure_actor_free_td_lewm_v1_c3_evaluation_mode(
     inference.update(
         {
             "score_mode": selected_score_mode,
-            "score_definition": deepcopy(_state_v_score_definition(selected_score_mode)),
+            "score_definition": _configured_state_v_score_definition(
+                selected_score_mode,
+                planning=planning,
+            ),
             "learned_actor": False,
             "parent_g_used": uses_parent_g,
             "terminal_goal_distance_used": False,
             "critic": "ema_target",
-            "replanning": "every_action_block",
+            "replanning": _execution_metadata(planning)["replanning"],
         }
     )
     if uses_parent_g:
@@ -539,8 +586,10 @@ def actor_free_td_lewm_v1_c3_output_directory_name(
     suffix = ""
     if weight is not None:
         suffix = f"_alpha_{_state_v_first_q_weight_slug(weight)}"
+    protocol_label = v1_evaluation_protocol_label(protocol)
     return (
-        f"{protocol['method']}_cube_o50_{selected_score_mode}{suffix}_{run_mode}"
+        f"{protocol['method']}_cube_{protocol_label}_{selected_score_mode}"
+        f"{suffix}_{run_mode}"
     )
 
 
@@ -627,9 +676,10 @@ def evaluate_actor_free_td_lewm_v1_c3(
     score_mode: str | None = None,
     g_first_weight: float | None = None,
 ) -> dict[str, Any]:
-    """Run the audited public Stable World Model CEM/O50 evaluation."""
+    """Run the audited public Stable World Model CEM O25/O50 evaluation."""
 
     formal_protocol = load_actor_free_td_lewm_v1_c3_evaluation_protocol(protocol_path)
+    protocol_label = v1_evaluation_protocol_label(formal_protocol)
     protocol = configure_actor_free_td_lewm_v1_c3_evaluation_mode(
         formal_protocol,
         smoke=smoke,
@@ -638,7 +688,9 @@ def evaluate_actor_free_td_lewm_v1_c3(
         g_first_weight=g_first_weight,
     )
     if checkpoint_epoch is not None and (smoke or pilot):
-        raise ValueError("--checkpoint-epoch is only valid for full O50 evaluation.")
+        raise ValueError(
+            "--checkpoint-epoch is only valid for full formal O25/O50 evaluation."
+        )
     dataset_path = Path(dataset_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -704,9 +756,11 @@ def evaluate_actor_free_td_lewm_v1_c3(
     selection_path = output_dir / "episode_selection.json"
     _write_json(selection_path, selection)
     selection_sha256 = _sha256(selection_path)
-    if not (smoke or pilot) and selection_sha256 != FORMAL_SELECTION_SHA256:
+    expected_selection_sha256 = FORMAL_SELECTION_SHA256_BY_PROTOCOL[protocol_label]
+    if not (smoke or pilot) and selection_sha256 != expected_selection_sha256:
         raise ValueError(
-            "Generated episode selection differs from the locked seed-42 O50 set."
+            "Generated episode selection differs from the locked seed-42 "
+            f"{protocol_label.upper()} set."
         )
     action_processor, action_stats = _load_action_processor(
         dataset, output_dir / "action_normalization.json"
@@ -773,9 +827,13 @@ def evaluate_actor_free_td_lewm_v1_c3(
     }
     if checkpoint_epoch is not None:
         checkpoint_manifest["requested_checkpoint_epoch"] = checkpoint_epoch
-        checkpoint_manifest["checkpoint_role"] = "intermediate_epoch_o50"
+        checkpoint_manifest["checkpoint_role"] = f"intermediate_epoch_{protocol_label}"
     selected_score_definition = protocol["inference_objective"]["score_definition"]
     manifest = {
+        "evaluation_protocol": protocol_label.upper(),
+        "protocol_label": protocol_label,
+        "goal_offset": evaluation["goal_offset"],
+        "episode_budget": planning["episode_budget"],
         "score_mode": selected_score_mode,
         "score_definition": deepcopy(selected_score_definition),
         "protocol": protocol,
@@ -791,6 +849,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "selection_sha256": selection_sha256,
         "normalization": {"action": action_stats},
         "runtime": runtime,
+        **_execution_metadata(planning),
     }
     if selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
         manifest["g_first_weight"] = protocol["inference_objective"][
@@ -861,6 +920,10 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "method_family": METHOD_FAMILY,
         "variant": VARIANT,
         "implementation_version": IMPLEMENTATION_VERSION,
+        "evaluation_protocol": protocol_label.upper(),
+        "protocol_label": protocol_label,
+        "goal_offset": evaluation["goal_offset"],
+        "episode_budget": planning["episode_budget"],
         "score_mode": selected_score_mode,
         "score_definition": deepcopy(selected_score_definition),
         "planning_horizon": planning["horizon"],
@@ -868,6 +931,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "smoke": smoke,
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
+        **_execution_metadata(planning),
     }
     if selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
         result["g_first_weight"] = protocol["inference_objective"][
@@ -880,15 +944,19 @@ def evaluate_actor_free_td_lewm_v1_c3(
         result["constant_shift_sanity"] = "checked_on_first_CEM_cost_call"
     if checkpoint_epoch is not None:
         result["checkpoint_epoch"] = restored.payload["epoch"]
-        result["checkpoint_role"] = "intermediate_epoch_o50"
+        result["checkpoint_role"] = f"intermediate_epoch_{protocol_label}"
         result["formal_completion_required"] = False
     _write_json(output_dir / "results.json", result)
     return _jsonable(result)
 
 
 __all__ = [
+    "FORMAL_O25_PLANNING",
+    "FORMAL_O25_SELECTION_SHA256",
     "FORMAL_O50_PLANNING",
+    "FORMAL_O50_SELECTION_SHA256",
     "FORMAL_SELECTION_SHA256",
+    "FORMAL_SELECTION_SHA256_BY_PROTOCOL",
     "STATE_V_FIRST_Q_SCORE_DEFINITION",
     "STATE_V_FIRST_Q2_SCORE_DEFINITION",
     "STATE_V_SCORE_DEFINITION",

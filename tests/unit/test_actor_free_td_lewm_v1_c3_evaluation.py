@@ -6,6 +6,7 @@ import json
 import sys
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -21,9 +22,12 @@ from tdwm.adapters.actor_free_td_lewm_v1_c3 import (
     ActorFreeTDLeWMV1C3,
     assert_constant_shift_preserves_selection,
     load_actor_free_td_lewm_v1_c3_checkpoint,
+    make_actor_free_td_lewm_v1_c3_policy,
     validate_actor_free_td_lewm_v1_c3_payload,
 )
 from tdwm.evaluation.actor_free_td_lewm_v1_c3 import (
+    FORMAL_O25_PLANNING,
+    FORMAL_O25_SELECTION_SHA256,
     FORMAL_O50_PLANNING,
     FORMAL_SELECTION_SHA256,
     STATE_V_FIRST_Q2_SCORE_DEFINITION,
@@ -40,6 +44,9 @@ from tdwm.methods.actor_free_td_lewm_v1_c3 import RP1StateValueV1C3
 
 CONFIG_PATH = Path(
     "configs/experiment/actor_free_td_lewm_v1_c3_cube_checkpoint_o50.yaml"
+)
+O25_CONFIG_PATH = Path(
+    "configs/experiment/actor_free_td_lewm_v1_c3_cube_checkpoint_o25.yaml"
 )
 SCRIPT_PATH = Path("scripts/evaluate_actor_free_td_lewm_v1_c3.py")
 
@@ -429,6 +436,90 @@ def test_v1_c3_protocol_locks_state_v_only_formal_o50() -> None:
     )
     assert protocol["inference_objective"]["parent_g_used"] is False
     assert protocol["inference_objective"]["terminal_goal_distance_used"] is False
+
+
+def test_v1_c3_protocol_locks_matching_formal_o25_execution() -> None:
+    protocol = load_actor_free_td_lewm_v1_c3_evaluation_protocol(O25_CONFIG_PATH)
+
+    assert protocol["planning"] == FORMAL_O25_PLANNING
+    assert protocol["evaluation"] == {
+        "episodes": 50,
+        "goal_offset": 25,
+        "start_goal_source": "same_dataset_episode",
+        "selection_sha256": FORMAL_O25_SELECTION_SHA256,
+    }
+    configured = configure_actor_free_td_lewm_v1_c3_evaluation_mode(
+        protocol,
+        smoke=False,
+        pilot=False,
+        score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+        g_first_weight=0.1,
+    )
+    validate_actor_free_td_lewm_v1_c3_evaluation_protocol(configured)
+    definition = configured["inference_objective"]["score_definition"]
+    assert definition["normalization"] == "population_z_score"
+    assert definition["executed_action_block"] == "all_five_blocks"
+    assert definition["replanning"] == "every_five_action_blocks"
+    assert configured["inference_objective"]["g_first_weight"] == 0.1
+    assert actor_free_td_lewm_v1_c3_output_directory_name(
+        protocol,
+        smoke=False,
+        pilot=False,
+        score_mode=STATE_V_FIRST_Q2_SCORE_MODE,
+        g_first_weight=0.1,
+    ).endswith("cube_o25_state_v_plus_first_q2_alpha_0p1_formal")
+
+
+@pytest.mark.parametrize(
+    ("config_path", "expected_receding_horizon"),
+    [(CONFIG_PATH, 1), (O25_CONFIG_PATH, 5)],
+)
+def test_v1_c3_policy_preserves_o50_and_accepts_exact_o25_cadence(
+    config_path: Path,
+    expected_receding_horizon: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _CEMSolver:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class _PlanConfig:
+        def __init__(self, **kwargs) -> None:
+            self.__dict__.update(kwargs)
+
+    class _Policy:
+        def __init__(self, **kwargs) -> None:
+            self.__dict__.update(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "stable_worldmodel",
+        SimpleNamespace(
+            solver=SimpleNamespace(CEMSolver=_CEMSolver),
+            PlanConfig=_PlanConfig,
+            policy=SimpleNamespace(WorldModelPolicy=_Policy),
+        ),
+    )
+    protocol = load_actor_free_td_lewm_v1_c3_evaluation_protocol(config_path)
+    policy = make_actor_free_td_lewm_v1_c3_policy(
+        world_model=_RecordingWorld(torch.zeros(1, 1, 192)),
+        target_critic=_RecordingCritic(),
+        planning=deepcopy(protocol["planning"]),
+    )
+
+    assert policy.config.horizon == 5
+    assert policy.config.receding_horizon == expected_receding_horizon
+
+
+def test_v1_c3_policy_rejects_unregistered_replanning_cadence() -> None:
+    planning = deepcopy(_protocol()["planning"])
+    planning["receding_horizon"] = 2
+    with pytest.raises(ValueError, match="receding_horizon=1 for O50 or 5"):
+        make_actor_free_td_lewm_v1_c3_policy(
+            world_model=_RecordingWorld(torch.zeros(1, 1, 192)),
+            target_critic=_RecordingCritic(),
+            planning=planning,
+        )
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,22 @@
+extends: actor_free_td_lewm_v1_c3_cube_checkpoint_o50.yaml
+id: actor_free_td_lewm_v1_c3_cube_checkpoint_o25
+
+evaluation:
+  goal_offset: 25
+  selection_sha256: 56546fe8725ce0e4670f308c5b325bd64ff2a792373add8c20ddbcab02da6b37
+
+planning:
+  receding_horizon: 5
+  executed_environment_steps_before_replanning: 25
+  episode_budget: 50
+
+inference_objective:
+  score_definition:
+    executed_action_block: all_five_blocks
+    replanning: every_five_action_blocks
+  replanning: every_five_action_blocks
+
+provenance:
+  comparison_protocol: configs/experiment/lewm_cube_seed3072_o25.yaml
+  status: audited_o25_evaluation_ready
+  note: Formal O25 preserves the V1-C3 E12 EMA State-V and retained V1-C online-G scorer while executing all five selected action blocks before replanning.
