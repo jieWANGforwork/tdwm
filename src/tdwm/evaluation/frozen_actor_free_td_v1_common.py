@@ -1,4 +1,4 @@
-"""Controlled Cube O25/O50 evaluation for Actor-Free TD-LeWM V1 methods.
+"""Controlled Cube O25/O50/O100 evaluation for Actor-Free TD-LeWM V1 methods.
 
 V1 is evaluated independently from the V0 raw-action predictor.
 Every C--G3 checkpoint deploys the same single symmetric goal-conditioned
@@ -84,9 +84,19 @@ FORMAL_O25_PLANNING = {
     "episode_budget": 50,
     "executed_environment_steps_before_replanning": 25,
 }
+FORMAL_O100_PLANNING = {
+    **FORMAL_O50_PLANNING,
+    "episode_budget": 200,
+}
 FORMAL_EVALUATION_BY_PROTOCOL = {
     "o25": {"episodes": 50, "goal_offset": 25},
     "o50": {"episodes": 50, "goal_offset": 50},
+    "o100": {"episodes": 50, "goal_offset": 100},
+}
+FORMAL_SELECTION_SHA256_BY_PROTOCOL = {
+    "o25": "56546fe8725ce0e4670f308c5b325bd64ff2a792373add8c20ddbcab02da6b37",
+    "o50": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+    "o100": "8a87815e8e1816ccb5021af81a5e2307a5b342d094eec3edf221a0e24851d10c",
 }
 FORMAL_HORIZON_BY_SCORE_MODE = {
     "f_only": 5,
@@ -184,7 +194,7 @@ def validate_v1_score_mode(score_mode: str) -> str:
 
 
 def v1_evaluation_protocol_label(protocol: Mapping[str, Any]) -> str:
-    """Identify one exact formal V1 O25 or O50 evaluation envelope."""
+    """Identify one exact formal V1 O25, O50, or O100 evaluation envelope."""
 
     evaluation = protocol.get("evaluation")
     planning = protocol.get("planning")
@@ -197,13 +207,14 @@ def v1_evaluation_protocol_label(protocol: Mapping[str, Any]) -> str:
     }
     if any(type(value) is not int for value in observed.values()):
         raise ValueError("Formal V1 evaluation counts must be exact integers.")
+    expected_budget_by_protocol = {"o25": 50, "o50": 100, "o100": 200}
     for label, expected_evaluation in FORMAL_EVALUATION_BY_PROTOCOL.items():
-        expected_budget = 50 if label == "o25" else 100
+        expected_budget = expected_budget_by_protocol[label]
         if observed == {**expected_evaluation, "episode_budget": expected_budget}:
             return label
     raise ValueError(
-        "Actor-Free TD-LeWM V1 accepts only the exact formal Cube O25/50 "
-        "or O50/50 evaluation protocol."
+        "Actor-Free TD-LeWM V1 accepts only the exact formal Cube O25/50, "
+        "O50/50, or O100/50 evaluation protocol."
     )
 
 
@@ -525,9 +536,11 @@ def _validate_planning_protocol(
             f"V1 score_mode={score_mode!r} requires planning.horizon="
             f"{expected_horizon}."
         )
-    expected_planning = (
-        FORMAL_O25_PLANNING if protocol_label == "o25" else FORMAL_O50_PLANNING
-    )
+    expected_planning = {
+        "o25": FORMAL_O25_PLANNING,
+        "o50": FORMAL_O50_PLANNING,
+        "o100": FORMAL_O100_PLANNING,
+    }[protocol_label]
     if protocol_label == "o25" and score_mode == "g_only":
         expected_planning = {
             **expected_planning,
@@ -799,7 +812,7 @@ def configure_frozen_actor_free_td_v1_evaluation_mode(
         selected_mode
     ]
     configured["planning"]["receding_horizon"] = (
-        1 if protocol_label == "o50" or selected_mode == "g_only" else 5
+        1 if protocol_label in {"o50", "o100"} or selected_mode == "g_only" else 5
     )
     if protocol_label == "o25":
         configured["planning"][
@@ -999,7 +1012,7 @@ def evaluate_actor_free_td_predictor_runtime(
     )
     if checkpoint_epoch is not None and (smoke or pilot):
         raise ValueError(
-            "checkpoint_epoch is only supported for full formal O25/O50 evaluation."
+            "checkpoint_epoch is only supported for full formal O25/O50/O100 evaluation."
         )
     require_formal_completion = not (smoke or pilot) and checkpoint_epoch is None
     checkpoint_validation = {
@@ -1048,6 +1061,13 @@ def evaluate_actor_free_td_predictor_runtime(
         "valid_row_ranks": valid_ranks,
     }
     _write_json(output_dir / "episode_selection.json", selection)
+    selection_sha256 = _sha256(output_dir / "episode_selection.json")
+    expected_selection_sha256 = FORMAL_SELECTION_SHA256_BY_PROTOCOL[protocol_label]
+    if not (smoke or pilot) and selection_sha256 != expected_selection_sha256:
+        raise ValueError(
+            "Generated episode selection differs from the locked seed-42 "
+            f"{protocol_label.upper()} set."
+        )
     action_processor, action_stats = _load_action_processor(
         dataset,
         output_dir / "action_normalization.json",
@@ -1271,6 +1291,8 @@ __all__ = [
     "FORMAL_HORIZON_BY_SCORE_MODE",
     "FORMAL_O25_PLANNING",
     "FORMAL_O50_PLANNING",
+    "FORMAL_O100_PLANNING",
+    "FORMAL_SELECTION_SHA256_BY_PROTOCOL",
     "ROLLOUT_MEAN_G_SCORE",
     "ROLLOUT_MEAN_INFERENCE_FIELDS",
     "ROLLOUT_MEAN_ONLY_INFERENCE_KEYS",

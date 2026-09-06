@@ -18,6 +18,7 @@ from tdwm.adapters.actor_free_td_lewm_v1_c import (
 from tdwm.evaluation.frozen_actor_free_td_v1_common import (
     FORMAL_O25_PLANNING,
     FORMAL_O50_PLANNING,
+    FORMAL_O100_PLANNING,
     configure_frozen_actor_free_td_v1_evaluation_mode,
     evaluate_frozen_actor_free_td_v1,
     load_frozen_actor_free_td_v1_evaluation_protocol,
@@ -57,6 +58,7 @@ __all__ = [
     "DEPLOYMENT_CHECKPOINT_VERSION",
     "FORMAL_O25_PLANNING",
     "FORMAL_O50_PLANNING",
+    "FORMAL_O100_PLANNING",
     "IMPLEMENTATION_VERSION",
     "METHOD",
     "OBJECTIVE_VERSION",

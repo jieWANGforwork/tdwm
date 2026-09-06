@@ -1,4 +1,4 @@
-"""Controlled Cube O25/O50 evaluation for V1-C3 EMA State-V planning."""
+"""Controlled Cube O25/O50/O100 evaluation for V1-C3 EMA State-V planning."""
 
 from __future__ import annotations
 
@@ -69,9 +69,13 @@ FORMAL_SELECTION_SHA256 = FORMAL_O50_SELECTION_SHA256
 FORMAL_O25_SELECTION_SHA256 = (
     "56546fe8725ce0e4670f308c5b325bd64ff2a792373add8c20ddbcab02da6b37"
 )
+FORMAL_O100_SELECTION_SHA256 = (
+    "8a87815e8e1816ccb5021af81a5e2307a5b342d094eec3edf221a0e24851d10c"
+)
 FORMAL_SELECTION_SHA256_BY_PROTOCOL = {
     "o25": FORMAL_O25_SELECTION_SHA256,
     "o50": FORMAL_O50_SELECTION_SHA256,
+    "o100": FORMAL_O100_SELECTION_SHA256,
 }
 FORMAL_O50_PLANNING = {
     "solver": "CEM",
@@ -95,6 +99,10 @@ FORMAL_O25_PLANNING = {
     "receding_horizon": 5,
     "episode_budget": 50,
     "executed_environment_steps_before_replanning": 25,
+}
+FORMAL_O100_PLANNING = {
+    **FORMAL_O50_PLANNING,
+    "episode_budget": 200,
 }
 STATE_V_SCORE_DEFINITION = {
     "formula": "target_state_v(F_frozen_rollout_5(z0,A1:A5),z_goal)",
@@ -391,9 +399,11 @@ def validate_actor_free_td_lewm_v1_c3_evaluation_protocol(
     if missing:
         raise ValueError(f"Missing planning keys: {sorted(missing)}")
     protocol_label = v1_evaluation_protocol_label(protocol)
-    expected_planning = (
-        FORMAL_O25_PLANNING if protocol_label == "o25" else FORMAL_O50_PLANNING
-    )
+    expected_planning = {
+        "o25": FORMAL_O25_PLANNING,
+        "o50": FORMAL_O50_PLANNING,
+        "o100": FORMAL_O100_PLANNING,
+    }[protocol_label]
     _require_exact_values(planning, expected_planning, label="planning")
     if planning.get("history_len") != context["plan_config_history_len"]:
         raise ValueError("planning.history_len must match the context lock.")
@@ -401,7 +411,7 @@ def validate_actor_free_td_lewm_v1_c3_evaluation_protocol(
     evaluation = protocol.get("evaluation")
     if not isinstance(evaluation, Mapping):
         raise ValueError("protocol.evaluation must be a mapping.")
-    expected_goal_offset = 25 if protocol_label == "o25" else 50
+    expected_goal_offset = {"o25": 25, "o50": 50, "o100": 100}[protocol_label]
     _require_exact_values(
         evaluation,
         {
@@ -676,7 +686,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
     score_mode: str | None = None,
     g_first_weight: float | None = None,
 ) -> dict[str, Any]:
-    """Run the audited public Stable World Model CEM O25/O50 evaluation."""
+    """Run the audited public Stable World Model CEM O25/O50/O100 evaluation."""
 
     formal_protocol = load_actor_free_td_lewm_v1_c3_evaluation_protocol(protocol_path)
     protocol_label = v1_evaluation_protocol_label(formal_protocol)
@@ -689,7 +699,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
     )
     if checkpoint_epoch is not None and (smoke or pilot):
         raise ValueError(
-            "--checkpoint-epoch is only valid for full formal O25/O50 evaluation."
+            "--checkpoint-epoch is only valid for full formal O25/O50/O100 evaluation."
         )
     dataset_path = Path(dataset_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
@@ -953,6 +963,8 @@ def evaluate_actor_free_td_lewm_v1_c3(
 __all__ = [
     "FORMAL_O25_PLANNING",
     "FORMAL_O25_SELECTION_SHA256",
+    "FORMAL_O100_PLANNING",
+    "FORMAL_O100_SELECTION_SHA256",
     "FORMAL_O50_PLANNING",
     "FORMAL_O50_SELECTION_SHA256",
     "FORMAL_SELECTION_SHA256",
