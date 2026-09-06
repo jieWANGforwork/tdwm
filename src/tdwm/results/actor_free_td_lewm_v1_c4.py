@@ -691,6 +691,7 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
             f"{protocol.upper()}: best C4 score is {'/'.join(modes)} at {_rate(best)}, "
             f"{delta:+d}/50 ({delta * 2:+d} pp) versus its unchanged F-only baseline."
         )
+
     improved = tied = harmed = 0
     for protocol in PROTOCOLS:
         for mode in NONBASELINE_SCORE_MODES:
@@ -706,6 +707,7 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
         f"Across the 15 non-baseline protocol-score cells, C4 improves {improved}, "
         f"ties {tied}, and harms {harmed} relative to the same-protocol F-only outcome."
     )
+
     for protocol in PROTOCOLS:
         deltas = {
             mode: int(
@@ -723,10 +725,128 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
             f"Against V1-C under identical {protocol.upper()} scorers, C4's largest "
             f"change is {best} {maximum:+d}/50 and its smallest is {worst} {minimum:+d}/50."
         )
+
+        higher = sum(value > 0 for value in deltas.values())
+        equal = sum(value == 0 for value in deltas.values())
+        lower = sum(value < 0 for value in deltas.values())
+        state_readouts = ", ".join(
+            f"{SCORE_LABELS[mode]} {deltas[mode]:+d}"
+            for mode in ("g_only", "g_only_f_rollout_mean")
+        )
+        mixed_readouts = ", ".join(
+            f"{SCORE_LABELS[mode]} {deltas[mode]:+d}"
+            for mode in ("f_plus_g", "f_plus_g_first", "f_plus_g_first_q2")
+        )
+        lines.append(
+            f"{protocol.upper()} scorer pattern for state-only/action-through-F C4 versus "
+            f"V1-C: higher {higher}/5, tied {equal}/5, lower {lower}/5; state-focused "
+            f"readouts [{state_readouts}], mixed F+C4 readouts [{mixed_readouts}] "
+            "(all deltas are successes out of 50)."
+        )
+
+    lines.append(
+        "C4 changes the action route, successor time semantics, and real/predicted "
+        "dual-branch training objective together. Therefore the C4-versus-V1-C scorer "
+        "pattern is descriptive and cannot isolate a causal effect of routing action "
+        "through frozen F or of removing action from G by itself."
+    )
+
+    for protocol in PROTOCOLS:
+        comparisons = {
+            mode: _comparison(
+                evidence, protocol, mode, "c4_vs_same_protocol_f_only"
+            )
+            for mode in NONBASELINE_SCORE_MODES
+        }
+        largest_union = max(
+            int(paired["f_plus_new_successes"])
+            for paired in comparisons.values()
+        )
+        union_details = []
+        for mode, paired in comparisons.items():
+            if int(paired["f_plus_new_successes"]) != largest_union:
+                continue
+            union_details.append(
+                f"{SCORE_LABELS[mode]} {_rate(int(paired['candidate_successes']))}, "
+                f"New {int(paired['new'])}, Lost {int(paired['lost'])}, "
+                f"delta {int(paired['delta_successes']):+d}"
+            )
+        deployed_best = max(
+            int(paired["delta_successes"])
+            for paired in comparisons.values()
+        )
+        deployed_modes = "/".join(
+            SCORE_LABELS[mode]
+            for mode, paired in comparisons.items()
+            if int(paired["delta_successes"]) == deployed_best
+        )
+        lines.append(
+            f"{protocol.upper()} complementarity: the largest F+New oracle union is "
+            f"{largest_union}/50, from {'; '.join(union_details)}. The largest deployed "
+            f"delta is {deployed_modes} {deployed_best:+d}/50. F+New preserves F successes "
+            "only by oracle construction; the deployable score still incurs every Lost case."
+        )
+
+    train = evidence.losses["train"]
+    validation = evidence.losses["validation"]
+    loss_scale_parts: list[str] = []
+    for label, stage in (("train", train), ("validation", validation)):
+        goal_sum = (
+            stage["real_goal_loss"].final
+            + stage["predicted_goal_loss"].final
+        )
+        vector_sum = (
+            stage["real_vector_loss"].final
+            + stage["predicted_vector_loss"].final
+        )
+        loss_scale_parts.append(
+            f"{label} goal/vector {goal_sum:.6g}/{vector_sum:.6g} "
+            f"({goal_sum / max(vector_sum, 1e-12):.2f}x)"
+        )
+    lines.append(
+        "At E10 with lambda_C=1, "
+        + "; ".join(loss_scale_parts)
+        + ". This raw-loss dominance measures optimization scale, not usefulness of the "
+        "goal signal; it means representation conclusions are confounded by unequal "
+        "component magnitudes until the loss scales are balanced."
+    )
+
+    q2_differences = []
+    for protocol in PROTOCOLS:
+        first = int(_score(evidence, protocol, "f_plus_g_first")["success_count"])
+        first_q2 = int(
+            _score(evidence, protocol, "f_plus_g_first_q2")["success_count"]
+        )
+        q2_differences.append(f"{protocol.upper()} {first_q2 - first:+d}/50")
+    lines.append(
+        "First-Q2 minus First-Q is "
+        + ", ".join(q2_differences)
+        + ". This quantifies sensitivity to F/Q scaling; it does not authorize choosing "
+        "a scorer after seeing these formal cells."
+    )
+
+    lines.append(
+        "Next predeclared experiment 1: keep C4 architecture, checkpoints, protocols, and "
+        "six scorer definitions fixed; compare lambda_C or running-scale-normalized vector/goal "
+        "losses chosen only on a disjoint development split, then run the locked choice once "
+        "on each formal protocol."
+    )
+    lines.append(
+        "Next predeclared experiment 2: fit F/Q calibration or an F-versus-C4 gate only on "
+        "separate development pairs, freeze its rule and threshold before formal evaluation, "
+        "and report its deployed result alongside New, Lost, and the non-deployable F+New "
+        "oracle ceiling."
+    )
+    lines.append(
+        "Confirmation target: repeat every locked comparison with multiple training seeds "
+        "and planning seeds, reporting paired uncertainty separately for O25, O50, and O100 "
+        "before making any overall superiority claim."
+    )
     lines.append(
         "These are paired, single-training-seed and single-planning-seed results. "
         "O25, O50, and O100 use different goal offsets, so their percentages describe "
-        "separate protocols and are not pooled as interchangeable episodes."
+        "separate protocols and are not pooled as interchangeable episodes. No scorer is "
+        "selected post hoc from these formal outcomes."
     )
     return lines
 

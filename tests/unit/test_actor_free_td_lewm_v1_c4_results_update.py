@@ -17,6 +17,7 @@ from tdwm.results.actor_free_td_lewm_v1_c4 import (
     C4ReportEvidence,
     C4ResultsUpdateError,
     LossSeries,
+    _analysis_lines,
     load_loss_series,
     load_report_evidence,
     update_docx_document,
@@ -374,6 +375,28 @@ def test_markdown_update_keeps_one_master_table_and_adds_paired_c4_matrices() ->
     )[1].split("### Training loss and evidence", 1)[0]
     assert "| O25 | F-only |" not in paired_section
     assert "18 C4 cells and 900 C4 Boolean outcomes" in updated
+
+
+def test_analysis_is_dynamic_evidence_driven_and_predeclares_next_steps() -> None:
+    analysis = "\n".join(_analysis_lines(_evidence(_summary())))
+
+    for protocol in PROTOCOLS:
+        assert f"{protocol.upper()} scorer pattern for state-only/action-through-F C4" in analysis
+        assert f"{protocol.upper()} complementarity:" in analysis
+    assert "cannot isolate a causal effect" in analysis
+    assert "F+New preserves F successes only by oracle construction" in analysis
+    assert "train goal/vector 24/22 (1.09x)" in analysis
+    assert "validation goal/vector 24/22 (1.09x)" in analysis
+    assert "optimization scale, not usefulness of the goal signal" in analysis
+    assert "First-Q2 minus First-Q is O25" in analysis
+    assert "does not authorize choosing a scorer after seeing" in analysis
+    assert "Next predeclared experiment 1:" in analysis
+    assert "disjoint development split" in analysis
+    assert "Next predeclared experiment 2:" in analysis
+    assert "non-deployable F+New oracle ceiling" in analysis
+    assert "multiple training seeds and planning seeds" in analysis
+    assert "separately for O25, O50, and O100" in analysis
+    assert "No scorer is selected post hoc" in analysis
 
 
 def test_summary_validation_does_not_mutate_input() -> None:
