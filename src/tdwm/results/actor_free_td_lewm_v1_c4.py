@@ -37,6 +37,7 @@ SCORE_MODES = (
     "g_only_f_rollout_mean",
     "f_plus_g_first_q2",
 )
+NONBASELINE_SCORE_MODES = SCORE_MODES[1:]
 SCORE_LABELS = {
     "f_only": "F-only",
     "g_only": "C4-only",
@@ -62,6 +63,17 @@ VARIANT = "c4"
 SECTION_START = "<!-- RESULTS_TD_V1_C4_FORMAL_START -->"
 SECTION_END = "<!-- RESULTS_TD_V1_C4_FORMAL_END -->"
 DOCX_END_MARKER = "RESULTS TD / V1-C4 FORMAL EXTENSION END"
+
+V1_FIXED_COUNTS: dict[str, tuple[int | None, ...]] = {
+    "C": (23, 18, 22, 28, 21, 26, None),
+    "C2": (23, 18, 23, 26, 22, 26, None),
+    "C3": (None, None, None, None, None, None, 26),
+    "D": (23, 22, 21, 25, 26, None, None),
+    "F": (23, 23, 24, 26, 26, None, None),
+    "G1": (23, 21, 24, 26, 25, None, None),
+    "G2": (23, 21, 25, 25, 24, None, None),
+    "G3": (23, 19, 27, 26, 27, None, None),
+}
 
 
 class C4ResultsUpdateError(ValueError):
@@ -679,10 +691,9 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
             f"{protocol.upper()}: best C4 score is {'/'.join(modes)} at {_rate(best)}, "
             f"{delta:+d}/50 ({delta * 2:+d} pp) versus its unchanged F-only baseline."
         )
-    nonbaseline = [mode for mode in SCORE_MODES if mode != "f_only"]
     improved = tied = harmed = 0
     for protocol in PROTOCOLS:
-        for mode in nonbaseline:
+        for mode in NONBASELINE_SCORE_MODES:
             delta = int(
                 _comparison(
                     evidence, protocol, mode, "c4_vs_same_protocol_f_only"
@@ -702,7 +713,7 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
                     evidence, protocol, mode, "c4_vs_v1_c_same_score_mode"
                 )["delta_successes"]
             )
-            for mode in SCORE_MODES
+            for mode in NONBASELINE_SCORE_MODES
         }
         maximum = max(deltas.values())
         minimum = min(deltas.values())
@@ -816,7 +827,7 @@ def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
         ]
     )
     for protocol in PROTOCOLS:
-        for mode in SCORE_MODES:
+        for mode in NONBASELINE_SCORE_MODES:
             paired = _comparison(
                 evidence, protocol, mode, "c4_vs_same_protocol_f_only"
             )
@@ -825,6 +836,26 @@ def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
                 f"{_rate(int(paired['candidate_successes']))} | {paired['new']} | "
                 f"{paired['lost']} | {paired['f_plus_new_successes']} | "
                 f"{int(paired['delta_successes']):+d} |"
+            )
+    lines.extend(
+        [
+            "",
+            "### Paired outcomes relative to V1-C under the same score",
+            "",
+            "| Protocol | Score | V1-C | C4 | New | Lost | Delta |",
+            "|---|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for protocol in PROTOCOLS:
+        for mode in NONBASELINE_SCORE_MODES:
+            paired = _comparison(
+                evidence, protocol, mode, "c4_vs_v1_c_same_score_mode"
+            )
+            lines.append(
+                f"| {protocol.upper()} | {SCORE_LABELS[mode]} | "
+                f"{_rate(int(paired['reference_successes']))} | "
+                f"{_rate(int(paired['candidate_successes']))} | {paired['new']} | "
+                f"{paired['lost']} | {int(paired['delta_successes']):+d} |"
             )
     train = evidence.losses["train"]
     validation = evidence.losses["validation"]
@@ -884,6 +915,149 @@ def _replace_once(text: str, old: str, new: str) -> str:
     return text.replace(old, new, 1)
 
 
+def _v1_fixed_counts(
+    evidence: C4ReportEvidence,
+) -> dict[str, tuple[int | None, ...]]:
+    counts = dict(V1_FIXED_COUNTS)
+    counts["C4"] = tuple(
+        int(_score(evidence, "o50", mode)["success_count"])
+        for mode in SCORE_MODES
+    ) + (None,)
+    return counts
+
+
+def _v1_column_winners(
+    counts: Mapping[str, Sequence[int | None]],
+) -> tuple[tuple[str, ...], ...]:
+    winners: list[tuple[str, ...]] = []
+    for column in range(7):
+        available = {
+            method: values[column]
+            for method, values in counts.items()
+            if values[column] is not None
+        }
+        maximum = max(int(value) for value in available.values())
+        winners.append(
+            tuple(
+                method
+                for method, value in available.items()
+                if int(value) == maximum
+            )
+        )
+    return tuple(winners)
+
+
+def _rewrite_markdown_v1_fixed_markers(
+    text: str,
+    evidence: C4ReportEvidence,
+) -> str:
+    """Recompute fixed V1 column markers without touching alpha markers."""
+
+    counts = _v1_fixed_counts(evidence)
+    winners = _v1_column_winners(counts)
+    alpha_cells = {("C", 3), ("C3", 3), ("C3", 5)}
+    for method, values in counts.items():
+        prefix = f"| V1 | {method} |"
+        matches = [line for line in text.splitlines() if line.startswith(prefix)]
+        if len(matches) != 1:
+            raise C4ResultsUpdateError(
+                f"Markdown V1 fixed row {method!r} matched {len(matches)} times"
+            )
+        original = matches[0]
+        cells = original.split(" | ")
+        if len(cells) != 10:
+            raise C4ResultsUpdateError(
+                f"Markdown V1 fixed row {method!r} is not a ten-column row"
+            )
+        for column, count in enumerate(values):
+            if count is None or (method, column) in alpha_cells:
+                continue
+            cell_index = column + 3
+            cells[cell_index] = re.sub(r"^◆\s*", "", cells[cell_index])
+            if method in winners[column]:
+                cells[cell_index] = "◆ " + cells[cell_index]
+        text = _replace_once(text, original, " | ".join(cells))
+
+    winner_cells: list[str] = []
+    for column, methods in enumerate(winners):
+        maximum = max(
+            int(counts[method][column])
+            for method in methods
+            if counts[method][column] is not None
+        )
+        winner_cells.append(f"{'/'.join(methods)} {maximum}/50")
+    replacement = "| V1 fixed | " + " | ".join(winner_cells) + " |"
+    existing = [
+        line for line in text.splitlines() if line.startswith("| V1 fixed |")
+    ]
+    if len(existing) != 1:
+        raise C4ResultsUpdateError(
+            f"Markdown V1 fixed winner row matched {len(existing)} times"
+        )
+    return _replace_once(text, existing[0], replacement)
+
+
+def _rewrite_markdown_fixed_winner_summary(
+    text: str,
+    evidence: C4ReportEvidence,
+) -> str:
+    """Keep the prose summary consistent with the updated fixed O50 cells."""
+
+    c4_counts = {
+        mode: int(_score(evidence, "o50", mode)["success_count"])
+        for mode in SCORE_MODES
+    }
+    tail_count = c4_counts["f_plus_g"]
+    tail_maximum = max(27, tail_count)
+    tail_names = ["V1-G3"] if tail_maximum == 27 else []
+    if tail_count == tail_maximum:
+        tail_names.append("V1-C4")
+    tail_summary = f"{', '.join(tail_names)}: {_rate(tail_maximum)}"
+
+    fixed_maximum = max(28, *c4_counts.values())
+    fixed_names = ["V1-C + F + first-Q"] if fixed_maximum == 28 else []
+    fixed_names.extend(
+        f"V1-C4 + {SCORE_LABELS[mode]}"
+        for mode, count in c4_counts.items()
+        if count == fixed_maximum
+    )
+    fixed_summary = f"{', '.join(fixed_names)}: {_rate(fixed_maximum)}"
+
+    text = _replace_once(
+        text,
+        "- **按原先固定的主评分列 F+G，描述性领先配置为 V1-G3: 27/50 (54%)。**",
+        f"- **按原先固定的主评分列 F+G，描述性领先配置为 {tail_summary}。**",
+    )
+    text = _replace_once(
+        text,
+        "- **所有固定 E10 单格的最高结果为 V1-C + F + first-Q: 28/50 (56%)。**",
+        f"- **所有固定 E10 单格的最高结果为 {fixed_summary}。**",
+    )
+    text = _replace_once(
+        text,
+        "- **若把五种评分等权平均，描述性领先训练配置为 V1-F, V1-G3（并列 48.8%）。**",
+        "- **在原 477 格基础账的 24 个训练配置内，若把五种评分等权平均，描述性领先训练配置为 V1-F, V1-G3（并列 48.8%）。** C4 作为独立正式扩展在文末按相同 O50 评分逐格报告。",
+    )
+    text = _replace_once(
+        text,
+        "- **按六个训练方法 × 五种评分的版本均值，V1 action encoder 最高（47.3%）。**",
+        "- **在原 477 格基础账的六方法 × 五评分版本均值中，V1 action encoder 最高（47.3%）。** C4 不回填改写该历史聚合口径。",
+    )
+
+    old_conclusion = (
+        "不存在脱离测试评分定义的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 "
+        "**V1-G3: 27/50 (54%)**；若把五种评分等权平均，则 **V1-F, V1-G3 并列领先（48.8%）**；"
+        "固定评分中的最高单格为 **V1-C + F + first-Q: 28/50 (56%)**。"
+    )
+    new_conclusion = (
+        "不存在脱离测试评分定义的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 "
+        f"**{tail_summary}**；在原 477 格基础账的 24 个训练配置内，把五种评分等权平均，"
+        "则 **V1-F, V1-G3 并列领先（48.8%）**；加入 C4 后固定评分中的最高单格为 "
+        f"**{fixed_summary}**。"
+    )
+    return _replace_once(text, old_conclusion, new_conclusion)
+
+
 def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
     """Return the canonical Markdown report with one C4 extension."""
 
@@ -937,17 +1111,7 @@ def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
         for mode in SCORE_MODES
     }
     row_best = max(o50_counts.values())
-    existing_v1 = {
-        "C": (23, 18, 22, 28, 21, 26, None),
-        "C2": (23, 18, 23, 26, 22, 26, None),
-        "C3": (None, None, None, None, None, None, 26),
-        "D": (23, 22, 21, 25, 26, None, None),
-        "F": (23, 23, 24, 26, 26, None, None),
-        "G1": (23, 21, 24, 26, 25, None, None),
-        "G2": (23, 21, 25, 25, 24, None, None),
-        "G3": (23, 19, 27, 26, 27, None, None),
-        "C4": tuple(o50_counts[mode] for mode in SCORE_MODES) + (None,),
-    }
+    existing_v1 = _v1_fixed_counts(evidence)
     column_maxima = tuple(
         max(value[index] for value in existing_v1.values() if value[index] is not None)
         for index in range(7)
@@ -970,6 +1134,8 @@ def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
         + " |"
     )
     text = _replace_once(text, c3_master, c3_master + "\n" + c4_master)
+    text = _rewrite_markdown_v1_fixed_markers(text, evidence)
+    text = _rewrite_markdown_fixed_winner_summary(text, evidence)
 
     text = _replace_once(
         text,
@@ -1078,6 +1244,30 @@ def _replace_paragraph(document: Any, prefix: str, text: str) -> None:
     paragraph = _find_paragraph(document, prefix)
     if len(paragraph.runs) != 1:
         raise C4ResultsUpdateError(f"canonical paragraph {prefix!r} no longer has one run")
+    paragraph.runs[0].text = text
+
+
+def _edit_paragraph(
+    document: Any,
+    prefix: str,
+    *,
+    replacements: Sequence[tuple[str, str]] = (),
+    append: str | None = None,
+) -> None:
+    """Apply narrow edits while retaining every unaffected source sentence."""
+
+    paragraph = _find_paragraph(document, prefix)
+    if len(paragraph.runs) != 1:
+        raise C4ResultsUpdateError(f"canonical paragraph {prefix!r} no longer has one run")
+    text = paragraph.runs[0].text
+    for old, new in replacements:
+        if text.count(old) != 1:
+            raise C4ResultsUpdateError(
+                f"canonical paragraph {prefix!r} does not contain one {old!r}"
+            )
+        text = text.replace(old, new, 1)
+    if append:
+        text = text.rstrip() + " " + append.strip()
     paragraph.runs[0].text = text
 
 
@@ -1201,6 +1391,48 @@ def _update_winner_docx(document: Any) -> None:
         _set_cell_text(target.cells[score_index + 1], f"{names} {maximum}/50", center=True)
 
 
+def _update_global_fixed_conclusion_docx(
+    document: Any,
+    evidence: C4ReportEvidence,
+) -> None:
+    paragraph = _find_paragraph(
+        document, "There is no evaluation-independent training winner."
+    )
+    if len(paragraph.runs) != 1 or "After integrating" not in paragraph.text:
+        raise C4ResultsUpdateError("DOCX global-winner paragraph changed shape")
+    suffix = "After integrating" + paragraph.text.split("After integrating", 1)[1]
+    c4_counts = {
+        mode: int(_score(evidence, "o50", mode)["success_count"])
+        for mode in SCORE_MODES
+    }
+    tail_count = c4_counts["f_plus_g"]
+    if tail_count > 27:
+        tail_text = f"V1-C4 at {_rate(tail_count)}"
+    elif tail_count == 27:
+        tail_text = "V1-G3 and V1-C4 tied at 27/50 (54%)"
+    else:
+        tail_text = "V1-G3 at 27/50 (54%)"
+    c4_maximum = max(c4_counts.values())
+    c4_best = "/".join(
+        SCORE_LABELS[mode]
+        for mode, count in c4_counts.items()
+        if count == c4_maximum
+    )
+    if c4_maximum > 28:
+        fixed_text = f"V1-C4 {c4_best} at {_rate(c4_maximum)}"
+    elif c4_maximum == 28:
+        fixed_text = (
+            f"V1-C First-Q and V1-C4 {c4_best} tied at 28/50 (56%)"
+        )
+    else:
+        fixed_text = "V1-C First-Q at 28/50 (56%)"
+    paragraph.runs[0].text = (
+        "There is no evaluation-independent training winner. The prespecified "
+        f"F+G leader is {tail_text}, and the highest fixed cell is {fixed_text}. "
+        + suffix
+    )
+
+
 def _update_coverage_docx(document: Any) -> None:
     table = document.tables[24]
     if len(table.rows) != 9 or table.rows[-1].cells[-1].text != "505":
@@ -1270,9 +1502,20 @@ def _update_audit_docx(document: Any, evidence: C4ReportEvidence, repository_roo
 
 
 def _style_new_table(table: Any) -> None:
-    _, WD_ALIGN_PARAGRAPH, _, _, Pt, RGBColor, _ = _docx_imports()
+    _, WD_ALIGN_PARAGRAPH, OxmlElement, qn, Pt, RGBColor, _ = _docx_imports()
     table.style = "Table Grid"
     for row_index, row in enumerate(table.rows):
+        row_properties = row._tr.get_or_add_trPr()
+        cant_split = row_properties.find(qn("w:cantSplit"))
+        if cant_split is None:
+            cant_split = OxmlElement("w:cantSplit")
+            row_properties.append(cant_split)
+        if row_index == 0:
+            repeat = row_properties.find(qn("w:tblHeader"))
+            if repeat is None:
+                repeat = OxmlElement("w:tblHeader")
+                row_properties.append(repeat)
+            repeat.set(qn("w:val"), "true")
         for cell in row.cells:
             _set_cell_border(cell, edges=("top", "bottom", "left", "right"), color="D9D9D9", size=4)
             cell.vertical_alignment = _docx_imports()[0].CENTER
@@ -1321,10 +1564,60 @@ def _add_docx_body(document: Any, text: str, *, bold: bool = False) -> Any:
     return paragraph
 
 
+def _start_c4_docx_section(document: Any) -> None:
+    """Start a separately labelled section instead of inheriting O100/C3."""
+
+    from docx.enum.section import WD_SECTION_START
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    section = document.add_section(WD_SECTION_START.NEW_PAGE)
+    section.different_first_page_header_footer = True
+
+    def write_container(container: Any, value: str, alignment: Any) -> None:
+        container.is_linked_to_previous = False
+        paragraph = container.paragraphs[0]
+        paragraph.text = ""
+        paragraph.alignment = alignment
+        run = paragraph.add_run(value)
+        run.font.name = "Aptos"
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor.from_string("667085")
+        run._element.get_or_add_rPr().get_or_add_rFonts().set(
+            qn("w:eastAsia"), "Aptos"
+        )
+
+    # The canonical report enables distinct first/odd/even headers.  Populate
+    # every variant in the new section so no C4 page can inherit an O100/C3
+    # label merely because its physical page parity changes after pagination.
+    for header in (
+        section.header,
+        section.first_page_header,
+        section.even_page_header,
+    ):
+        write_container(
+            header,
+            "Results TD · V1-C4 formal O25 O50 O100 paired evaluation",
+            WD_ALIGN_PARAGRAPH.LEFT,
+        )
+    for footer in (
+        section.footer,
+        section.first_page_footer,
+        section.even_page_footer,
+    ):
+        write_container(
+            footer,
+            "Validated V1-C4 paired outcomes",
+            WD_ALIGN_PARAGRAPH.RIGHT,
+        )
+
+
 def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
     if any(paragraph.text == DOCX_END_MARKER for paragraph in document.paragraphs):
         raise C4ResultsUpdateError("DOCX already contains a C4 formal extension")
-    _add_docx_heading(document, "V1 C4 formal O25 O50 O100 paired evaluation", 1, page_break=True)
+    _start_c4_docx_section(document)
+    _add_docx_heading(document, "V1 C4 formal O25 O50 O100 paired evaluation", 1)
     _add_docx_body(
         document,
         "C4 freezes the V1 observation encoder, Action Encoder and world-model predictor F; every F output is stopped. Only online state-only G_C4 is optimized, with a frozen EMA target. G_C4 accepts state and task only and returns a 192-dimensional successor vector. Raw action and action embedding never enter G_C4.",
@@ -1361,7 +1654,7 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
     for cell, value in zip(paired_table.rows[0].cells, paired_headers):
         _set_cell_text(cell, value, bold=True, center=True)
     for protocol in PROTOCOLS:
-        for mode in SCORE_MODES:
+        for mode in NONBASELINE_SCORE_MODES:
             paired = _comparison(
                 evidence, protocol, mode, "c4_vs_same_protocol_f_only"
             )
@@ -1378,6 +1671,37 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
             for cell, value in zip(row.cells, values):
                 _set_cell_text(cell, value, center=True)
     _style_new_table(paired_table)
+    _start_c4_docx_section(document)
+    _add_docx_heading(
+        document,
+        "Paired outcomes relative to V1 C under the same score",
+        2,
+    )
+    v1_c_table = document.add_table(rows=1, cols=7)
+    for cell, value in zip(
+        v1_c_table.rows[0].cells,
+        ("Protocol", "Score", "V1-C", "C4", "New", "Lost", "Delta"),
+    ):
+        _set_cell_text(cell, value, bold=True, center=True)
+    for protocol in PROTOCOLS:
+        for mode in NONBASELINE_SCORE_MODES:
+            paired = _comparison(
+                evidence, protocol, mode, "c4_vs_v1_c_same_score_mode"
+            )
+            row = v1_c_table.add_row()
+            values = (
+                protocol.upper(),
+                SCORE_LABELS[mode],
+                _rate(int(paired["reference_successes"])),
+                _rate(int(paired["candidate_successes"])),
+                str(paired["new"]),
+                str(paired["lost"]),
+                f"{int(paired['delta_successes']):+d}",
+            )
+            for cell, value in zip(row.cells, values):
+                _set_cell_text(cell, value, center=True)
+    _style_new_table(v1_c_table)
+    _start_c4_docx_section(document)
     _add_docx_heading(document, "Training loss and evidence", 2)
     train = evidence.losses["train"]
     validation = evidence.losses["validation"]
@@ -1433,51 +1757,92 @@ def update_docx_document(document: Any, evidence: C4ReportEvidence, repository_r
         raise C4ResultsUpdateError(
             "DOCX is not the canonical pre-C4 Results TD artifact (expected 46 tables / 276 paragraphs)"
         )
-    _replace_paragraph(document, "Complete 26-method", "Complete 27-method, seven-score results and analysis")
+    _edit_paragraph(
+        document,
+        "Complete 26-method",
+        replacements=(("Complete 26-method", "Complete 27-method"),),
+    )
     _replace_paragraph(
         document,
         "Cube · seed 3072 · 477 base",
         "Cube · seed 3072 · 477 base + 8 endpoints + 20 alpha-sweep + 6 C4 cells = 511 O50 cells",
     )
-    _replace_paragraph(
+    _edit_paragraph(
         document,
         "The preceding pages preserve",
-        "The preceding pages preserve the detailed Legacy and V0/V1 method reference. This section integrates the complete 477-cell base audit, eight strict C2-E10/C3-E12 endpoint cells, all 20 First-Q alpha-sweep cells, and six formal V1-C4 O50 cells in one master matrix. Every O50 result uses the same 50 start-goal pairs; together they retain 25,550 Boolean outcomes. All training uses one seed, and the alpha-sweep peak remains exploratory.",
+        replacements=(
+            (
+                "and all 20 First-Q alpha-sweep cells in one master matrix.",
+                "all 20 First-Q alpha-sweep cells, and six formal V1-C4 O50 cells in one master matrix.",
+            ),
+            (
+                "Every result uses the same 50 start-goal pairs; the three audited components retain 25,250 Boolean outcomes.",
+                "Every O50 result uses the same 50 start-goal pairs; the original three audited components retain 25,250 Boolean outcomes, and the six V1-C4 O50 cells raise that ledger to 25,550.",
+            ),
+        ),
     )
-    _replace_paragraph(
+    _edit_paragraph(
         document,
         "The original fixed-E10 analysis remains unchanged",
-        "The original fixed-E10 analysis remains unchanged in its 477-cell base ledger. The original endpoint and alpha ledgers also keep their existing fingerprints. Adding six formal V1-C4 O50 cells extends the complete document from 505 to 511 O50 cells and from 25,250 to 25,550 pair-level outcomes.",
+        replacements=(
+            (
+                "the complete document covers 505 O50 cells and 25,250 pair-level outcomes.",
+                "the pre-C4 document covers 505 O50 cells and 25,250 pair-level outcomes; six formal V1-C4 O50 cells extend the ledger to 511 cells and 25,550 pair-level outcomes.",
+            ),
+        ),
     )
-    _replace_paragraph(
+    _edit_paragraph(
         document,
         "This section defines the seven score families",
-        "This section defines the seven score families in the 27-method matrix. z0 is the latent of the current real observation, z_g is the supplied goal-image latent, and z_k^F is the imagined latent after k LeWM steps. The V1-C and V1-C3 alpha cells remain a separate exploratory comparison scope. Standard action-conditioned methods use Q_G(z,A,g)=G(z,e,w(g))^T w(g); state-only C4 uses q_C4(z,m)=G_C4(z,m)^T m after action has passed through F.",
+        replacements=(("26-method matrix", "27-method matrix"),),
+        append=(
+            "For state-only C4, m uses that same normalized goal representation and "
+            "q_C4(z,m)=G_C4(z,m)^T m; candidate actions can reach G_C4 only after "
+            "they have changed an F-produced imagined state."
+        ),
     )
-    _replace_paragraph(
+    _edit_paragraph(
         document,
         "Action input differs only by training version",
-        "Action input differs by training version: V0 passes normalized 25D action blocks directly to G; V1, V1-C2, V2 and V2-EMA use e=E_A(A). V1-C3 State-V has no G action input after F produces z5. V1-C4 is stricter: state-only G_C4 never sees raw action or action embedding; candidate action can affect its score only by first changing an F-produced imagined state.",
+        replacements=(("differs only", "differs"),),
+        append=(
+            "V1-C4 is stricter: state-only G_C4 never sees raw action or action "
+            "embedding; a candidate action affects its score only through an "
+            "F-produced imagined state."
+        ),
     )
     _replace_paragraph(
         document,
         "26-method, seven-score master comparison",
         "27-method, seven-score master comparison with the integrated alpha sweep",
     )
-    _replace_paragraph(
+    _edit_paragraph(
         document,
         "Read across a row to compare",
-        "Read across a row to compare all available scores for one training method; read down a column only inside one version block. V1 includes C2, C3 and C4 beside C. For the fixed 27-method matrix, yellow is the row best, blue is the within-version column best, and teal is both; all ties are retained. The dedicated alpha submatrix remains excluded from this fixed winner recomputation.",
+        replacements=(
+            ("V1 includes C2/C3 beside C", "V1 includes C2/C3/C4 beside C"),
+            (
+                "Yellow marks a row best, blue a sweep-column best, and teal both; all ties are retained. Fixed-score and exploratory-sweep winners are kept as separate comparison scopes.",
+                "For the fixed 27-method cells, yellow marks a row best, blue a within-version column best, and teal both; all ties are retained. The dedicated alpha submatrix keeps its separate exploratory winner scope and is excluded from the fixed winner recomputation.",
+            ),
+        ),
     )
-    _replace_paragraph(
+    _edit_paragraph(
         document,
         "The Training loss column shows",
-        "The Training loss column shows each method-specific G objective. C4 is the only V1 row with equal real and stopped-F-predicted state-only branches: one half of the four vector/goal terms. V0/V1 C-G3 retain their existing real-branch objectives; V2/V2-EMA retain L_pred + 0.09 L_SIGReg + rho(L_method^real + L_method^pred).",
+        append=(
+            "C4 is the only V1 row with equal real and stopped-F-predicted "
+            "state-only branches: one half of its four vector/goal terms."
+        ),
     )
-    _replace_paragraph(
+    _edit_paragraph(
         document,
         "V1-C2 initializes every parameter",
-        "V1-C2 initializes from V1-C E10 and fine-tunes only G with its ranking CE. V1-C3 freezes the complete V1-C parent and trains only EMA-targeted State-V. V1-C4 instead starts a new state-only G_C4 over the same frozen V1 LeWM: real z_i and stop-gradient F(z_(i-1),a_(i-1)) share the target z_i + gamma(1-d_i)Gbar_C4(z_(i+1),m), and only online G_C4 is optimized.",
+        append=(
+            "V1-C4 instead starts a new state-only G_C4 over the same frozen V1 "
+            "LeWM: real z_i and stop-gradient F(z_(i-1),a_(i-1)) share the target "
+            "z_i + gamma(1-d_i)Gbar_C4(z_(i+1),m), and only online G_C4 is optimized."
+        ),
     )
     _replace_paragraph(
         document,
@@ -1486,6 +1851,7 @@ def update_docx_document(document: Any, evidence: C4ReportEvidence, repository_r
     )
     _update_master_docx(document, evidence)
     _update_winner_docx(document)
+    _update_global_fixed_conclusion_docx(document, evidence)
     _update_coverage_docx(document)
     _update_method_docx(document)
     _update_audit_docx(document, evidence, repository_root)

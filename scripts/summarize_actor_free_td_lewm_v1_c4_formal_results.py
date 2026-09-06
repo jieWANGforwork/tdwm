@@ -30,6 +30,7 @@ SCORE_MODES = (
     "g_only_f_rollout_mean",
     "f_plus_g_first_q2",
 )
+NONBASELINE_SCORE_MODES = SCORE_MODES[1:]
 SCORE_LABELS = {
     "f_only": "F-only",
     "g_only": "G/C4-only",
@@ -52,6 +53,19 @@ METHODS = {
 }
 EXPECTED_EPISODES = 50
 GOAL_OFFSET_BY_PROTOCOL = {"o25": 25, "o50": 50, "o100": 100}
+EXPECTED_SELECTION_FILE_SHA256_BY_PROTOCOL = {
+    "o25": "56546fe8725ce0e4670f308c5b325bd64ff2a792373add8c20ddbcab02da6b37",
+    "o50": "e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7",
+    "o100": "8a87815e8e1816ccb5021af81a5e2307a5b342d094eec3edf221a0e24851d10c",
+}
+EXPECTED_SELECTION_RANKS_SHA256_BY_PROTOCOL = {
+    "o25": "72af45d4bad65a25288c5d405072d18ab5c0b4f0b67ddc970ac3f344b3c22fd9",
+    "o50": "88c204770f33c0b0220057d45b187766e3cfc54912e3f5ca49f2aa93d16437e9",
+    "o100": "36994b1ab36656666ff91b379a59829c4b2af150b1f4ed23d409deb5cca9654e",
+}
+EXPECTED_ACTION_NORMALIZATION_SHA256 = (
+    "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723"
+)
 SUMMARY_JSON_NAME = "actor_free_td_lewm_v1_c4_formal_summary.json"
 EPISODE_CSV_NAME = "actor_free_td_lewm_v1_c4_formal_episode_matrix.csv"
 SUMMARY_MARKDOWN_NAME = "actor_free_td_lewm_v1_c4_formal_summary.md"
@@ -194,10 +208,85 @@ def _required_mapping(value: Any, *, label: str) -> Mapping[str, Any]:
     return value
 
 
-def _optional_source(path: Path) -> dict[str, str] | None:
-    if not path.is_file():
-        return None
-    return {"path": str(path.resolve()), "sha256": _file_sha256(path)}
+def _validate_formal_protocol(
+    protocol_value: Mapping[str, Any],
+    *,
+    protocol: str,
+    score_mode: str,
+    label: str,
+) -> None:
+    """Validate the shared V1-C/C4 formal planning contract.
+
+    Historical V1-C manifests and new C4 manifests use different method-
+    specific fields, but both retain the same ``evaluation``, ``planning`` and
+    ``inference_objective`` mappings.  Restrict this downstream audit to that
+    stable common surface so old, genuine V1-C evidence remains readable while
+    a run with changed CEM settings cannot be relabelled as formal.
+    """
+
+    evaluation = _required_mapping(
+        protocol_value.get("evaluation"), label=f"{label}.evaluation"
+    )
+    expected_evaluation = {
+        "episodes": EXPECTED_EPISODES,
+        "goal_offset": GOAL_OFFSET_BY_PROTOCOL[protocol],
+        "start_goal_source": "same_dataset_episode",
+    }
+    for key, expected in expected_evaluation.items():
+        if evaluation.get(key) != expected:
+            raise ValueError(f"{label}.evaluation.{key} must be {expected!r}.")
+
+    planning = _required_mapping(
+        protocol_value.get("planning"), label=f"{label}.planning"
+    )
+    expected_horizon = 1 if score_mode == "g_only" else 5
+    expected_receding_horizon = (
+        1 if protocol in {"o50", "o100"} or score_mode == "g_only" else 5
+    )
+    expected_budget = {"o25": 50, "o50": 100, "o100": 200}[protocol]
+    expected_planning: dict[str, Any] = {
+        "solver": "CEM",
+        "horizon": expected_horizon,
+        "candidates": 300,
+        "iterations": 30,
+        "elites": 30,
+        "action_block": 5,
+        "frame_skip": 5,
+        "history_len": 1,
+        "receding_horizon": expected_receding_horizon,
+        "episode_budget": expected_budget,
+        "planning_seed": 42,
+    }
+    if protocol == "o25":
+        expected_planning["executed_environment_steps_before_replanning"] = (
+            expected_receding_horizon * 5
+        )
+    for key, expected in expected_planning.items():
+        actual = planning.get(key)
+        if actual != expected or (
+            type(expected) is int and type(actual) is not int
+        ):
+            raise ValueError(f"{label}.planning.{key} must be {expected!r}.")
+
+    inference = _required_mapping(
+        protocol_value.get("inference_objective"),
+        label=f"{label}.inference_objective",
+    )
+    if inference.get("score_mode") != score_mode:
+        raise ValueError(
+            f"{label}.inference_objective.score_mode must be {score_mode!r}."
+        )
+    if score_mode in {"f_plus_g_first", "f_plus_g_first_q2"}:
+        try:
+            weight = float(inference.get("g_first_weight"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{label}.inference_objective.g_first_weight must be 0.25."
+            ) from error
+        if not math.isclose(weight, 0.25, abs_tol=1e-12):
+            raise ValueError(
+                f"{label}.inference_objective.g_first_weight must be 0.25."
+            )
 
 
 def _load_cell(
@@ -225,6 +314,20 @@ def _load_cell(
         protocol=protocol,
         label=f"{method_key}.{protocol}.{score_mode}.selection",
     )
+    selection_file_sha = _file_sha256(paths["selection"])
+    expected_selection_sha = EXPECTED_SELECTION_FILE_SHA256_BY_PROTOCOL[protocol]
+    if selection_file_sha != expected_selection_sha:
+        raise ValueError(
+            f"{paths['selection']} is not the locked {protocol.upper()} selection: "
+            f"expected {expected_selection_sha}, found {selection_file_sha}."
+        )
+    ranks_sha = _canonical_json_sha256(selection["valid_row_ranks"])
+    expected_ranks_sha = EXPECTED_SELECTION_RANKS_SHA256_BY_PROTOCOL[protocol]
+    if ranks_sha != expected_ranks_sha:
+        raise ValueError(
+            f"{paths['selection']} has the wrong ordered valid-row ranks: "
+            f"expected {expected_ranks_sha}, found {ranks_sha}."
+        )
 
     method = METHODS[method_key]
     expected = {
@@ -278,8 +381,27 @@ def _load_cell(
             f"{paths['manifest']}.protocol.inference_objective.score_mode is "
             "incorrect."
         )
+    _validate_formal_protocol(
+        manifest_protocol,
+        protocol=protocol,
+        score_mode=score_mode,
+        label=f"{paths['manifest']}.protocol",
+    )
     if manifest.get("selection") != selection_value:
         raise ValueError(f"{paths['manifest']} does not embed its selection file.")
+
+    action_normalization_path = directory / "action_normalization.json"
+    if not action_normalization_path.is_file():
+        raise FileNotFoundError(
+            f"{method_key}/{protocol}/{score_mode} has no action_normalization.json."
+        )
+    action_normalization_sha = _file_sha256(action_normalization_path)
+    if action_normalization_sha != EXPECTED_ACTION_NORMALIZATION_SHA256:
+        raise ValueError(
+            f"{action_normalization_path} does not match the locked action "
+            f"normalization: expected {EXPECTED_ACTION_NORMALIZATION_SHA256}, "
+            f"found {action_normalization_sha}."
+        )
 
     metrics = _required_mapping(
         results.get("metrics"), label=f"{paths['results']}.metrics"
@@ -331,16 +453,15 @@ def _load_cell(
         },
         "episode_selection": {
             "path": str(paths["selection"].resolve()),
-            "sha256": _file_sha256(paths["selection"]),
-            "valid_row_ranks_sha256": _canonical_json_sha256(
-                selection["valid_row_ranks"]
-            ),
+            "sha256": selection_file_sha,
+            "valid_row_ranks_sha256": ranks_sha,
         },
         "checkpoint": {"path": checkpoint_path, "sha256": checkpoint_sha},
+        "action_normalization": {
+            "path": str(action_normalization_path.resolve()),
+            "sha256": action_normalization_sha,
+        },
     }
-    action_normalization = _optional_source(directory / "action_normalization.json")
-    if action_normalization is not None:
-        source["action_normalization"] = action_normalization
     return Cell(
         method_key=method_key,
         protocol=protocol,
@@ -697,7 +818,7 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             comparisons["c4_vs_same_protocol_f_only"],
             label=f"{protocol}.versus_f",
         )
-        for mode in SCORE_MODES:
+        for mode in NONBASELINE_SCORE_MODES:
             paired = _required_mapping(versus_f[mode], label=mode)
             lines.append(
                 f"| {SCORE_LABELS[mode]} | "
@@ -721,7 +842,7 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             comparisons["c4_vs_v1_c_same_score_mode"],
             label=f"{protocol}.versus_c",
         )
-        for mode in SCORE_MODES:
+        for mode in NONBASELINE_SCORE_MODES:
             paired = _required_mapping(versus_c[mode], label=mode)
             lines.append(
                 f"| {SCORE_LABELS[mode]} | "

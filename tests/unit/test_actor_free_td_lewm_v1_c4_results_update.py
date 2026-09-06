@@ -356,7 +356,7 @@ def test_load_report_evidence_binds_checkpoint_and_optional_png(tmp_path: Path) 
         )
 
 
-def test_markdown_update_keeps_one_master_table_and_adds_two_c4_matrices() -> None:
+def test_markdown_update_keeps_one_master_table_and_adds_paired_c4_matrices() -> None:
     report = Path(__file__).resolve().parents[2] / "reports" / "actor_free_td_lewm_complete_cube_seed3072.md"
     updated = update_markdown_text(report.read_text(encoding="utf-8"), _evidence(_summary()))
     assert "## 27 个训练方法 × 7 种评分" in updated
@@ -365,9 +365,14 @@ def test_markdown_update_keeps_one_master_table_and_adds_two_c4_matrices() -> No
     assert "| **TOTAL** | — | — | same locked O50 selection | **511** |" in updated
     assert updated.count("### Protocol by score matrix") == 1
     assert updated.count("### Paired outcomes relative to same-protocol F-only") == 1
+    assert updated.count("### Paired outcomes relative to V1-C under the same score") == 1
     section = updated.split("<!-- RESULTS_TD_V1_C4_FORMAL_START -->", 1)[1]
     paired_lines = [line for line in section.splitlines() if line.startswith(("| O25 |", "| O50 |", "| O100 |"))]
-    assert len(paired_lines) == 21  # 3 protocol-matrix rows + 18 paired rows
+    assert len(paired_lines) == 33  # 3 score rows + two 15-row paired tables
+    paired_section = section.split(
+        "### Paired outcomes relative to same-protocol F-only", 1
+    )[1].split("### Training loss and evidence", 1)[0]
+    assert "| O25 | F-only |" not in paired_section
     assert "18 C4 cells and 900 C4 Boolean outcomes" in updated
 
 
@@ -376,6 +381,29 @@ def test_summary_validation_does_not_mutate_input() -> None:
     before = deepcopy(summary)
     validate_summary(summary)
     assert summary == before
+
+
+def test_markdown_recomputes_v1_fixed_markers_and_winner_row() -> None:
+    report = Path(__file__).resolve().parents[2] / "reports" / "actor_free_td_lewm_complete_cube_seed3072.md"
+    summary = _summary()
+    summary["protocols"]["o50"]["methods"]["c4"]["scores"]["f_only"][
+        "success_count"
+    ] = 30
+    updated = update_markdown_text(report.read_text(encoding="utf-8"), _evidence(summary))
+    c_row = next(line for line in updated.splitlines() if line.startswith("| V1 | C |"))
+    c4_row = next(line for line in updated.splitlines() if line.startswith("| V1 | C4 |"))
+    winner_row = next(
+        line for line in updated.splitlines() if line.startswith("| V1 fixed |")
+    )
+    assert c_row.split(" | ")[3].startswith("23/50")
+    assert c4_row.split(" | ")[3].startswith("◆ **30/50")
+    assert "| V1 fixed | C4 30/50 |" in winner_row
+    assert (
+        "所有固定 E10 单格的最高结果为 V1-C4 + F-only: 30/50 (60%)"
+        in updated
+    )
+    assert "加入 C4 后固定评分中的最高单格为 **V1-C4 + F-only: 30/50 (60%)**" in updated
+    assert "在原 477 格基础账的 24 个训练配置内" in updated
 
 
 def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -> None:
@@ -403,4 +431,31 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
         "0e5b541bdb11cf6d647fc1e679499a02c3aa430d64e37c8819d02c44e1dcb900"
     )
     assert any(paragraph.text == "RESULTS TD / V1-C4 FORMAL EXTENSION END" for paragraph in document.paragraphs)
-    assert len(document.tables) == 49
+    assert len(document.tables) == 50
+    assert len(document.tables[47].rows) == 16
+    assert all(row.cells[1].text != "F-only" for row in document.tables[47].rows[1:])
+    assert len(document.tables[48].rows) == 16
+    assert document.tables[48].rows[0].cells[2].text == "V1-C"
+    assert len(document.sections) == 11
+    for c4_section in document.sections[-3:]:
+        assert c4_section.different_first_page_header_footer is True
+        for header in (
+            c4_section.header,
+            c4_section.first_page_header,
+            c4_section.even_page_header,
+        ):
+            assert header.is_linked_to_previous is False
+            assert "V1-C4 formal O25 O50 O100" in header.paragraphs[0].text
+        for footer in (
+            c4_section.footer,
+            c4_section.first_page_footer,
+            c4_section.even_page_footer,
+        ):
+            assert footer.is_linked_to_previous is False
+            assert "Validated V1-C4 paired outcomes" in footer.paragraphs[0].text
+    repeat = document.tables[49].rows[0]._tr.get_or_add_trPr().find(qn("w:tblHeader"))
+    assert repeat is not None
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "w(g)=sqrt(192) z_g/||z_g||_2" in text
+    assert "Every A_k is one 25D block of five consecutive 5D primitive actions" in text
+    assert "tau=0.03, gamma=0.98, n<=50 primitive steps" in text

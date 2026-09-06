@@ -18,6 +18,7 @@ assert SPEC is not None and SPEC.loader is not None
 SUMMARY = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = SUMMARY
 SPEC.loader.exec_module(SUMMARY)
+_TEST_LOCKED_PROTOCOLS: set[str] = set()
 
 
 def _selection(protocol: str, *, rank_offset: int = 0) -> dict[str, list[int]]:
@@ -95,6 +96,30 @@ def _write_cell(
             "success_rate": sum(outcomes) * 2.0,
         },
     }
+    horizon = 1 if score_mode == "g_only" else 5
+    receding_horizon = (
+        1 if protocol in {"o50", "o100"} or score_mode == "g_only" else 5
+    )
+    planning = {
+        "solver": "CEM",
+        "horizon": horizon,
+        "candidates": 300,
+        "iterations": 30,
+        "elites": 30,
+        "action_block": 5,
+        "frame_skip": 5,
+        "history_len": 1,
+        "receding_horizon": receding_horizon,
+        "episode_budget": {"o25": 50, "o50": 100, "o100": 200}[protocol],
+        "planning_seed": 42,
+    }
+    if protocol == "o25":
+        planning["executed_environment_steps_before_replanning"] = (
+            receding_horizon * 5
+        )
+    inference = {"score_mode": score_mode}
+    if score_mode in {"f_plus_g_first", "f_plus_g_first_q2"}:
+        inference["g_first_weight"] = 0.25
     manifest = {
         "protocol_label": protocol,
         "evaluation_protocol": protocol.upper(),
@@ -105,9 +130,12 @@ def _write_cell(
             "method": method["method"],
             "variant": method["variant"],
             "evaluation": {
-                "goal_offset": SUMMARY.GOAL_OFFSET_BY_PROTOCOL[protocol]
+                "episodes": 50,
+                "goal_offset": SUMMARY.GOAL_OFFSET_BY_PROTOCOL[protocol],
+                "start_goal_source": "same_dataset_episode",
             },
-            "inference_objective": {"score_mode": score_mode},
+            "inference_objective": inference,
+            "planning": planning,
         },
         "checkpoint": {
             "path": f"/server/{method_key}/epoch_10.pt",
@@ -118,12 +146,23 @@ def _write_cell(
     (directory / "protocol_manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
     )
-    (directory / "episode_selection.json").write_text(
+    selection_path = directory / "episode_selection.json"
+    selection_path.write_text(
         json.dumps(selection), encoding="utf-8"
     )
-    (directory / "action_normalization.json").write_text(
-        json.dumps({"protocol": protocol}), encoding="utf-8"
+    action_path = directory / "action_normalization.json"
+    action_path.write_text(
+        json.dumps({"normalization": "shared-test-fixture"}), encoding="utf-8"
     )
+    if protocol not in _TEST_LOCKED_PROTOCOLS:
+        SUMMARY.EXPECTED_SELECTION_FILE_SHA256_BY_PROTOCOL[protocol] = (
+            SUMMARY._file_sha256(selection_path)
+        )
+        SUMMARY.EXPECTED_SELECTION_RANKS_SHA256_BY_PROTOCOL[protocol] = (
+            SUMMARY._canonical_json_sha256(selection["valid_row_ranks"])
+        )
+        _TEST_LOCKED_PROTOCOLS.add(protocol)
+    SUMMARY.EXPECTED_ACTION_NORMALIZATION_SHA256 = SUMMARY._file_sha256(action_path)
 
 
 def _write_method(
@@ -217,6 +256,9 @@ def test_writes_one_json_wide_episode_csv_and_markdown(tmp_path: Path) -> None:
     assert "## O100" in markdown
     assert "New | Lost | F+New" in markdown
     assert "C4 relative to V1-C" in markdown
+    assert "| F-only |" not in markdown.split(
+        "### C4 relative to its same-protocol F-only baseline", 1
+    )[1].split("## O50", 1)[0]
     assert SUMMARY.EPISODE_CSV_NAME in markdown
 
     assert SUMMARY.write_outputs(summary, tmp_path / "summary") == paths
@@ -239,7 +281,7 @@ def test_rejects_cross_method_selection_rank_mismatch(tmp_path: Path) -> None:
             rank_offset=1000 if protocol == "o50" else 0,
         )
 
-    with pytest.raises(ValueError, match="between C4 and V1-C for O50"):
+    with pytest.raises(ValueError, match="locked O50 selection"):
         SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
 
 
@@ -333,6 +375,90 @@ def test_rejects_non_boolean_outcome_and_missing_cell(tmp_path: Path) -> None:
     )
     (missing / "results.json").unlink()
     with pytest.raises(FileNotFoundError, match="No c4/o100/f_plus_g result cell"):
+        SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
+
+
+def test_rejects_changed_formal_planning_and_action_normalization(
+    tmp_path: Path,
+) -> None:
+    c4_root, v1_c_roots = _complete_inputs(tmp_path)
+    cell = _cell_directory(
+        c4_root, protocol="o50", variant="c4", score_mode="f_plus_g"
+    )
+    manifest_path = cell / "protocol_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["protocol"]["planning"]["planning_seed"] = 43
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="planning_seed must be 42"):
+        SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
+
+    c4_root, v1_c_roots = _complete_inputs(tmp_path / "normalization")
+    cell = _cell_directory(
+        c4_root, protocol="o100", variant="c4", score_mode="g_only"
+    )
+    (cell / "action_normalization.json").write_text(
+        json.dumps({"normalization": "changed"}), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="locked action normalization"):
+        SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
+
+
+@pytest.mark.parametrize(
+    ("protocol", "score_mode", "key", "changed"),
+    (
+        ("o25", "f_plus_g", "solver", "MPPI"),
+        ("o25", "f_plus_g", "candidates", 301),
+        ("o25", "f_plus_g", "iterations", 29),
+        ("o25", "f_plus_g", "elites", 31),
+        ("o25", "f_plus_g", "action_block", 4),
+        ("o25", "f_plus_g", "horizon", 4),
+        ("o25", "f_plus_g", "receding_horizon", 1),
+        ("o25", "f_plus_g", "episode_budget", 49),
+        (
+            "o25",
+            "f_plus_g",
+            "executed_environment_steps_before_replanning",
+            5,
+        ),
+        ("o50", "g_only", "horizon", 5),
+        ("o100", "f_plus_g", "episode_budget", 100),
+    ),
+)
+def test_rejects_each_changed_formal_cem_contract_field(
+    tmp_path: Path,
+    protocol: str,
+    score_mode: str,
+    key: str,
+    changed: object,
+) -> None:
+    c4_root, v1_c_roots = _complete_inputs(tmp_path)
+    cell = _cell_directory(
+        c4_root,
+        protocol=protocol,
+        variant="c4",
+        score_mode=score_mode,
+    )
+    manifest_path = cell / "protocol_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["protocol"]["planning"][key] = changed
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match=rf"planning\.{key} must be"):
+        SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
+
+
+def test_rejects_smoke_or_pilot_result_cell(tmp_path: Path) -> None:
+    c4_root, v1_c_roots = _complete_inputs(tmp_path)
+    cell = _cell_directory(
+        c4_root,
+        protocol="o50",
+        variant="c4",
+        score_mode="f_only",
+    )
+    result_path = cell / "results.json"
+    result = json.loads(result_path.read_text())
+    result["smoke"] = True
+    result_path.write_text(json.dumps(result))
+    with pytest.raises(ValueError, match=r"results\.json\.smoke must be False"):
         SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
 
 
