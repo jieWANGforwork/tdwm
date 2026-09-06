@@ -9,6 +9,7 @@ from torch import nn
 from tdwm.methods.actor_free_td_lewm_v1_c4 import (
     ActorFreeTDJEPAPredictorV1C4,
     build_two_branch_td_loss_v1_c4,
+    ema_update_target_v1_c4,
     predict_frozen_lewm_aligned_state_v1_c4,
     successor_td_target_v1_c4,
 )
@@ -219,3 +220,32 @@ def test_random_only_batch_has_vector_td_but_zero_goal_projection() -> None:
     assert output.predicted.goal_loss.item() == 0.0
     assert output.real.vector_loss.item() > 0.0
     assert output.predicted.vector_loss.item() > 0.0
+
+
+def test_c4_ema_updates_target_by_decay_and_keeps_it_frozen() -> None:
+    online = _predictor()
+    target = online.make_target()
+    with torch.no_grad():
+        for parameter in online.parameters():
+            parameter.fill_(2.0)
+        for parameter in target.parameters():
+            parameter.fill_(-2.0)
+    online_before = {
+        name: parameter.detach().clone()
+        for name, parameter in online.named_parameters()
+    }
+    target_before = {
+        name: parameter.detach().clone()
+        for name, parameter in target.named_parameters()
+    }
+    target.train()
+
+    ema_update_target_v1_c4(target, online, decay=0.75)
+
+    assert not target.training
+    assert all(not parameter.requires_grad for parameter in target.parameters())
+    for name, parameter in target.named_parameters():
+        expected = 0.75 * target_before[name] + 0.25 * online_before[name]
+        torch.testing.assert_close(parameter, expected)
+    for name, parameter in online.named_parameters():
+        torch.testing.assert_close(parameter, online_before[name])

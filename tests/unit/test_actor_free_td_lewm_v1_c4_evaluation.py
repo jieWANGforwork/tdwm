@@ -171,7 +171,7 @@ def test_f_plus_c4_uses_full_rollout_z4_cost_and_zhat5_state_only_tail() -> None
 
 
 @pytest.mark.parametrize("score_mode", ("f_plus_g_first", "f_plus_g_first_q2"))
-def test_c4_first_q_reads_zhat1_after_full_five_action_rollout(
+def test_c4_first_q_uses_exact_raw_or_zscore_formula_after_full_f_rollout(
     score_mode: str,
 ) -> None:
     future = torch.zeros(1, 3, 5, 192)
@@ -186,8 +186,20 @@ def test_c4_first_q_reads_zhat1_after_full_five_action_rollout(
 
     assert torch.equal(world.rollout_actions[0], actions)
     assert torch.equal(predictor.states[0], future[..., 0, :])
-    assert cost.shape == (1, 3)
-    assert bool(torch.isfinite(cost).all())
+    f_cost = torch.tensor([[1.0, 5.0, 17.0]])
+    q_first = math.sqrt(192.0) * torch.tensor([[1.0, 2.0, 10.0]])
+    if score_mode == "f_plus_g_first_q2":
+        f_cost = (f_cost - f_cost.mean(dim=1, keepdim=True)) / f_cost.std(
+            dim=1,
+            correction=0,
+            keepdim=True,
+        )
+        q_first = (q_first - q_first.mean(dim=1, keepdim=True)) / q_first.std(
+            dim=1,
+            correction=0,
+            keepdim=True,
+        )
+    torch.testing.assert_close(cost, f_cost - 0.25 * q_first)
 
 
 def test_c4_mean_q_reads_all_five_f_successor_states() -> None:
