@@ -24,10 +24,8 @@ FORMAL_STEPS_PER_EPOCH = 12_796
 FORMAL_OPTIMIZER_UPDATES = FORMAL_EPOCHS * FORMAL_STEPS_PER_EPOCH
 
 LOSS_FIELDS = (
-    "real_vector_loss",
-    "real_goal_loss",
-    "predicted_vector_loss",
-    "predicted_goal_loss",
+    "vector_td_loss",
+    "goal_projection_loss",
     "c4_total_loss",
 )
 
@@ -288,15 +286,15 @@ def load_epoch_metrics(path: str | Path) -> list[dict[str, int | float]]:
             components = sum(
                 float(item[f"{stage}_{field}"]) for field in LOSS_FIELDS[:-1]
             )
-            expected_total = 0.5 * components
+            expected_total = components
             actual_total = float(item[f"{stage}_c4_total_loss"])
             if not math.isclose(
                 actual_total, expected_total, rel_tol=2e-5, abs_tol=1e-7
             ):
                 raise ValueError(
                     f"epoch {zero_based_epoch + 1} {stage} C4 total does not "
-                    "equal 0.5 * (real_vector + real_goal + predicted_vector + "
-                    f"predicted_goal): expected {expected_total}, found "
+                    "equal vector_td_loss + goal_projection_loss: "
+                    f"expected {expected_total}, found "
                     f"{actual_total}."
                 )
         epochs.append(item)
@@ -353,10 +351,8 @@ def render_loss_chart(
     temporary = output.with_name(f".{output.name}.tmp")
     epoch_numbers = [int(row["epoch"]) for row in epochs]
     component_specs = (
-        ("real_vector_loss", "Real / vector", "#2F5597"),
-        ("real_goal_loss", "Real / goal", "#C55A11"),
-        ("predicted_vector_loss", "Predicted / vector", "#548235"),
-        ("predicted_goal_loss", "Predicted / goal", "#7030A0"),
+        ("vector_td_loss", "Vector TD", "#2F5597"),
+        ("goal_projection_loss", "Goal projection", "#C55A11"),
     )
 
     figure = plt.figure(figsize=(13.2, 9.0), dpi=dpi)
@@ -420,10 +416,7 @@ def render_loss_chart(
         figure.text(
             0.5,
             0.94,
-            (
-                "Total = 0.5 × (real/vector + real/goal + "
-                "predicted/vector + predicted/goal)"
-            ),
+            "Total = vector TD + goal projection",
             ha="center",
             color="#5C6975",
         )
@@ -474,10 +467,7 @@ def build_training_summary(
             "optimizer_updates": FORMAL_OPTIMIZER_UPDATES,
             "lightning_final_step_zero_based": FORMAL_OPTIMIZER_UPDATES - 1,
             "loss_fields": list(LOSS_FIELDS),
-            "total_loss_definition": (
-                "0.5*(real_vector_loss+real_goal_loss+"
-                "predicted_vector_loss+predicted_goal_loss)"
-            ),
+            "total_loss_definition": "vector_td_loss+goal_projection_loss",
         },
         "source_files": {
             "metrics_csv": {

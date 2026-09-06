@@ -24,12 +24,10 @@ def _component_values(epoch: int, *, validation: bool) -> dict[str, float]:
     offset = 0.25 if validation else 0.0
     scale = float(epoch + 1)
     components = {
-        "real_vector_loss": 8.0 / scale + offset,
-        "real_goal_loss": 16.0 / scale + offset,
-        "predicted_vector_loss": 10.0 / scale + offset,
-        "predicted_goal_loss": 18.0 / scale + offset,
+        "vector_td_loss": 8.0 / scale + offset,
+        "goal_projection_loss": 16.0 / scale + offset,
     }
-    components["c4_total_loss"] = 0.5 * sum(components.values())
+    components["c4_total_loss"] = sum(components.values())
     return components
 
 
@@ -150,6 +148,9 @@ def test_completed_c4_run_writes_json_epoch_csv_and_loss_png(
     assert payload["formal_contract"]["epochs"] == 10
     assert payload["formal_contract"]["optimizer_updates"] == 127_960
     assert payload["formal_contract"]["loss_fields"] == list(LOSS_FIELDS)
+    assert payload["formal_contract"]["total_loss_definition"] == (
+        "vector_td_loss+goal_projection_loss"
+    )
     assert len(payload["epochs"]) == 10
     assert payload["epochs"][-1]["optimizer_updates"] == 127_960
     assert payload["summary"]["best_validation_epoch"] == 10
@@ -172,14 +173,14 @@ def test_c4_metrics_ignore_step_losses_but_require_every_epoch_aggregate(
     fieldnames = list(rows[0])
     for row in rows:
         if row["epoch"] == "4":
-            row["validation/predicted_goal_loss"] = ""
+            row["validation/goal_projection_loss"] = ""
     with metrics.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
     with pytest.raises(
-        ValueError, match=r"epoch 5 validation/predicted_goal_loss is missing"
+        ValueError, match=r"epoch 5 validation/goal_projection_loss is missing"
     ):
         load_epoch_metrics(metrics)
 
@@ -216,7 +217,7 @@ def test_c4_report_rejects_nonformal_result_or_loss_identity(tmp_path: Path) -> 
         )
 
 
-def test_c4_report_rejects_total_inconsistent_with_four_components(
+def test_c4_report_rejects_total_inconsistent_with_two_components(
     tmp_path: Path,
 ) -> None:
     metrics, _result, _manifest = _write_completed_run(tmp_path)
