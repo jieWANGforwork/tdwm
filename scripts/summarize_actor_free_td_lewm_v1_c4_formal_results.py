@@ -19,7 +19,8 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence as TypingSequence, Union
+from typing import Any, Union
+from typing import Sequence as TypingSequence
 
 PROTOCOLS = ("o25", "o50", "o100")
 SCORE_MODES = (
@@ -340,11 +341,41 @@ def _load_cell(
         "smoke": False,
         "pilot": False,
     }
+    legacy_v1_c_o50 = method_key == "v1_c" and protocol == "o50"
+    legacy_optional_top_level_fields = {
+        "protocol_label",
+        "evaluation_protocol",
+        "goal_offset",
+    }
+    missing_results_metadata = {
+        key for key in legacy_optional_top_level_fields if key not in results
+    }
+    missing_manifest_metadata = {
+        key for key in legacy_optional_top_level_fields if key not in manifest
+    }
+    legacy_metadata_omitted = (
+        legacy_v1_c_o50
+        and missing_results_metadata == legacy_optional_top_level_fields
+        and missing_manifest_metadata == legacy_optional_top_level_fields
+    )
+    if legacy_v1_c_o50 and (
+        missing_results_metadata or missing_manifest_metadata
+    ) and not legacy_metadata_omitted:
+        raise ValueError(
+            "Legacy V1-C O50 top-level protocol metadata must be either fully "
+            "explicit or absent as one historical schema block."
+        )
     for key, expected_value in expected.items():
-        if results.get(key) != expected_value:
+        actual = results.get(key)
+        if (
+            legacy_metadata_omitted
+            and key in legacy_optional_top_level_fields
+        ):
+            continue
+        if actual != expected_value:
             raise ValueError(
                 f"{paths['results']}.{key} must be {expected_value!r}, "
-                f"found {results.get(key)!r}."
+                f"found {actual!r}."
             )
     for key in (
         "protocol_label",
@@ -352,7 +383,13 @@ def _load_cell(
         "goal_offset",
         "score_mode",
     ):
-        if manifest.get(key) != expected[key]:
+        actual = manifest.get(key)
+        if (
+            legacy_metadata_omitted
+            and key in legacy_optional_top_level_fields
+        ):
+            continue
+        if actual != expected[key]:
             raise ValueError(
                 f"{paths['manifest']}.{key} must be {expected[key]!r}."
             )
@@ -461,6 +498,11 @@ def _load_cell(
             "path": str(action_normalization_path.resolve()),
             "sha256": action_normalization_sha,
         },
+        "top_level_protocol_metadata": (
+            "legacy_v1_c_o50_validated_from_embedded_protocol"
+            if legacy_metadata_omitted
+            else "explicit"
+        ),
     }
     return Cell(
         method_key=method_key,

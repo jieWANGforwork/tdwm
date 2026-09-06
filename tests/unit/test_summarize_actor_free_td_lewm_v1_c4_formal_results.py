@@ -329,6 +329,109 @@ def test_accepts_one_protocol_split_across_multiple_source_roots(
     }
 
 
+def test_accepts_only_authentic_legacy_v1_c_o50_missing_top_level_labels(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "legacy_v1_c_o50"
+    directory = _cell_directory(
+        root,
+        protocol="o50",
+        variant="c",
+        score_mode="f_plus_g_first",
+    )
+    _write_cell(
+        directory,
+        method_key="v1_c",
+        protocol="o50",
+        score_mode="f_plus_g_first",
+        selection=_selection("o50"),
+    )
+    optional = {"protocol_label", "evaluation_protocol", "goal_offset"}
+    for name in ("results.json", "protocol_manifest.json"):
+        path = directory / name
+        payload = json.loads(path.read_text())
+        for key in optional:
+            payload.pop(key)
+        path.write_text(json.dumps(payload))
+
+    cell = SUMMARY._load_cell(
+        directory,
+        method_key="v1_c",
+        protocol="o50",
+        score_mode="f_plus_g_first",
+    )
+
+    assert cell.source["top_level_protocol_metadata"] == (
+        "legacy_v1_c_o50_validated_from_embedded_protocol"
+    )
+    assert cell.success_count == 9
+
+    results_path = directory / "results.json"
+    manifest_path = directory / "protocol_manifest.json"
+    results = json.loads(results_path.read_text())
+    manifest = json.loads(manifest_path.read_text())
+    for payload in (results, manifest):
+        payload.update(
+            {
+                "protocol_label": "o50",
+                "evaluation_protocol": "O50",
+                "goal_offset": 50,
+            }
+        )
+    results["goal_offset"] = 25
+    results_path.write_text(json.dumps(results))
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match=r"results\.json\.goal_offset must be 50"):
+        SUMMARY._load_cell(
+            directory,
+            method_key="v1_c",
+            protocol="o50",
+            score_mode="f_plus_g_first",
+        )
+
+    results["goal_offset"] = 50
+    results.pop("evaluation_protocol")
+    results_path.write_text(json.dumps(results))
+    with pytest.raises(ValueError, match="must be either fully explicit or absent"):
+        SUMMARY._load_cell(
+            directory,
+            method_key="v1_c",
+            protocol="o50",
+            score_mode="f_plus_g_first",
+        )
+
+
+def test_missing_top_level_protocol_label_is_not_allowed_for_c4(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "c4"
+    directory = _cell_directory(
+        root,
+        protocol="o50",
+        variant="c4",
+        score_mode="f_only",
+    )
+    _write_cell(
+        directory,
+        method_key="c4",
+        protocol="o50",
+        score_mode="f_only",
+        selection=_selection("o50"),
+    )
+    results_path = directory / "results.json"
+    results = json.loads(results_path.read_text())
+    results.pop("protocol_label")
+    results_path.write_text(json.dumps(results))
+
+    with pytest.raises(ValueError, match=r"results\.json\.protocol_label"):
+        SUMMARY._load_cell(
+            directory,
+            method_key="c4",
+            protocol="o50",
+            score_mode="f_only",
+        )
+
+
 def test_rejects_conflicting_duplicate_cells_across_source_roots(
     tmp_path: Path,
 ) -> None:
