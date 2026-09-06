@@ -122,9 +122,16 @@ def test_checkpoint_manifest_dynamically_hashes_and_locks_new_c4_checkpoint(
     assert payload["checkpoint"] == {
         "path": str(checkpoint.resolve()),
         "sha256": LAUNCHER.file_sha256(checkpoint),
+        "required_objective_version": LAUNCHER.OBJECTIVE_VERSION,
     }
     assert set(payload["protocols"]) == set(LAUNCHER.PROTOCOL_LABELS)
     assert payload["score_modes"] == list(LAUNCHER.SCORE_MODES)
+    assert payload["objective_version"] == LAUNCHER.OBJECTIVE_VERSION == 1
+    assert payload["training_objective"] == (
+        "single_post_action_ghost_goal_projected_td"
+    )
+    assert payload["action_effect"] == LAUNCHER.C4_ACTION_EFFECT
+    assert payload["checkpoint"]["required_objective_version"] == 1
     assert payload["first_q_alpha"] == 0.25
     assert payload["alpha_selection_performed"] is False
     assert payload["training_performed"] is False
@@ -273,6 +280,7 @@ def _write_valid_output(
         "method_family": "actor_free_td_lewm_v1",
         "variant": "c4",
         "implementation_version": "v1",
+        "objective_version": LAUNCHER.OBJECTIVE_VERSION,
         "evaluation_protocol": "O50",
         "protocol_label": "o50",
         "goal_offset": 50,
@@ -280,7 +288,8 @@ def _write_valid_output(
         "score_mode": job.score_mode,
         "state_only_g": True,
         "action_enters_g": False,
-        "action_effect": "only_via_f_predicted_state",
+        "action_effect": LAUNCHER.C4_ACTION_EFFECT,
+        "g_state_source": "stopped_f_post_action_ghost_state",
         "g_first_weight": 0.25,
         "score_definition": protocol["inference_objective"]["score_definition"],
         **_execution_metadata(protocol["planning"]),
@@ -303,6 +312,7 @@ def _write_valid_output(
             "sha256": checkpoint_sha,
             "epoch": 10,
             "global_step": 127_960,
+            "objective_version": LAUNCHER.OBJECTIVE_VERSION,
             "formal_completion_required": True,
             "g_config": {},
         },
@@ -363,6 +373,20 @@ def test_c4_output_validator_rejects_non_boolean_episode_outcome(
     results_path.write_text(json.dumps(results))
 
     with pytest.raises(ValueError, match="50 Boolean"):
+        LAUNCHER.validate_c4_job_output(job)
+
+
+def test_c4_output_validator_rejects_old_objective_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job, _ = _write_valid_output(tmp_path, monkeypatch)
+    lock_path = tmp_path / "outputs" / "checkpoint_manifest.json"
+    lock = json.loads(lock_path.read_text())
+    lock["objective_version"] = 0
+    lock["checkpoint"]["required_objective_version"] = 0
+    lock_path.write_text(json.dumps(lock))
+
+    with pytest.raises(ValueError, match="final C4 objective v1"):
         LAUNCHER.validate_c4_job_output(job)
 
 

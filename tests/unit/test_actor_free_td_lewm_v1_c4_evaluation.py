@@ -4,6 +4,7 @@ import json
 import math
 import sys
 import types
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,8 +13,12 @@ import torch
 from torch import nn
 
 from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
+    C4_ACTION_EFFECT,
+    C4_JOINT_OBJECTIVE,
+    C4_TIME_ALIGNMENT,
     FIRST_ACTION_SCORE_MODES,
     FORMAL_HORIZON_BY_SCORE_MODE,
+    OBJECTIVE_VERSION,
     SCORE_MODES,
     ActorFreeTDLeWMV1C4,
     load_actor_free_td_lewm_v1_c4_checkpoint,
@@ -98,13 +103,38 @@ class RecordingStateOnlyG(nn.Module):
         super().__init__()
         self.anchor = nn.Parameter(torch.zeros(()))
         self.states: list[torch.Tensor] = []
+        self.state_requires_grad: list[bool] = []
 
     def forward(self, state, task):
         del task
+        self.state_requires_grad.append(state.requires_grad)
         self.states.append(state.detach().clone())
         output = torch.zeros_like(state) + self.anchor
         output[..., 0] = state[..., 0]
         return output
+
+
+class RecurrentRecordingWorld(RecordingWorld):
+    """Tiny F whose next state depends on the preceding real/planned state."""
+
+    def rollout(self, info, actions, history_size=None):
+        self.rollout_actions.append(actions.detach().clone())
+        self.rollout_history_sizes.append(history_size)
+        batch, samples, horizon = actions.shape[:3]
+        observed = int(info["emb"].shape[-2])
+        history = info["emb"].to(actions)
+        current = history[..., -1, :]
+        future = []
+        for index in range(horizon):
+            successor = current.clone()
+            successor[..., 0] = (
+                current[..., 0] * 10.0 + actions[..., index, 0]
+            )
+            future.append(successor)
+            current = successor
+        predicted = torch.cat((history, torch.stack(future, dim=-2)), dim=-2)
+        assert predicted.shape == (batch, samples, observed + horizon, 192)
+        return {"predicted_emb": predicted + self.anchor}
 
 
 def _info(samples: int = 1) -> dict[str, torch.Tensor]:
@@ -254,6 +284,39 @@ def test_changing_action_can_affect_c4_only_through_changed_f_output() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("score_mode", "expected_g_states"),
+    (
+        ("g_only", (21.0,)),
+        ("f_plus_g", (212345.0,)),
+        ("f_plus_g_first", (21.0,)),
+        ("f_plus_g_first_q2", (21.0,)),
+        ("g_only_f_rollout_mean", (21.0, 212.0, 2123.0, 21234.0, 212345.0)),
+    ),
+)
+def test_c4_g_reads_only_stopped_next_ghost_states_from_recurrent_f(
+    score_mode: str,
+    expected_g_states: tuple[float, ...],
+) -> None:
+    world = RecurrentRecordingWorld()
+    predictor = RecordingStateOnlyG()
+    adapter = _adapter(world, predictor, score_mode=score_mode)
+    horizon = FORMAL_HORIZON_BY_SCORE_MODE[score_mode]
+    info = _info()
+    info["emb"][..., 0] = 2.0
+    actions = _actions(horizon).requires_grad_(True)
+    actions.data[..., 0] = torch.arange(1.0, horizon + 1.0)
+
+    adapter.get_cost(info, actions)
+
+    assert len(world.rollout_actions) == 1
+    assert torch.equal(world.rollout_actions[0], actions.detach())
+    assert world.rollout_history_sizes == [3]
+    assert predictor.state_requires_grad == [False]
+    observed = predictor.states[0][..., 0].reshape(-1)
+    torch.testing.assert_close(observed, torch.tensor(expected_g_states))
+
+
 @pytest.mark.parametrize("protocol_label", ("o25", "o50", "o100"))
 @pytest.mark.parametrize("score_mode", tuple(sorted(SCORE_MODES)))
 def test_c4_protocols_lock_all_six_f_through_state_only_g_scores(
@@ -277,7 +340,10 @@ def test_c4_protocols_lock_all_six_f_through_state_only_g_scores(
     ]
     inference = configured["inference_objective"]
     assert inference["action_enters_g"] is False
-    assert inference["action_effect"] == "only_via_f_predicted_state"
+    assert inference["action_effect"] == C4_ACTION_EFFECT
+    assert inference["training_only_auxiliary"] == [
+        C4_JOINT_OBJECTIVE["objective"]
+    ]
     assert inference["score_definition"]["action_enters_g"] is False
     if score_mode == "f_plus_g":
         assert inference["score_definition"]["final_action_path"] == (
@@ -298,7 +364,7 @@ def _g_config() -> dict:
         "method_family": "actor_free_td_lewm_v1",
         "variant": "c4",
         "implementation_version": "v1",
-        "objective_version": 0,
+        "objective_version": OBJECTIVE_VERSION,
         "deployment_checkpoint_version": 1,
         "architecture": "td_jepa_state_only_forward_map_v1_c4",
         "state_dim": 192,
@@ -309,7 +375,7 @@ def _g_config() -> dict:
         "embedding_layers": 2,
         "num_parallel": 1,
         "action_input": "none",
-        "action_effect": "only_via_f_predicted_state",
+        "action_effect": C4_ACTION_EFFECT,
         "goal_conditioning": "task_input",
         "successor_semantics": "includes_current_input_state",
         "actor": "none",
@@ -317,8 +383,8 @@ def _g_config() -> dict:
         "gamma": 0.95,
         "target_ema_decay": 0.995,
         "task_sampling": {},
-        "joint_objective": {"goal_projection_weight": 1.0},
-        "time_alignment": {},
+        "joint_objective": deepcopy(C4_JOINT_OBJECTIVE),
+        "time_alignment": deepcopy(C4_TIME_ALIGNMENT),
         "pretrained_world_model": {"frozen": True},
     }
 
@@ -331,7 +397,7 @@ def test_c4_checkpoint_roundtrip_restores_state_only_online_g(tmp_path: Path) ->
         "method_family": "actor_free_td_lewm_v1",
         "variant": "c4",
         "implementation_version": "v1",
-        "objective_version": 0,
+        "objective_version": OBJECTIVE_VERSION,
         "deployment_checkpoint_version": 1,
         "epoch": 10,
         "global_step": 127_960,
@@ -360,6 +426,47 @@ def test_c4_checkpoint_roundtrip_restores_state_only_online_g(tmp_path: Path) ->
     assert output.shape == (2, 192)
     with pytest.raises(TypeError):
         restored_g(torch.zeros(2, 192), torch.zeros(2, 25), torch.ones(2, 192))
+
+
+def test_c4_checkpoint_rejects_old_objective_and_dual_branch_semantics() -> None:
+    world = RecordingWorld()
+    online = ActorFreeTDJEPAPredictorV1C4()
+    valid = {
+        "method": "actor_free_td_lewm_v1_c4",
+        "method_family": "actor_free_td_lewm_v1",
+        "variant": "c4",
+        "implementation_version": "v1",
+        "objective_version": OBJECTIVE_VERSION,
+        "deployment_checkpoint_version": 1,
+        "epoch": 10,
+        "global_step": 127_960,
+        "world_model_state_dict": world.state_dict(),
+        "world_model_config": {"_target_": "tests.RecordingWorld"},
+        "online_g_state_dict": online.state_dict(),
+        "target_g_state_dict": online.make_target().state_dict(),
+        "g_config": _g_config(),
+        "pretrained_world_model_provenance": {
+            "source_checkpoint_sha256": "a" * 64
+        },
+    }
+
+    old_version = deepcopy(valid)
+    old_version["objective_version"] = 0
+    old_version["g_config"]["objective_version"] = 0
+    with pytest.raises(ValueError, match="checkpoint.objective_version"):
+        validate_actor_free_td_lewm_v1_c4_payload(old_version)
+
+    old_dual_branch = deepcopy(valid)
+    old_dual_branch["g_config"]["time_alignment"] = {
+        "real_online_input": "real_z_i",
+        "predicted_online_input": "stop_gradient_f_of_z_i_minus_1_a_i_minus_1",
+    }
+    old_dual_branch["g_config"]["joint_objective"] = {
+        "objective": "equal_real_predicted_state_only_goal_projected_td",
+        "goal_projection_weight": 1.0,
+    }
+    with pytest.raises(ValueError, match="post-action ghost TD path"):
+        validate_actor_free_td_lewm_v1_c4_payload(old_dual_branch)
 
 
 def test_real_training_payload_contract_passes_formal_eval_validator() -> None:
@@ -439,6 +546,10 @@ def test_evaluation_manifest_uses_g_config_not_old_predictor_config(
     assert stored_manifest["score_definition"]["formula"] != "mutated returned copy"
     assert result["state_only_g"] is True
     assert result["action_enters_g"] is False
+    for values in (stored_result, stored_manifest, result):
+        assert values["objective_version"] == OBJECTIVE_VERSION
+        assert values["action_effect"] == C4_ACTION_EFFECT
+        assert values["g_state_source"] == "stopped_f_post_action_ghost_state"
 
 
 @pytest.mark.parametrize(
@@ -597,6 +708,10 @@ def test_c4_wrapper_persists_score_definition_after_real_common_runtime(
     assert manifest["score_definition"] == expected_definition
     assert result["score_definition"] == expected_definition
     assert stored_result["score_definition"]["action_enters_g"] is False
+    assert stored_result["objective_version"] == OBJECTIVE_VERSION
+    assert manifest["objective_version"] == OBJECTIVE_VERSION
+    assert stored_result["action_effect"] == C4_ACTION_EFFECT
+    assert manifest["g_state_source"] == "stopped_f_post_action_ghost_state"
     if score_mode == "f_plus_g_first_q2":
         assert stored_result["score_definition"]["normalization"] == (
             "population_z_score"

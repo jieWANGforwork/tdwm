@@ -69,7 +69,7 @@ context:
   plan_config_history_len: 1
 
 g:
-  objective_version: 0
+  objective_version: 1
   architecture: td_jepa_state_only_forward_map_v1_c4
   state_dim: 192
   task_dim: 192
@@ -79,7 +79,7 @@ g:
   embedding_layers: 2
   num_parallel: 1
   action_input: none
-  action_effect: only_via_f_predicted_state
+  action_effect: only_via_f_post_action_states
   goal_conditioning: task_input
   successor_semantics: includes_current_input_state
   gamma: 0.95
@@ -98,24 +98,24 @@ task_sampling:
   task_sampling_seed_offset: 270007
 
 time_alignment:
-  replay_anchor: z_i_minus_1
-  real_online_input: real_z_i
-  predicted_online_input: stop_gradient_f_of_z_i_minus_1_a_i_minus_1
-  shared_target_current_feature: real_z_i
-  shared_target_bootstrap_input: real_z_i_plus_1
-  terminal_semantics: d_i_true_when_real_z_i_is_terminal
-  terminal_target: y_i_equals_z_i
+  replay_anchor: z_i
+  online_input: stop_gradient_f_of_real_z_i_a_i
+  target_current_feature: real_z_i_plus_1
+  target_bootstrap_input: stop_gradient_ema_g_of_f_real_z_i_plus_1_a_i_plus_1
+  terminal_semantics: d_i_true_when_transition_after_a_i_terminates
+  terminal_target: y_i_equals_real_z_i_plus_1
   f_history_states: 3
+  f_output_role: online_and_ema_bootstrap_post_action_states
   f_output_gradient: stop_gradient
 
 joint_objective:
-  objective: equal_real_predicted_state_only_goal_projected_td
-  vector_td_population: all_transitions_both_branches
+  objective: single_post_action_ghost_goal_projected_td
+  vector_td_population: all_transitions_single_online_branch
   vector_reduction: mean_of_squared_l2_norm
   goal_subset: goal_derived_tasks_only
   goal_projection_weight: 1.0
-  goal_projection_target: detached_shared_td_target_projection
-  branch_combination: one_half_real_plus_predicted
+  goal_projection_target: detached_real_immediate_ghost_bootstrap_projection
+  branch_combination: single_online_branch
   target_gradient: stop_gradient
   trainable_modules: [online_g_c4]
   frozen_modules:
@@ -163,14 +163,14 @@ inference_objective:
   score_definition:
     optimization: cem_minimize
     action_enters_g: false
-    action_path: candidate_action_to_frozen_f_to_predicted_state_to_c4
+    action_path: candidate_action_to_frozen_f_post_action_ghost_state
     task: sqrt_dim_l2_normalized_goal_vector
     online_g_used: true
     target_g_used: false
     formula: terminal_summed_mse(zhat4_f,z_goal) - gamma_power_4 * dot(G_C4(zhat5_f,m),m)
     f_rollout: full_five_action_blocks_A1_through_A5
     f_prefix_state: frozen_f_predicted_state_after_A4_zhat4
-    g_state: frozen_f_predicted_state_after_A5_zhat5
+    g_state: stopped_f_post_action_ghost_state_after_A5_zhat5
     final_action_path: A5_to_frozen_f_to_zhat5_to_state_only_g
     executed_action_block: first_block_only
     replanning: every_action_block
@@ -178,10 +178,10 @@ inference_objective:
   f_score_reducer: final_predicted_latent_summed_mse
   g_score: negative_goal_projection_of_state_only_c4
   action_enters_g: false
-  action_effect: only_via_f_predicted_state
+  action_effect: only_via_f_post_action_states
   goal_enters_g: true
   learned_actor: false
-  training_only_auxiliary: [dual_branch_goal_projected_td]
+  training_only_auxiliary: [single_post_action_ghost_goal_projected_td]
   training_only_auxiliary_used_at_evaluation: false
   replanning: every_action_block
 
@@ -189,4 +189,4 @@ provenance:
   training_protocol: configs/experiment/actor_free_td_lewm_v1_c4_cube_train.yaml
   comparison_protocol: configs/experiment/actor_free_td_lewm_v1_c_cube_checkpoint_o50.yaml
   status: implementation_ready_checkpoint_pending
-  note: C4 preserves the six predeclared V1-C score columns, but every C4 G read consumes an F-predicted successor state and no action tensor.
+  note: C4 preserves the six predeclared V1-C score columns, but every C4 G read consumes a stopped F post-action ghost state and no action tensor.

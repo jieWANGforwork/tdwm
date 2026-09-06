@@ -9,6 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
+    C4_ACTION_EFFECT,
+    OBJECTIVE_VERSION,
+)
+from tdwm.evaluation.actor_free_td_lewm_v1_c4 import (
+    configure_actor_free_td_lewm_v1_c4_evaluation_mode,
+    load_actor_free_td_lewm_v1_c4_evaluation_protocol,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = (
     ROOT / "scripts" / "summarize_actor_free_td_lewm_v1_c4_formal_results.py"
@@ -120,28 +129,75 @@ def _write_cell(
     inference = {"score_mode": score_mode}
     if score_mode in {"f_plus_g_first", "f_plus_g_first_q2"}:
         inference["g_first_weight"] = 0.25
+    protocol_value = {
+        "method": method["method"],
+        "variant": method["variant"],
+        "evaluation": {
+            "episodes": 50,
+            "goal_offset": SUMMARY.GOAL_OFFSET_BY_PROTOCOL[protocol],
+            "start_goal_source": "same_dataset_episode",
+        },
+        "inference_objective": inference,
+        "planning": planning,
+    }
+    checkpoint = {
+        "path": f"/server/{method_key}/epoch_10.pt",
+        "sha256": "a" * 64 if method_key == "c4" else "b" * 64,
+    }
+    c4_metadata: dict[str, object] = {}
+    formal_protocol = None
+    if method_key == "c4":
+        formal_protocol = load_actor_free_td_lewm_v1_c4_evaluation_protocol(
+            ROOT
+            / "configs"
+            / "experiment"
+            / f"actor_free_td_lewm_v1_c4_cube_checkpoint_{protocol}.yaml"
+        )
+        protocol_value = configure_actor_free_td_lewm_v1_c4_evaluation_mode(
+            formal_protocol,
+            smoke=False,
+            pilot=False,
+            score_mode=score_mode,
+            g_first_weight=(
+                0.25
+                if score_mode in {"f_plus_g_first", "f_plus_g_first_q2"}
+                else None
+            ),
+        )
+        c4_metadata = {
+            "objective_version": OBJECTIVE_VERSION,
+            "state_only_g": True,
+            "action_enters_g": False,
+            "action_effect": C4_ACTION_EFFECT,
+            "g_state_source": "stopped_f_post_action_ghost_state",
+            "score_definition": protocol_value["inference_objective"][
+                "score_definition"
+            ],
+        }
+        results.update(c4_metadata)
+        checkpoint.update(
+            {
+                "objective_version": OBJECTIVE_VERSION,
+                "g_config": {
+                    "objective_version": OBJECTIVE_VERSION,
+                    "action_effect": C4_ACTION_EFFECT,
+                    "time_alignment": formal_protocol["time_alignment"],
+                    "joint_objective": formal_protocol["joint_objective"],
+                },
+            }
+        )
     manifest = {
+        **c4_metadata,
         "protocol_label": protocol,
         "evaluation_protocol": protocol.upper(),
         "goal_offset": SUMMARY.GOAL_OFFSET_BY_PROTOCOL[protocol],
         "score_mode": score_mode,
         "selection": selection,
-        "protocol": {
-            "method": method["method"],
-            "variant": method["variant"],
-            "evaluation": {
-                "episodes": 50,
-                "goal_offset": SUMMARY.GOAL_OFFSET_BY_PROTOCOL[protocol],
-                "start_goal_source": "same_dataset_episode",
-            },
-            "inference_objective": inference,
-            "planning": planning,
-        },
-        "checkpoint": {
-            "path": f"/server/{method_key}/epoch_10.pt",
-            "sha256": "a" * 64 if method_key == "c4" else "b" * 64,
-        },
+        "protocol": protocol_value,
+        "checkpoint": checkpoint,
     }
+    if formal_protocol is not None:
+        manifest["formal_protocol"] = formal_protocol
     (directory / "results.json").write_text(json.dumps(results), encoding="utf-8")
     (directory / "protocol_manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"

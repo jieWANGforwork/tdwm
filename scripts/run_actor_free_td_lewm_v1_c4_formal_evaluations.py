@@ -18,7 +18,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tdwm.adapters.actor_free_td_lewm_v1_c4 import FIRST_ACTION_SCORE_MODES
+from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
+    C4_ACTION_EFFECT,
+    C4_JOINT_OBJECTIVE,
+    FIRST_ACTION_SCORE_MODES,
+    OBJECTIVE_VERSION,
+)
 from tdwm.evaluation.actor_free_td_lewm_v1_c4 import (
     configure_actor_free_td_lewm_v1_c4_evaluation_mode,
     validate_actor_free_td_lewm_v1_c4_evaluation_protocol,
@@ -279,12 +284,16 @@ def write_checkpoint_manifest(output_root: Path, *, checkpoint: Path) -> Path:
     checkpoint_sha256 = file_sha256(checkpoint)
     payload = {
         "schema_version": 1,
-        "purpose": "v1_c4_six_scores_formal_o25_o50_o100",
+        "purpose": "v1_c4_objective1_six_scores_formal_o25_o50_o100",
         "method": "actor_free_td_lewm_v1_c4",
         "variant": "c4",
+        "objective_version": OBJECTIVE_VERSION,
+        "training_objective": C4_JOINT_OBJECTIVE["objective"],
+        "action_effect": C4_ACTION_EFFECT,
         "checkpoint": {
             "path": str(checkpoint.resolve()),
             "sha256": checkpoint_sha256,
+            "required_objective_version": OBJECTIVE_VERSION,
         },
         "protocols": {
             protocol_label: {
@@ -373,6 +382,15 @@ def validate_c4_job_output(
     locked_checkpoint_path = Path(str(lock_checkpoint.get("path"))).resolve()
     locked_checkpoint_sha = lock_checkpoint.get("sha256")
     if (
+        lock.get("objective_version") != OBJECTIVE_VERSION
+        or lock.get("training_objective") != C4_JOINT_OBJECTIVE["objective"]
+        or lock.get("action_effect") != C4_ACTION_EFFECT
+        or lock_checkpoint.get("required_objective_version") != OBJECTIVE_VERSION
+    ):
+        raise ValueError(
+            f"{job.job_id} checkpoint lock does not describe final C4 objective v1."
+        )
+    if (
         locked_checkpoint_path != Path(job.checkpoint).resolve()
         or not isinstance(locked_checkpoint_sha, str)
         or file_sha256(job.checkpoint) != locked_checkpoint_sha
@@ -386,6 +404,7 @@ def validate_c4_job_output(
         "method_family": "actor_free_td_lewm_v1",
         "variant": "c4",
         "implementation_version": "v1",
+        "objective_version": OBJECTIVE_VERSION,
         "evaluation_protocol": protocol_label.upper(),
         "protocol_label": protocol_label,
         "goal_offset": EXPECTED_GOAL_OFFSET_BY_PROTOCOL[protocol_label],
@@ -396,7 +415,8 @@ def validate_c4_job_output(
         "pilot": False,
         "state_only_g": True,
         "action_enters_g": False,
-        "action_effect": "only_via_f_predicted_state",
+        "action_effect": C4_ACTION_EFFECT,
+        "g_state_source": "stopped_f_post_action_ghost_state",
     }
     for key, expected in expected_common.items():
         if results.get(key) != expected:
@@ -413,6 +433,8 @@ def validate_c4_job_output(
         "state_only_g",
         "action_enters_g",
         "action_effect",
+        "objective_version",
+        "g_state_source",
     ):
         if manifest.get(key) != expected_common[key]:
             raise ValueError(f"{job.job_id} manifest.{key} is incorrect.")
@@ -475,6 +497,7 @@ def validate_c4_job_output(
         or checkpoint.get("sha256") != locked_checkpoint_sha
         or checkpoint.get("epoch") != 10
         or checkpoint.get("global_step") != 127_960
+        or checkpoint.get("objective_version") != OBJECTIVE_VERSION
         or checkpoint.get("formal_completion_required") is not True
         or "g_config" not in checkpoint
         or "predictor_config" in checkpoint

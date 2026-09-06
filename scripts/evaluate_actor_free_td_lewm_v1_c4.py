@@ -17,7 +17,8 @@ from tdwm.evaluation.actor_free_td_lewm_v1_c4 import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate state-only Actor-Free TD-LeWM V1-C4 with policy-free CEM."
+            "Evaluate post-action-ghost, state-only Actor-Free TD-LeWM V1-C4 "
+            "with policy-free CEM."
         )
     )
     parser.add_argument("--config", required=True)

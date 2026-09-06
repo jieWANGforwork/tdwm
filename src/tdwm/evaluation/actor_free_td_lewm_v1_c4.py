@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
+    C4_ACTION_EFFECT,
+    C4_JOINT_OBJECTIVE,
     C4_ONLY_SCORE_MODE,
+    C4_TIME_ALIGNMENT,
     DEPLOYMENT_CHECKPOINT_VERSION,
     F_ONLY_SCORE_MODE,
     F_PLUS_C4_SCORE_MODE,
@@ -61,8 +64,10 @@ def _validate_method_config(config: Mapping[str, Any]) -> None:
     objective = config.get("joint_objective")
     if not isinstance(objective, Mapping):
         raise ValueError("g_config.joint_objective must be a mapping.")
-    if float(objective.get("goal_projection_weight", -1.0)) != 1.0:
-        raise ValueError("C4 goal_projection_weight must be exactly 1.0.")
+    if dict(objective) != C4_JOINT_OBJECTIVE:
+        raise ValueError(
+            "C4 joint_objective must be the single post-action ghost objective."
+        )
 
 
 METHOD_SPEC = FrozenActorFreeTDV1MethodSpec(
@@ -91,7 +96,7 @@ def _score_definition(score_mode: str) -> dict[str, Any]:
     common = {
         "optimization": "cem_minimize",
         "action_enters_g": False,
-        "action_path": "candidate_action_to_frozen_f_to_predicted_state_to_c4",
+        "action_path": "candidate_action_to_frozen_f_post_action_ghost_state",
         "task": "sqrt_dim_l2_normalized_goal_vector",
         "online_g_used": score_mode != F_ONLY_SCORE_MODE,
         "target_g_used": False,
@@ -108,7 +113,8 @@ def _score_definition(score_mode: str) -> dict[str, Any]:
             **common,
             "formula": "-dot(G_C4(zhat1_f,m),m)",
             "f_rollout": "one_action_block_A1",
-            "g_state": "frozen_f_predicted_state_after_A1_zhat1",
+            "g_state": "stopped_f_post_action_ghost_state_after_A1_zhat1",
+            "g_action_path": "A1_to_frozen_f_to_zhat1_to_state_only_g",
             "terminal_f_cost": "unused",
             "gamma": "unused",
         }
@@ -121,7 +127,7 @@ def _score_definition(score_mode: str) -> dict[str, Any]:
             ),
             "f_rollout": "full_five_action_blocks_A1_through_A5",
             "f_prefix_state": "frozen_f_predicted_state_after_A4_zhat4",
-            "g_state": "frozen_f_predicted_state_after_A5_zhat5",
+            "g_state": "stopped_f_post_action_ghost_state_after_A5_zhat5",
             "final_action_path": "A5_to_frozen_f_to_zhat5_to_state_only_g",
         }
     if score_mode in FIRST_ACTION_SCORE_MODES:
@@ -133,7 +139,7 @@ def _score_definition(score_mode: str) -> dict[str, Any]:
             ),
             "f_rollout": "full_five_action_blocks_A1_through_A5",
             "q_first": "dot(G_C4(zhat1_f,m),m)",
-            "q_first_state": "frozen_f_predicted_state_after_A1_zhat1",
+            "q_first_state": "stopped_f_post_action_ghost_state_after_A1_zhat1",
             "q_first_action_path": "A1_to_frozen_f_to_zhat1_to_state_only_g",
             "q_first_discount": "none",
         }
@@ -163,7 +169,7 @@ def _score_definition(score_mode: str) -> dict[str, Any]:
             **common,
             "formula": "-(1/5)*sum_k_1_to_5(dot(G_C4(zhatk_f,m),m))",
             "f_rollout": "full_five_action_blocks_A1_through_A5",
-            "g_state_sequence": "frozen_f_predicted_successor_states_zhat1_to_zhat5",
+            "g_state_sequence": "stopped_f_post_action_ghost_states_zhat1_to_zhat5",
             "g_aggregation": "mean_over_5_blocks",
             "terminal_f_cost": "unused",
             "gamma": "unused",
@@ -198,10 +204,10 @@ def _configured_inference(
             else "negative_goal_projection_of_state_only_c4"
         ),
         "action_enters_g": False,
-        "action_effect": "only_via_f_predicted_state",
+        "action_effect": C4_ACTION_EFFECT,
         "goal_enters_g": True,
         "learned_actor": False,
-        "training_only_auxiliary": ["dual_branch_goal_projected_td"],
+        "training_only_auxiliary": [C4_JOINT_OBJECTIVE["objective"]],
         "training_only_auxiliary_used_at_evaluation": False,
         "replanning": execution["replanning"],
     }
@@ -235,7 +241,7 @@ def _validate_g_protocol(g: Mapping[str, Any]) -> None:
         "embedding_layers": 2,
         "num_parallel": 1,
         "action_input": "none",
-        "action_effect": "only_via_f_predicted_state",
+        "action_effect": C4_ACTION_EFFECT,
         "goal_conditioning": "task_input",
         "successor_semantics": "includes_current_input_state",
         "actor": "none",
@@ -340,8 +346,19 @@ def validate_actor_free_td_lewm_v1_c4_evaluation_protocol(
         raise ValueError(
             "C4 protocol requires task_sampling, time_alignment and joint_objective."
         )
-    if float(objective.get("goal_projection_weight", -1.0)) != 1.0:
-        raise ValueError("C4 goal_projection_weight must be 1.0.")
+    if g.get("objective_version") != OBJECTIVE_VERSION:
+        raise ValueError(
+            f"protocol.g.objective_version must be {OBJECTIVE_VERSION}."
+        )
+    if dict(time_alignment) != C4_TIME_ALIGNMENT:
+        raise ValueError(
+            "C4 time_alignment must encode online F(z_i,a_i), real z_(i+1) "
+            "immediate supervision, and EMA G(F(z_(i+1),a_(i+1)),m)."
+        )
+    if dict(objective) != C4_JOINT_OBJECTIVE:
+        raise ValueError(
+            "C4 joint_objective must encode one post-action ghost online branch."
+        )
 
     inference = protocol.get("inference_objective")
     planning = protocol.get("planning")
@@ -569,9 +586,11 @@ def evaluate_actor_free_td_lewm_v1_c4(**kwargs) -> dict[str, Any]:
             "C4 protocol is missing inference_objective.score_definition."
         )
     for values in (stored_result, manifest, result):
+        values["objective_version"] = OBJECTIVE_VERSION
         values["state_only_g"] = True
         values["action_enters_g"] = False
-        values["action_effect"] = "only_via_f_predicted_state"
+        values["action_effect"] = C4_ACTION_EFFECT
+        values["g_state_source"] = "stopped_f_post_action_ghost_state"
         values["score_definition"] = deepcopy(score_definition)
     _write_json(result_path, stored_result)
     _write_json(manifest_path, manifest)

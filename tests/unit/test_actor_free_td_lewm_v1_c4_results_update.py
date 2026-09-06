@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 from tdwm.results.actor_free_td_lewm_v1_c4 import (
+    C4_ACTION_EFFECT,
+    C4_JOINT_OBJECTIVE,
+    C4_TIME_ALIGNMENT,
     LOSS_METRICS,
+    OBJECTIVE_VERSION,
     PROTOCOLS,
     SCORE_MODES,
     C4ReportEvidence,
@@ -155,6 +159,8 @@ def _summary(checkpoint_sha: str = "c" * 64) -> dict:
         "schema_version": 1,
         "study": {
             "method": "actor_free_td_lewm_v1_c4",
+            "objective_version": OBJECTIVE_VERSION,
+            "training_objective": C4_JOINT_OBJECTIVE["objective"],
             "comparison_method": "actor_free_td_lewm_v1_c",
             "training_seed": 3072,
             "protocols": list(PROTOCOLS),
@@ -173,10 +179,12 @@ def _manifest() -> dict:
     return {
         "method": "actor_free_td_lewm_v1_c4",
         "variant": "c4",
+        "objective_version": OBJECTIVE_VERSION,
         "seed": 3072,
         "protocol": {
             "method": "actor_free_td_lewm_v1_c4",
             "variant": "c4",
+            "objective_version": OBJECTIVE_VERSION,
             "stage": "full_training",
             "seeds": [3072],
             "g": {
@@ -184,31 +192,13 @@ def _manifest() -> dict:
                 "task_dim": 192,
                 "output_dim": 192,
                 "action_input": "none",
-                "action_effect": "only_via_f_predicted_state",
+                "action_effect": C4_ACTION_EFFECT,
                 "successor_semantics": "includes_current_input_state",
                 "actor": "none",
                 "reward": "none",
             },
-            "time_alignment": {
-                "real_online_input": "real_z_i",
-                "predicted_online_input": "stop_gradient_f_of_z_i_minus_1_a_i_minus_1",
-                "shared_target_current_feature": "real_z_i",
-                "shared_target_bootstrap_input": "real_z_i_plus_1",
-                "terminal_semantics": "d_i_true_when_real_z_i_is_terminal",
-                "terminal_target": "y_i_equals_z_i",
-                "f_output_gradient": "stop_gradient",
-            },
-            "joint_objective": {
-                "vector_td_population": "all_transitions_both_branches",
-                "vector_reduction": "mean_of_squared_l2_norm",
-                "goal_subset": "goal_derived_tasks_only",
-                "goal_projection_weight": 1.0,
-                "branch_combination": "one_half_real_plus_predicted",
-                "target_gradient": "stop_gradient",
-                "trainable_modules": ["online_g_c4"],
-                "lewm_prediction_loss": "none",
-                "sigreg_loss": "none",
-            },
+            "time_alignment": deepcopy(C4_TIME_ALIGNMENT),
+            "joint_objective": deepcopy(C4_JOINT_OBJECTIVE),
             "training": {"epochs": 10, "optimizer_steps_per_epoch": 12_796},
         },
         "model": {
@@ -248,7 +238,7 @@ def _write_metrics(path: Path) -> None:
                     key = f"{stage}/{metric}{'_epoch' if stage == 'train' else ''}"
                     row[key] = value
                 total_key = f"{stage}/c4_total_loss{'_epoch' if stage == 'train' else ''}"
-                row[total_key] = sum(component_values) / 2.0
+                row[total_key] = sum(component_values)
             writer.writerow(row)
 
 
@@ -301,11 +291,11 @@ def test_load_loss_series_requires_ten_complete_consistent_epochs(tmp_path: Path
     metrics = tmp_path / "metrics.csv"
     _write_metrics(metrics)
     values = load_loss_series(metrics)
-    assert values["train"]["c4_total_loss"].first == 23.0
-    assert values["validation"]["c4_total_loss"].final == 43.0
+    assert values["train"]["c4_total_loss"].first == 21.0
+    assert values["validation"]["c4_total_loss"].final == 41.0
 
     rows = list(csv.DictReader(metrics.read_text().splitlines()))
-    rows[-1]["validation/real_goal_loss"] = "nan"
+    rows[-1]["validation/goal_projection_loss"] = "nan"
     with metrics.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=rows[0].keys())
         writer.writeheader()
@@ -389,8 +379,8 @@ def test_analysis_is_dynamic_evidence_driven_and_predeclares_next_steps() -> Non
         assert f"{protocol.upper()} complementarity:" in analysis
     assert "cannot isolate a causal effect" in analysis
     assert "F+New preserves F successes only by oracle construction" in analysis
-    assert "train goal/vector 24/22 (1.09x)" in analysis
-    assert "validation goal/vector 24/22 (1.09x)" in analysis
+    assert "train goal/vector 11/10 (1.10x)" in analysis
+    assert "validation goal/vector 11/10 (1.10x)" in analysis
     assert "optimization scale, not usefulness of the goal signal" in analysis
     assert "First-Q2 minus First-Q is O25" in analysis
     assert "does not authorize choosing a scorer after seeing" in analysis

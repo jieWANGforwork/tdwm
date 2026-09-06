@@ -1,8 +1,9 @@
-"""Deployment adapter for state-only Actor-Free TD-LeWM V1-C4.
+"""Deployment adapter for post-action-ghost Actor-Free TD-LeWM V1-C4.
 
 C4 keeps the pretrained LeWM world model frozen and removes action from the
-successor predictor interface.  Candidate actions may affect C4 scores only by
-first passing through the frozen LeWM rollout and changing an imagined state.
+successor predictor interface.  Every G read consumes a stopped post-action
+ghost state produced by F; neither raw actions nor action embeddings can enter
+G directly.
 """
 
 from __future__ import annotations
@@ -35,8 +36,43 @@ METHOD = "actor_free_td_lewm_v1_c4"
 METHOD_FAMILY = "actor_free_td_lewm_v1"
 VARIANT = "c4"
 IMPLEMENTATION_VERSION = "v1"
-OBJECTIVE_VERSION = 0
+OBJECTIVE_VERSION = 1
 DEPLOYMENT_CHECKPOINT_VERSION = 1
+C4_ACTION_EFFECT = "only_via_f_post_action_states"
+C4_TIME_ALIGNMENT = {
+    "replay_anchor": "z_i",
+    "online_input": "stop_gradient_f_of_real_z_i_a_i",
+    "target_current_feature": "real_z_i_plus_1",
+    "target_bootstrap_input": (
+        "stop_gradient_ema_g_of_f_real_z_i_plus_1_a_i_plus_1"
+    ),
+    "terminal_semantics": "d_i_true_when_transition_after_a_i_terminates",
+    "terminal_target": "y_i_equals_real_z_i_plus_1",
+    "f_history_states": 3,
+    "f_output_role": "online_and_ema_bootstrap_post_action_states",
+    "f_output_gradient": "stop_gradient",
+}
+C4_JOINT_OBJECTIVE = {
+    "objective": "single_post_action_ghost_goal_projected_td",
+    "vector_td_population": "all_transitions_single_online_branch",
+    "vector_reduction": "mean_of_squared_l2_norm",
+    "goal_subset": "goal_derived_tasks_only",
+    "goal_projection_weight": 1.0,
+    "goal_projection_target": (
+        "detached_real_immediate_ghost_bootstrap_projection"
+    ),
+    "branch_combination": "single_online_branch",
+    "target_gradient": "stop_gradient",
+    "trainable_modules": ["online_g_c4"],
+    "frozen_modules": [
+        "lewm_observation_encoder",
+        "lewm_action_encoder",
+        "lewm_world_model_predictor_f",
+        "target_g_c4",
+    ],
+    "lewm_prediction_loss": "none",
+    "sigreg_loss": "none",
+}
 
 F_ONLY_SCORE_MODE = "f_only"
 C4_ONLY_SCORE_MODE = "g_only"
@@ -190,7 +226,7 @@ def validate_actor_free_td_lewm_v1_c4_payload(
             "embedding_layers": 2,
             "num_parallel": 1,
             "action_input": "none",
-            "action_effect": "only_via_f_predicted_state",
+            "action_effect": C4_ACTION_EFFECT,
             "goal_conditioning": "task_input",
             "successor_semantics": "includes_current_input_state",
             "actor": "none",
@@ -219,6 +255,15 @@ def validate_actor_free_td_lewm_v1_c4_payload(
     ):
         if not isinstance(config[key], Mapping):
             raise ValueError(f"g_config.{key} must be a mapping.")
+    if dict(config["time_alignment"]) != C4_TIME_ALIGNMENT:
+        raise ValueError(
+            "g_config.time_alignment must encode the post-action ghost TD path."
+        )
+    if dict(config["joint_objective"]) != C4_JOINT_OBJECTIVE:
+        raise ValueError(
+            "g_config.joint_objective must encode the single post-action ghost "
+            "objective."
+        )
     _require_exact_values(
         config["pretrained_world_model"],
         {"frozen": True},
@@ -376,7 +421,7 @@ class ActorFreeTDLeWMV1C4(nn.Module):
             samples=samples,
             reference=action_candidates,
         )
-        future = self._rollout_future(
+        ghost_states = self._rollout_next_ghost_states(
             info_dict,
             action_candidates,
             batch=batch,
@@ -384,24 +429,24 @@ class ActorFreeTDLeWMV1C4(nn.Module):
             horizon=horizon,
         )
         if self.score_mode == F_ONLY_SCORE_MODE:
-            return self._explicit_terminal_cost(future, goal)
+            return self._explicit_terminal_cost(ghost_states, goal)
 
         task = project_tasks_to_sphere_v1(goal)
         if self.score_mode == C4_ONLY_SCORE_MODE:
-            return -self._goal_score(future[..., -1, :], task)
+            return -self._goal_score(ghost_states[..., -1, :], task)
         if self.score_mode == MEAN_Q_SCORE_MODE:
-            step_tasks = task.unsqueeze(-2).expand_as(future)
-            return -self._goal_score(future, step_tasks).mean(dim=-1)
+            step_tasks = task.unsqueeze(-2).expand_as(ghost_states)
+            return -self._goal_score(ghost_states, step_tasks).mean(dim=-1)
         if self.score_mode in FIRST_ACTION_SCORE_MODES:
             weight = self.g_first_weight
             if weight is None:
                 raise RuntimeError("First-Q weight was not initialized.")
-            explicit_cost = self._explicit_terminal_cost(future, goal)
+            explicit_cost = self._explicit_terminal_cost(ghost_states, goal)
             if weight == 0.0:
                 if self.score_mode == FIRST_Q2_SCORE_MODE:
                     return _normalize_cem_candidate_scores(explicit_cost)
                 return explicit_cost
-            first_score = self._goal_score(future[..., 0, :], task)
+            first_score = self._goal_score(ghost_states[..., 0, :], task)
             if self.score_mode == FIRST_Q2_SCORE_MODE:
                 explicit_cost = _normalize_cem_candidate_scores(explicit_cost)
                 first_score = _normalize_cem_candidate_scores(first_score)
@@ -409,8 +454,8 @@ class ActorFreeTDLeWMV1C4(nn.Module):
 
         if self.score_mode != F_PLUS_C4_SCORE_MODE:
             raise RuntimeError(f"Unhandled C4 score mode {self.score_mode!r}.")
-        prefix_cost = self._explicit_terminal_cost(future[..., :-1, :], goal)
-        final_score = self._goal_score(future[..., -1, :], task)
+        prefix_cost = self._explicit_terminal_cost(ghost_states[..., :-1, :], goal)
+        final_score = self._goal_score(ghost_states[..., -1, :], task)
         return prefix_cost - (self.gamma ** (horizon - 1)) * final_score
 
     def _goal_score(self, state: torch.Tensor, task: torch.Tensor) -> torch.Tensor:
@@ -430,7 +475,7 @@ class ActorFreeTDLeWMV1C4(nn.Module):
             raise ValueError("LeWM terminal and goal embeddings must align.")
         return (terminal - goal).square().sum(dim=-1)
 
-    def _rollout_future(
+    def _rollout_next_ghost_states(
         self,
         info: dict[str, Any],
         actions: torch.Tensor,
@@ -439,6 +484,15 @@ class ActorFreeTDLeWMV1C4(nn.Module):
         samples: int,
         horizon: int,
     ) -> torch.Tensor:
+        """Return stopped F states after each candidate action block.
+
+        The returned axis is ``(zhat_1, ..., zhat_H)``: ``zhat_1`` is the
+        frozen-F successor of the current real state under ``A_1`` and every
+        later ``zhat_k`` is the successor of the preceding planned ghost state
+        under ``A_k``.  These tensors, never the candidate action or its
+        embedding, are the only action-dependent inputs that C4 G can receive.
+        """
+
         observed_frames = self._observed_frames(info)
         rollout_info = self.world_model.rollout(
             info, actions, history_size=self.lewm_history_size
@@ -453,13 +507,16 @@ class ActorFreeTDLeWMV1C4(nn.Module):
             raise ValueError("LeWM rollout has incompatible batch/sample/feature axes.")
         if predicted.shape[-2] < observed_frames:
             raise ValueError("LeWM rollout contains fewer than the observed frames.")
-        future = predicted[..., observed_frames:, :]
-        if future.shape[-2] != horizon:
+        ghost_states = predicted[..., observed_frames:, :]
+        if ghost_states.shape[-2] != horizon:
             raise ValueError(
                 "LeWM rollout future length differs from the CEM horizon: "
-                f"{future.shape[-2]} != {horizon}."
+                f"{ghost_states.shape[-2]} != {horizon}."
             )
-        return future
+        # Formal evaluation already runs under torch.inference_mode(), but the
+        # explicit detach makes the C4 action->F->ghost-state boundary true for
+        # every direct adapter caller as well.
+        return ghost_states.detach()
 
     @staticmethod
     def _observed_frames(info: Mapping[str, Any]) -> int:
@@ -580,7 +637,10 @@ def make_actor_free_td_lewm_v1_c4_policy(
 
 __all__ = [
     "ActorFreeTDLeWMV1C4",
+    "C4_ACTION_EFFECT",
+    "C4_JOINT_OBJECTIVE",
     "C4_ONLY_SCORE_MODE",
+    "C4_TIME_ALIGNMENT",
     "DEPLOYMENT_CHECKPOINT_VERSION",
     "FIRST_ACTION_SCORE_MODES",
     "FIRST_Q2_SCORE_MODE",

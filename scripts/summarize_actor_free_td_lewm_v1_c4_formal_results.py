@@ -22,6 +22,18 @@ from pathlib import Path
 from typing import Any, Union
 from typing import Sequence as TypingSequence
 
+from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
+    C4_ACTION_EFFECT,
+    C4_JOINT_OBJECTIVE,
+    C4_TIME_ALIGNMENT,
+)
+from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
+    OBJECTIVE_VERSION as C4_OBJECTIVE_VERSION,
+)
+from tdwm.evaluation.actor_free_td_lewm_v1_c4 import (
+    validate_actor_free_td_lewm_v1_c4_evaluation_protocol,
+)
+
 PROTOCOLS = ("o25", "o50", "o100")
 SCORE_MODES = (
     "f_only",
@@ -424,6 +436,36 @@ def _load_cell(
         score_mode=score_mode,
         label=f"{paths['manifest']}.protocol",
     )
+    if method_key == "c4":
+        for values, values_path in (
+            (results, paths["results"]),
+            (manifest, paths["manifest"]),
+        ):
+            for key, expected_value in {
+                "objective_version": C4_OBJECTIVE_VERSION,
+                "state_only_g": True,
+                "action_enters_g": False,
+                "action_effect": C4_ACTION_EFFECT,
+                "g_state_source": "stopped_f_post_action_ghost_state",
+            }.items():
+                if values.get(key) != expected_value:
+                    raise ValueError(
+                        f"{values_path}.{key} must be {expected_value!r}."
+                    )
+        validate_actor_free_td_lewm_v1_c4_evaluation_protocol(manifest_protocol)
+        formal_protocol = _required_mapping(
+            manifest.get("formal_protocol"),
+            label=f"{paths['manifest']}.formal_protocol",
+        )
+        validate_actor_free_td_lewm_v1_c4_evaluation_protocol(formal_protocol)
+        score_definition = protocol_inference.get("score_definition")
+        if (
+            results.get("score_definition") != score_definition
+            or manifest.get("score_definition") != score_definition
+        ):
+            raise ValueError(
+                f"{paths['manifest']} changed the locked C4 score definition."
+            )
     if manifest.get("selection") != selection_value:
         raise ValueError(f"{paths['manifest']} does not embed its selection file.")
 
@@ -477,6 +519,26 @@ def _load_cell(
         or not checkpoint_path
     ):
         raise ValueError(f"{paths['manifest']} has invalid checkpoint provenance.")
+    if method_key == "c4":
+        if checkpoint.get("objective_version") != C4_OBJECTIVE_VERSION:
+            raise ValueError(
+                f"{paths['manifest']}.checkpoint.objective_version must be "
+                f"{C4_OBJECTIVE_VERSION}."
+            )
+        g_config = _required_mapping(
+            checkpoint.get("g_config"),
+            label=f"{paths['manifest']}.checkpoint.g_config",
+        )
+        if (
+            g_config.get("objective_version") != C4_OBJECTIVE_VERSION
+            or g_config.get("action_effect") != C4_ACTION_EFFECT
+            or g_config.get("time_alignment") != C4_TIME_ALIGNMENT
+            or g_config.get("joint_objective") != C4_JOINT_OBJECTIVE
+        ):
+            raise ValueError(
+                f"{paths['manifest']} checkpoint does not implement final C4 "
+                "objective v1."
+            )
 
     source: dict[str, Any] = {
         "directory": str(directory.resolve()),
@@ -764,6 +826,8 @@ def build_summary(
         "schema_version": 1,
         "study": {
             "method": "actor_free_td_lewm_v1_c4",
+            "objective_version": C4_OBJECTIVE_VERSION,
+            "training_objective": C4_JOINT_OBJECTIVE["objective"],
             "comparison_method": "actor_free_td_lewm_v1_c",
             "training_seed": 3072,
             "protocols": list(PROTOCOLS),

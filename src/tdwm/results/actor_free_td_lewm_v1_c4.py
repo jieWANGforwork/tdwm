@@ -28,6 +28,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
+    C4_ACTION_EFFECT,
+    C4_JOINT_OBJECTIVE,
+    C4_TIME_ALIGNMENT,
+    OBJECTIVE_VERSION,
+)
+
 PROTOCOLS = ("o25", "o50", "o100")
 SCORE_MODES = (
     "f_only",
@@ -47,10 +54,8 @@ SCORE_LABELS = {
     "f_plus_g_first_q2": "First-Q2",
 }
 LOSS_METRICS = (
-    "real_vector_loss",
-    "real_goal_loss",
-    "predicted_vector_loss",
-    "predicted_goal_loss",
+    "vector_td_loss",
+    "goal_projection_loss",
     "c4_total_loss",
 )
 EXPECTED_EPISODES = 50
@@ -288,6 +293,8 @@ def validate_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
     study = _mapping(summary.get("study"), "study")
     required_study = {
         "method": METHOD,
+        "objective_version": OBJECTIVE_VERSION,
+        "training_objective": C4_JOINT_OBJECTIVE["objective"],
         "comparison_method": "actor_free_td_lewm_v1_c",
         "training_seed": 3072,
         "protocols": list(PROTOCOLS),
@@ -451,6 +458,7 @@ def _validate_training_manifest(manifest: Mapping[str, Any]) -> None:
     exact = {
         "method": METHOD,
         "variant": VARIANT,
+        "objective_version": OBJECTIVE_VERSION,
         "seed": 3072,
     }
     for key, value in exact.items():
@@ -467,7 +475,7 @@ def _validate_training_manifest(manifest: Mapping[str, Any]) -> None:
         "task_dim": 192,
         "output_dim": 192,
         "action_input": "none",
-        "action_effect": "only_via_f_predicted_state",
+        "action_effect": C4_ACTION_EFFECT,
         "successor_semantics": "includes_current_input_state",
         "actor": "none",
         "reward": "none",
@@ -476,35 +484,16 @@ def _validate_training_manifest(manifest: Mapping[str, Any]) -> None:
         if g.get(key) != value:
             raise C4ResultsUpdateError(f"training protocol g.{key} must be {value!r}")
     alignment = _mapping(protocol.get("time_alignment"), "training time_alignment")
-    required_alignment = {
-        "real_online_input": "real_z_i",
-        "predicted_online_input": "stop_gradient_f_of_z_i_minus_1_a_i_minus_1",
-        "shared_target_current_feature": "real_z_i",
-        "shared_target_bootstrap_input": "real_z_i_plus_1",
-        "terminal_semantics": "d_i_true_when_real_z_i_is_terminal",
-        "terminal_target": "y_i_equals_z_i",
-        "f_output_gradient": "stop_gradient",
-    }
-    for key, value in required_alignment.items():
-        if alignment.get(key) != value:
-            raise C4ResultsUpdateError(
-                f"training protocol time_alignment.{key} must be {value!r}"
-            )
+    if dict(alignment) != C4_TIME_ALIGNMENT:
+        raise C4ResultsUpdateError(
+            "training protocol time_alignment must encode the final post-action "
+            "ghost objective"
+        )
     objective = _mapping(protocol.get("joint_objective"), "training objective")
-    required_objective = {
-        "vector_td_population": "all_transitions_both_branches",
-        "vector_reduction": "mean_of_squared_l2_norm",
-        "goal_subset": "goal_derived_tasks_only",
-        "goal_projection_weight": 1.0,
-        "branch_combination": "one_half_real_plus_predicted",
-        "target_gradient": "stop_gradient",
-        "trainable_modules": ["online_g_c4"],
-        "lewm_prediction_loss": "none",
-        "sigreg_loss": "none",
-    }
-    for key, value in required_objective.items():
-        if objective.get(key) != value:
-            raise C4ResultsUpdateError(f"training objective {key} must be {value!r}")
+    if dict(objective) != C4_JOINT_OBJECTIVE:
+        raise C4ResultsUpdateError(
+            "training objective must be single_post_action_ghost_goal_projected_td"
+        )
     training_protocol = _mapping(protocol.get("training"), "protocol.training")
     if training_protocol.get("epochs") != EXPECTED_EPOCHS:
         raise C4ResultsUpdateError("C4 training must use ten epochs")
@@ -595,11 +584,11 @@ def load_loss_series(path: Path) -> dict[str, dict[str, LossSeries]]:
             components = sum(
                 result[stage][metric].values[epoch]
                 for metric in LOSS_METRICS[:-1]
-            ) / 2.0
+            )
             total = result[stage]["c4_total_loss"].values[epoch]
             if not math.isclose(components, total, rel_tol=2e-4, abs_tol=2e-3):
                 raise C4ResultsUpdateError(
-                    f"{stage} epoch {epoch} C4 total is not half the four branch losses"
+                    f"{stage} epoch {epoch} C4 total is not vector TD plus goal loss"
                 )
     return result
 
@@ -745,8 +734,8 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
         )
 
     lines.append(
-        "C4 changes the action route, successor time semantics, and real/predicted "
-        "dual-branch training objective together. Therefore the C4-versus-V1-C scorer "
+        "C4 changes the action route, successor time semantics, and action-conditioned "
+        "G interface together. Therefore the C4-versus-V1-C scorer "
         "pattern is descriptive and cannot isolate a causal effect of routing action "
         "through frozen F or of removing action from G by itself."
     )
@@ -791,14 +780,8 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
     validation = evidence.losses["validation"]
     loss_scale_parts: list[str] = []
     for label, stage in (("train", train), ("validation", validation)):
-        goal_sum = (
-            stage["real_goal_loss"].final
-            + stage["predicted_goal_loss"].final
-        )
-        vector_sum = (
-            stage["real_vector_loss"].final
-            + stage["predicted_vector_loss"].final
-        )
+        goal_sum = stage["goal_projection_loss"].final
+        vector_sum = stage["vector_td_loss"].final
         loss_scale_parts.append(
             f"{label} goal/vector {goal_sum:.6g}/{vector_sum:.6g} "
             f"({goal_sum / max(vector_sum, 1e-12):.2f}x)"
@@ -859,10 +842,8 @@ def _loss_change(series: LossSeries) -> str:
 
 def _loss_rows(evidence: C4ReportEvidence) -> list[tuple[str, str, str, str, str]]:
     labels = {
-        "real_vector_loss": "Real vector",
-        "real_goal_loss": "Real goal",
-        "predicted_vector_loss": "Predicted vector",
-        "predicted_goal_loss": "Predicted goal",
+        "vector_td_loss": "Vector TD",
+        "goal_projection_loss": "Goal projection",
         "c4_total_loss": "C4 total",
     }
     rows: list[tuple[str, str, str, str, str]] = []
@@ -885,8 +866,8 @@ def _loss_interpretation(evidence: C4ReportEvidence) -> str:
     observations: list[str] = []
     for stage in ("train", "validation"):
         losses = evidence.losses[stage]
-        goal = losses["real_goal_loss"].final + losses["predicted_goal_loss"].final
-        vector = losses["real_vector_loss"].final + losses["predicted_vector_loss"].final
+        goal = losses["goal_projection_loss"].final
+        vector = losses["vector_td_loss"].final
         dominant = "goal-projection" if goal > vector else "vector-TD"
         ratio = max(goal, vector) / max(min(goal, vector), 1e-12)
         observations.append(f"{stage} ends {dominant}-dominated ({ratio:.2f}x)")
@@ -906,16 +887,16 @@ def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
             "C4 keeps the V1 LeWM observation encoder, Action Encoder and world-model "
             "predictor F frozen, stops every F output, and trains only a new online "
             "state-only G_C4 with a frozen EMA target. G_C4 has interface "
-            "`G_C4(z_i,m)->Psi_i in R^192`; raw action and action embedding never enter G_C4."
+            "`G_C4(z_ghost,m)->Psi_i in R^192`; raw action and action embedding never enter G_C4."
         ),
         "",
         (
-            "The aligned online inputs are `x_real=z_i` and "
-            "`x_pred=sg[F(z_{i-1},a_{i-1})]`. They share "
-            "`Y_i=sg[z_i+gamma(1-d_i)Gbar_C4(z_{i+1},m)]`; when z_i is terminal, "
-            "`Y_i=z_i`. Each branch uses full 192-D vector TD plus the goal projection "
-            "residual on goal-derived samples only, and "
-            "`L_C4=0.5*(L_real_vector+L_real_goal+L_pred_vector+L_pred_goal)` with lambda_C=1."
+            "The single online input is `x_i=sg[F(z_i^real,a_i)]`. Its target is "
+            "`Y_i=sg[z_(i+1)^real+gamma(1-d_i)Gbar_C4(sg[F(z_(i+1)^real,a_(i+1))],m)]`; "
+            "when the transition after a_i terminates, `Y_i=z_(i+1)^real`. The loss is "
+            "`L_C4=L_vector+L_goal`, where the full 192-D vector TD term uses every "
+            "transition and the goal projection residual uses goal-derived samples only "
+            "with lambda_C=1."
         ),
         "",
         "### Protocol by score matrix",
@@ -997,10 +978,8 @@ def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
                 f"{train['c4_total_loss'].final:.6g}; validation C4 total changed from "
                 f"{validation['c4_total_loss'].first:.6g} to "
                 f"{validation['c4_total_loss'].final:.6g}. Final train components are "
-                f"real/vector {train['real_vector_loss'].final:.6g}, "
-                f"real/goal {train['real_goal_loss'].final:.6g}, "
-                f"predicted/vector {train['predicted_vector_loss'].final:.6g}, and "
-                f"predicted/goal {train['predicted_goal_loss'].final:.6g}."
+                f"vector TD {train['vector_td_loss'].final:.6g} and goal projection "
+                f"{train['goal_projection_loss'].final:.6g}."
             ),
             "",
             _loss_interpretation(evidence),
@@ -1212,8 +1191,8 @@ def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
     if method_anchor is None:
         raise C4ResultsUpdateError("Markdown method table has no V1-C3 row")
     method_row = (
-        "| C4 (V1 only) | state-only G on aligned real z_i and stopped F-predicted z_i | "
-        "L_C4=0.5[(L_vec^real+L_goal^real)+(L_vec^pred+L_goal^pred)], lambda_C=1 | "
+        "| C4 (V1 only) | state-only G on stopped F(z_i,a_i) post-action ghost states | "
+        "L_C4=L_vector+L_goal, lambda_C=1 | "
         "Freeze encoder, Action Encoder and F; action affects G_C4 only through the F-produced state |"
     )
     text = _replace_once(text, method_anchor, method_anchor + "\n" + method_row)
@@ -1249,7 +1228,7 @@ def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
         formatted.append(value)
     formatted.append("—")
     c4_master = (
-        "| V1 | C4 | L_C4=0.5[(L_vec^r+L_goal^r)+(L_vec^p+L_goal^p)] | "
+        "| V1 | C4 | L_C4=L_vector+L_goal | "
         + " | ".join(formatted)
         + " |"
     )
@@ -1443,7 +1422,7 @@ def _update_master_docx(document: Any, evidence: C4ReportEvidence) -> None:
     _set_cell_text(inserted.cells[1], "C4", bold=True)
     _set_cell_text(
         inserted.cells[2],
-        "L_C4=1/2[(L_vec^real+L_goal^real)+(L_vec^pred+L_goal^pred)]",
+        "L_C4=L_vector+L_goal",
         size=7.5,
     )
     for column, mode in enumerate(SCORE_MODES, start=3):
@@ -1572,8 +1551,8 @@ def _update_method_docx(document: Any) -> None:
     row = table.add_row()
     values = (
         "C4 (V1 only)",
-        "x_real=z_i; x_pred=sg[F(z_(i-1),a_(i-1))]; shared Y_i=sg[z_i+gamma(1-d_i)Gbar_C4(z_(i+1),m)]",
-        "L_C4=1/2[(L_vec^real+L_goal^real)+(L_vec^pred+L_goal^pred)], lambda_C=1",
+        "x_i=sg[F(z_i^real,a_i)]; Y_i=sg[z_(i+1)^real+gamma(1-d_i)Gbar_C4(sg[F(z_(i+1)^real,a_(i+1))],m)]",
+        "L_C4=L_vector+L_goal, lambda_C=1",
         "Freeze encoder, Action Encoder and F; action reaches state-only G_C4 only through F",
     )
     for cell, value in zip(row.cells, values):
@@ -1745,7 +1724,7 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
     )
     _add_docx_body(
         document,
-        "Aligned inputs: x_real = z_i and x_pred = stopgrad[F(z_(i-1),a_(i-1))]. Shared target: Y_i = stopgrad[z_i + gamma(1-d_i) Gbar_C4(z_(i+1),m)]; if z_i is terminal, Y_i = z_i. Loss: L_C4 = 1/2[(L_vector^real + L_goal^real) + (L_vector^pred + L_goal^pred)], with lambda_C = 1 and goal loss only on goal-derived samples.",
+        "Single online input: x_i = stopgrad[F(z_i^real,a_i)]. Target: Y_i = stopgrad[z_(i+1)^real + gamma(1-d_i) Gbar_C4(stopgrad[F(z_(i+1)^real,a_(i+1))],m)]; if the transition after a_i terminates, Y_i = z_(i+1)^real. Loss: L_C4 = L_vector + L_goal, with lambda_C = 1 and goal loss only on goal-derived samples.",
     )
     _add_docx_heading(document, "Protocol by score matrix", 2)
     table = document.add_table(rows=1, cols=7)
@@ -1841,10 +1820,8 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
         "The formal ten-epoch run completed 127,960 optimizer updates. "
         f"Train total changed {train['c4_total_loss'].first:.6g} -> {train['c4_total_loss'].final:.6g}; "
         f"validation total changed {validation['c4_total_loss'].first:.6g} -> {validation['c4_total_loss'].final:.6g}. "
-        f"Final train components: real/vector {train['real_vector_loss'].final:.6g}, "
-        f"real/goal {train['real_goal_loss'].final:.6g}, "
-        f"predicted/vector {train['predicted_vector_loss'].final:.6g}, "
-        f"predicted/goal {train['predicted_goal_loss'].final:.6g}.",
+        f"Final train components: vector TD {train['vector_td_loss'].final:.6g}, "
+        f"goal projection {train['goal_projection_loss'].final:.6g}.",
     )
     _add_docx_body(document, _loss_interpretation(evidence), bold=True)
     if evidence.loss_plot_path is not None:
