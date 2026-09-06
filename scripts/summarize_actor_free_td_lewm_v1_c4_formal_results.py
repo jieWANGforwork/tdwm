@@ -19,7 +19,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence as TypingSequence, Union
 
 PROTOCOLS = ("o25", "o50", "o100")
 SCORE_MODES = (
@@ -55,6 +55,7 @@ GOAL_OFFSET_BY_PROTOCOL = {"o25": 25, "o50": 50, "o100": 100}
 SUMMARY_JSON_NAME = "actor_free_td_lewm_v1_c4_formal_summary.json"
 EPISODE_CSV_NAME = "actor_free_td_lewm_v1_c4_formal_episode_matrix.csv"
 SUMMARY_MARKDOWN_NAME = "actor_free_td_lewm_v1_c4_formal_summary.md"
+RootInput = Union[str, Path, TypingSequence[Union[str, Path]]]
 
 
 @dataclass(frozen=True)
@@ -105,44 +106,58 @@ def _cell_parts(score_mode: str) -> tuple[str, ...]:
     return (score_mode,)
 
 
-def _contains_all_cells(method_root: Path) -> bool:
-    required_names = ("results.json", "protocol_manifest.json", "episode_selection.json")
-    return all(
-        all((method_root.joinpath(*_cell_parts(mode)) / name).is_file() for name in required_names)
-        for mode in SCORE_MODES
-    )
+def _normalise_roots(roots: RootInput, *, label: str) -> tuple[Path, ...]:
+    if isinstance(roots, (str, Path)):
+        values: Sequence[str | Path] = (roots,)
+    elif isinstance(roots, Sequence):
+        values = roots
+    else:
+        raise TypeError(f"{label} must be one path or a sequence of paths.")
+    resolved: list[Path] = []
+    for value in values:
+        if not isinstance(value, (str, Path)):
+            raise TypeError(f"Every {label} entry must be a path.")
+        path = Path(value).expanduser().resolve()
+        if path not in resolved:
+            resolved.append(path)
+    if not resolved:
+        raise ValueError(f"At least one {label} path is required.")
+    for path in resolved:
+        if not path.is_dir():
+            raise FileNotFoundError(path)
+    return tuple(resolved)
 
 
-def _resolve_method_root(
-    root: str | Path,
+def _candidate_cell_directories(
+    root: Path,
     *,
     protocol: str,
     variant: str,
-) -> Path:
-    supplied = Path(root).expanduser().resolve()
-    candidates = (
-        supplied / "formal" / protocol / "v1" / variant,
-        supplied / protocol / "v1" / variant,
-        supplied / "v1" / variant,
-        supplied,
+    score_mode: str,
+) -> tuple[Path, ...]:
+    bases = (
+        root / "formal" / protocol / "v1" / variant,
+        root / "formal" / "v1" / variant,
+        root / protocol / "v1" / variant,
+        root / protocol / variant,
+        root / "v1" / variant,
+        root / variant,
+        root,
+    )
+    required_names = (
+        "results.json",
+        "protocol_manifest.json",
+        "episode_selection.json",
     )
     matches: list[Path] = []
+    candidates = [base.joinpath(*_cell_parts(score_mode)) for base in bases]
     for candidate in candidates:
         resolved = candidate.resolve()
-        if resolved not in matches and _contains_all_cells(resolved):
+        if resolved in matches:
+            continue
+        if all((resolved / name).is_file() for name in required_names):
             matches.append(resolved)
-    if not matches:
-        expected = candidates[0]
-        raise FileNotFoundError(
-            f"No complete six-cell {protocol.upper()} V1-{variant.upper()} matrix "
-            f"was found below {supplied}; expected a layout such as {expected}."
-        )
-    if len(matches) != 1:
-        raise ValueError(
-            f"{supplied} resolves more than one possible {protocol.upper()} "
-            f"V1-{variant.upper()} matrix: {[str(path) for path in matches]}."
-        )
-    return matches[0]
+    return tuple(matches)
 
 
 def _validate_selection(
@@ -336,23 +351,80 @@ def _load_cell(
     )
 
 
+def _cell_content_signature(cell: Cell) -> tuple[Any, ...]:
+    source = cell.source
+    action = source.get("action_normalization")
+    return (
+        cell.outcomes,
+        _canonical_json_sha256(cell.selection),
+        source["results"]["sha256"],
+        source["protocol_manifest"]["sha256"],
+        source["episode_selection"]["sha256"],
+        action["sha256"] if isinstance(action, Mapping) else None,
+        source["checkpoint"]["sha256"],
+    )
+
+
 def _load_method(
-    root: str | Path,
+    roots: RootInput,
     *,
     method_key: str,
     protocol: str,
 ) -> dict[str, Cell]:
     variant = str(METHODS[method_key]["variant"])
-    method_root = _resolve_method_root(root, protocol=protocol, variant=variant)
-    cells = {
-        score_mode: _load_cell(
-            method_root.joinpath(*_cell_parts(score_mode)),
-            method_key=method_key,
-            protocol=protocol,
-            score_mode=score_mode,
+    source_roots = _normalise_roots(
+        roots, label=f"{method_key}/{protocol} source root"
+    )
+    cells: dict[str, Cell] = {}
+    used_roots: set[Path] = set()
+    for score_mode in SCORE_MODES:
+        directories: list[tuple[Path, Path]] = []
+        for root in source_roots:
+            for directory in _candidate_cell_directories(
+                root,
+                protocol=protocol,
+                variant=variant,
+                score_mode=score_mode,
+            ):
+                if all(existing != directory for _, existing in directories):
+                    directories.append((root, directory))
+        if not directories:
+            raise FileNotFoundError(
+                f"No {method_key}/{protocol}/{score_mode} result cell was found "
+                f"under {[str(path) for path in source_roots]}."
+            )
+        loaded = [
+            (
+                root,
+                _load_cell(
+                    directory,
+                    method_key=method_key,
+                    protocol=protocol,
+                    score_mode=score_mode,
+                ),
+            )
+            for root, directory in directories
+        ]
+        signatures = {_cell_content_signature(cell) for _, cell in loaded}
+        if len(signatures) != 1:
+            raise ValueError(
+                f"Conflicting duplicate {method_key}/{protocol}/{score_mode} "
+                f"cells were found at {[cell.source['directory'] for _, cell in loaded]}."
+            )
+        selected_root, selected = loaded[0]
+        used_roots.update(root for root, _ in loaded)
+        if len(loaded) > 1:
+            selected.source["equivalent_source_directories"] = [
+                cell.source["directory"] for _, cell in loaded
+            ]
+        cells[score_mode] = selected
+        used_roots.add(selected_root)
+    unused_roots = [root for root in source_roots if root not in used_roots]
+    if unused_roots:
+        raise ValueError(
+            f"These {method_key}/{protocol} source roots contributed no result "
+            f"cells: {[str(path) for path in unused_roots]}."
         )
-        for score_mode in SCORE_MODES
-    }
     reference = cells[SCORE_MODES[0]].selection
     for score_mode, cell in cells.items():
         if cell.selection != reference:
@@ -444,8 +516,8 @@ def _method_payload(cells: Mapping[str, Cell]) -> dict[str, Any]:
 
 def build_summary(
     *,
-    c4_root: str | Path,
-    v1_c_roots: Mapping[str, str | Path],
+    c4_root: RootInput,
+    v1_c_roots: Mapping[str, RootInput],
 ) -> dict[str, Any]:
     if set(v1_c_roots) != set(PROTOCOLS):
         raise ValueError("V1-C roots must be provided exactly for O25, O50, and O100.")
@@ -543,9 +615,18 @@ def build_summary(
             "v1_c_checkpoint_sha256": next(iter(v1_c_checkpoint_hashes)),
         },
         "input_roots": {
-            "c4": str(Path(c4_root).expanduser().resolve()),
+            "c4": [
+                str(path)
+                for path in _normalise_roots(c4_root, label="C4 source root")
+            ],
             "v1_c": {
-                protocol: str(Path(v1_c_roots[protocol]).expanduser().resolve())
+                protocol: [
+                    str(path)
+                    for path in _normalise_roots(
+                        v1_c_roots[protocol],
+                        label=f"V1-C {protocol.upper()} source root",
+                    )
+                ]
                 for protocol in PROTOCOLS
             },
         },
@@ -751,10 +832,30 @@ def build_parser() -> argparse.ArgumentParser:
             "Strictly summarize paired C4 and V1-C O25/O50/O100 formal results."
         )
     )
-    parser.add_argument("--c4-root", required=True)
-    parser.add_argument("--v1-c-o25-root", required=True)
-    parser.add_argument("--v1-c-o50-root", required=True)
-    parser.add_argument("--v1-c-o100-root", required=True)
+    parser.add_argument(
+        "--c4-root",
+        action="append",
+        required=True,
+        help="C4 matrix source root; repeat only if its cells are split.",
+    )
+    parser.add_argument(
+        "--v1-c-o25-root",
+        action="append",
+        required=True,
+        help="V1-C O25 source root; may be repeated for split cells.",
+    )
+    parser.add_argument(
+        "--v1-c-o50-root",
+        action="append",
+        required=True,
+        help="V1-C O50 source root; repeat for each historical source run.",
+    )
+    parser.add_argument(
+        "--v1-c-o100-root",
+        action="append",
+        required=True,
+        help="V1-C O100 source root; may be repeated for split cells.",
+    )
     parser.add_argument("--output-dir", required=True)
     return parser
 

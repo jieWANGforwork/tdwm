@@ -132,10 +132,11 @@ def _write_method(
     method_key: str,
     protocol: str,
     rank_offset: int = 0,
+    score_modes: tuple[str, ...] | None = None,
 ) -> None:
     variant = SUMMARY.METHODS[method_key]["variant"]
     selection = _selection(protocol, rank_offset=rank_offset)
-    for score_mode in SUMMARY.SCORE_MODES:
+    for score_mode in score_modes or SUMMARY.SCORE_MODES:
         _write_cell(
             _cell_directory(
                 root,
@@ -242,6 +243,78 @@ def test_rejects_cross_method_selection_rank_mismatch(tmp_path: Path) -> None:
         SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
 
 
+def test_accepts_one_protocol_split_across_multiple_source_roots(
+    tmp_path: Path,
+) -> None:
+    c4_root = tmp_path / "c4"
+    v1_c_roots: dict[str, object] = {}
+    for protocol in SUMMARY.PROTOCOLS:
+        _write_method(c4_root, method_key="c4", protocol=protocol)
+        if protocol != "o50":
+            root = tmp_path / f"v1_c_{protocol}"
+            _write_method(root, method_key="v1_c", protocol=protocol)
+            v1_c_roots[protocol] = root
+
+    split_roots = [tmp_path / f"v1_c_o50_part_{index}" for index in range(4)]
+    groups = (
+        ("f_only", "g_only", "f_plus_g"),
+        ("f_plus_g_first",),
+        ("g_only_f_rollout_mean",),
+        ("f_plus_g_first_q2",),
+    )
+    for root, modes in zip(split_roots, groups):
+        _write_method(
+            root,
+            method_key="v1_c",
+            protocol="o50",
+            score_modes=modes,
+        )
+    v1_c_roots["o50"] = split_roots
+
+    summary = SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
+
+    assert summary["input_roots"]["v1_c"]["o50"] == [
+        str(path.resolve()) for path in split_roots
+    ]
+    scores = summary["protocols"]["o50"]["methods"]["v1_c"]["scores"]
+    assert {mode: values["success_count"] for mode, values in scores.items()} == {
+        "f_only": 10,
+        "g_only": 8,
+        "f_plus_g": 12,
+        "f_plus_g_first": 9,
+        "g_only_f_rollout_mean": 5,
+        "f_plus_g_first_q2": 11,
+    }
+
+
+def test_rejects_conflicting_duplicate_cells_across_source_roots(
+    tmp_path: Path,
+) -> None:
+    c4_root, v1_c_roots = _complete_inputs(tmp_path)
+    duplicate_root = tmp_path / "v1_c_o50_conflict"
+    _write_method(
+        duplicate_root,
+        method_key="v1_c",
+        protocol="o50",
+        score_modes=("g_only",),
+    )
+    cell = _cell_directory(
+        duplicate_root,
+        protocol="o50",
+        variant="c",
+        score_mode="g_only",
+    )
+    result_path = cell / "results.json"
+    result = json.loads(result_path.read_text())
+    result["metrics"]["episode_successes"][20] = True
+    result["metrics"]["success_rate"] = 18.0
+    result_path.write_text(json.dumps(result))
+    v1_c_roots["o50"] = [v1_c_roots["o50"], duplicate_root]
+
+    with pytest.raises(ValueError, match="Conflicting duplicate v1_c/o50/g_only"):
+        SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
+
+
 def test_rejects_non_boolean_outcome_and_missing_cell(tmp_path: Path) -> None:
     c4_root, v1_c_roots = _complete_inputs(tmp_path)
     cell = _cell_directory(
@@ -259,7 +332,7 @@ def test_rejects_non_boolean_outcome_and_missing_cell(tmp_path: Path) -> None:
         c4_root, protocol="o100", variant="c4", score_mode="f_plus_g"
     )
     (missing / "results.json").unlink()
-    with pytest.raises(FileNotFoundError, match="No complete six-cell"):
+    with pytest.raises(FileNotFoundError, match="No c4/o100/f_plus_g result cell"):
         SUMMARY.build_summary(c4_root=c4_root, v1_c_roots=v1_c_roots)
 
 
