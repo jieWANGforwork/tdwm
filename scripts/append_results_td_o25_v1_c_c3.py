@@ -341,27 +341,38 @@ def markdown_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> lis
     return lines
 
 
-def _result_cell(cell: Mapping[str, Any]) -> str:
+def _score_cell(cell: Mapping[str, Any]) -> str:
+    return f"{cell['success_count']}/50 ({cell['success_rate_percent']}%)"
+
+
+def _change_cell(cell: Mapping[str, Any]) -> str:
     return (
-        f"{cell['success_count']}/50 ({cell['success_rate_percent']}%)\n"
-        f"New +{len(cell['new_rescues'])} · Lost {len(cell['lost_f_successes'])}"
+        f"{len(cell['new_rescues'])}/"
+        f"{len(cell['lost_f_successes'])}/"
+        f"{cell['f_or_method_count']}"
     )
 
 
 def result_matrix_rows(cells: Mapping[str, Mapping[str, Any]]) -> tuple[tuple[str, ...], ...]:
     """Return the O25 matrix in the report's method-by-score orientation."""
     baseline = cells["f_only"]
-    baseline_text = f"{baseline['success_count']}/50 ({baseline['success_rate_percent']}%)\nBaseline"
-    baseline_reference = f"{baseline['success_count']}/50 ({baseline['success_rate_percent']}%)*\nBaseline reference"
+    baseline_text = _score_cell(baseline)
+    baseline_reference = _score_cell(baseline) + "*"
     return (
         (
             "V1-C E10",
             baseline_text,
-            _result_cell(cells["g_only"]),
-            _result_cell(cells["f_plus_g"]),
-            _result_cell(cells["first_q"]),
-            _result_cell(cells["mean_q"]),
-            _result_cell(cells["first_q2"]),
+            _score_cell(cells["g_only"]),
+            _change_cell(cells["g_only"]),
+            _score_cell(cells["f_plus_g"]),
+            _change_cell(cells["f_plus_g"]),
+            _score_cell(cells["first_q"]),
+            _change_cell(cells["first_q"]),
+            _score_cell(cells["mean_q"]),
+            _change_cell(cells["mean_q"]),
+            _score_cell(cells["first_q2"]),
+            _change_cell(cells["first_q2"]),
+            "—",
             "—",
         ),
         (
@@ -372,93 +383,55 @@ def result_matrix_rows(cells: Mapping[str, Mapping[str, Any]]) -> tuple[tuple[st
             "—",
             "—",
             "—",
-            _result_cell(cells["c3"]),
+            "—",
+            "—",
+            "—",
+            "—",
+            "—",
+            _score_cell(cells["c3"]),
+            _change_cell(cells["c3"]),
         ),
     )
 
 
 def build_markdown_section(summary: Mapping[str, Any], outcomes: Mapping[str, Sequence[bool]], paired_sha256: str) -> str:
     cells = summary["cells"]
-    selection = summary["selection"]
     lines = [
         MARKDOWN_START,
         "## O25 配对补测 V1 C 与 C3",
         "",
         "同一组 50 个 O25 start-goal pair 上，单方法最高为 **C3 State-V + First-Q2 alpha=.10：38/50 (76%)**；V1-C F-only 为 **37/50 (74%)**。前六行是先前补测的 V1-C E10 六种评分；最后一行是把此前 O50 得到 31/50 (62%) 的同一个 C3 scorer 原样移到 O25，未重新训练。C3 相对 F-only 新救回 6 个 pair，同时丢失 5 个原 F 成功 pair。若事后使用成功标签做 oracle 选择，F-only 与 C3 的并集为 **43/50 (86%)**；把全部六种替代评分也纳入，oracle 上限为 **44/50 (88%)**。这些 oracle 数字不是可部署结果。",
         "",
-        "### 协议与证据指纹",
-        "",
-    ]
-    lines += markdown_table(("字段", "锁定值"), (
-        ("任务", "Cube O25；50 个固定 start-goal pair；goal step - start step = 25"),
-        ("规划", "CEM；300 candidates；30 iterations；30 elites；planning seed 42；action block 5"),
-        ("执行节奏", "除 G-only 外均 H=5/RH=5、每 25 环境步重规划；G-only 为 H=1/RH=1、每 5 步重规划"),
-        ("V1-C checkpoint", f"E10/global step 127960；SHA-256 `{V1_C_CHECKPOINT_SHA256}`"),
-        ("V1-C3 checkpoint", f"E12/global step 12000；SHA-256 `{V1_C3_CHECKPOINT_SHA256}`"),
-        ("Selection / ranks", f"`{SELECTION_SHA256}` / `{RANKS_SHA256}`"),
-        ("Action normalization", f"`{ACTION_SHA256}`"),
-        ("逐-pair CSV", f"`reports/artifacts/actor_free_td_lewm_v1_c_c3_o25_20260906/paired_outcomes.csv`；SHA-256 `{paired_sha256}`"),
-    ))
-    lines += [
-        "",
-        "### 训练目标与推理评分定义",
-        "",
-        "V1-C 的六种 O25 评分共享同一个 E10 checkpoint 与训练目标 `L_C=mean(l)+mean_goal(q-qY)^2`；C3 使用 `L_C3=mean_i omega_tau(r_i)Huber_1(r_i)`。本轮只改变或复用推理评分，没有为 O25 重新训练。`Zcand` 表示在每次 CEM candidate population 内分别做 z-score。",
-        "",
-    ]
-    score_rows = []
-    for spec in CELL_SPECS:
-        execution = "A1 后重规划；真实 z0" if spec.key == "g_only" else "A1-A5 后重规划"
-        if spec.key == "mean_q":
-            execution += "；q1 用真实 z0，q2-q5 用 F imagined states"
-        elif spec.key == "c3":
-            execution += "；EMA State-V 读 F imagined terminal，online G 读真实 z0"
-        score_rows.append(
-            (
-                spec.label,
-                SCORE_PATHS[spec.label],
-                f"H{spec.horizon}/RH{spec.receding_horizon}",
-                execution,
-            )
-        )
-    lines += markdown_table(("评分", "CEM 最小化 cost", "H/RH", "执行与状态来源"), score_rows)
-    lines += [
+        "50 个结果使用同一组 O25 pairs。V1-C E10 的六列共享同一个 checkpoint；C3 列使用 V1-C3 E12 checkpoint。训练 loss、推理公式与完整 outcome metrics 已在前文记录；这里不再重复拆表。",
         "",
         "### 方法 × 测试方法 O25 结果矩阵",
         "",
-        "第一列是训练方法；后续各列都是测试方法。每个非 F-only 已测单元格依次写 O25 成绩、相对 F-only 的新成功数（New）和丢失数（Lost）。F-only 是比较基线，因此只写基线成绩，不计算也不显示 New/Lost；未测组合写 `—`。",
+        "第一列是训练方法。每个测试方法先放成绩列，随后紧跟一列 `New / Lost / F+New`；该列只写三个数量。`F+New` 表示保住 F-only 的全部成功，再加该测试方法新增成功后的总成功数。F-only 是比较基线，只放成绩；未测组合写 `—`。",
         "",
     ]
     lines += markdown_table(
         (
             "方法 / checkpoint",
-            "F-only",
+            "F-only baseline",
             "G-only",
+            "New / Lost / F+New",
             "F+G tail",
+            "New / Lost / F+New",
             "First-Q alpha=.25",
+            "New / Lost / F+New",
             "Mean-Q",
+            "New / Lost / F+New",
             "First-Q2 alpha=.25",
+            "New / Lost / F+New",
             "C3 State-V + First-Q2 alpha=.10",
+            "New / Lost / F+New",
         ),
         result_matrix_rows(cells),
     )
     lines += [
         "",
-        "`New` = F-only 失败而该测试方法成功；`Lost` = F-only 成功而该测试方法失败。* C3 冻结并沿用 V1-C 的 F，因此 C3 行的 F-only 是同一条 37/50 基线引用，不是另一次独立重跑。",
+        f"`New` = F-only 失败而该测试方法成功；`Lost` = F-only 成功而该测试方法失败。* C3 冻结并沿用 V1-C 的 F，因此 C3 行的 F-only 是同一条 37/50 基线引用，不是另一次独立重跑。逐 pair 原始记录保留在审计 CSV（SHA-256 `{paired_sha256}`），不再拆成其他结果表。",
     ]
-    lines += ["", "### F-only 成功与失败 pair", "", f"- F-only 成功 37 个：{', '.join(summary['f_success_pair_ids'])}", f"- F-only 失败 13 个：{', '.join(summary['f_failure_pair_ids'])}", "", "### 每种方法相对 F-only 的逐-pair 转移", ""]
-    transition_rows = []
-    for spec in CELL_SPECS:
-        if spec.key == "f_only":
-            continue
-        cell = cells[spec.key]
-        transition_rows.append((spec.label, ", ".join(cell["new_rescues"]) or "无", ", ".join(cell["lost_f_successes"]) or "无", ", ".join(cell["both_fail"]) or "无"))
-    lines += markdown_table(("评分", "新救回 F 失败", "丢失 F 成功", "两者均失败"), transition_rows)
-    lines += ["", "### P01 到 P50 完整结果", "", "`S` 表示成功，`F` 表示失败。", ""]
-    pair_rows = []
-    for index in range(EPISODES):
-        pair_rows.append((f"P{index + 1:02d}", str(selection["episode_indices"][index]), str(selection["start_steps"][index]), str(selection["goal_steps"][index]), str(selection["valid_row_ranks"][index]), *[("S" if outcomes[spec.key][index] else "F") for spec in CELL_SPECS]))
-    lines += markdown_table(("Pair", "Episode", "Start", "Goal", "Rank", "F", "G", "F+G", "First-Q", "Mean-Q", "First-Q2", "C3 combo"), pair_rows)
     oracle = summary["oracle"]
     lines += [
         "", "### 结论与下一步门控目标", "",
@@ -595,7 +568,6 @@ def build_docx(base_path: Path, summary: Mapping[str, Any], outcomes: Mapping[st
         helpers._configure_append_section(document)
     _set_running_matter(document.sections[-1], helpers)
     cells = summary["cells"]
-    selection = summary["selection"]
 
     kicker = document.add_paragraph(style="Report Kicker")
     helpers._set_run_font(kicker.add_run(DOCX_START), size=9.5, color="5C6975", bold=True)
@@ -609,60 +581,20 @@ def build_docx(base_path: Path, summary: Mapping[str, Any], outcomes: Mapping[st
     for run in intro.runs:
         helpers._set_run_font(run, size=9.5, color="7A5A00", bold=True)
 
-    document.add_heading("Protocol and evidence fingerprints", level=2)
-    protocol_rows = (
-        ("Task", "Cube O25; 50 fixed pairs; goal step minus start step = 25"),
-        ("CEM", "300 candidates; 30 iterations; 30 elites; planning seed 42; action block 5"),
-        ("Execution cadence", "All but G-only: H5/RH5 and replan every 25 environment steps. G-only: H1/RH1 and replan every 5 steps."),
-        ("V1-C", f"E10 / step 127960 / {V1_C_CHECKPOINT_SHA256}"),
-        ("V1-C3", f"E12 / step 12000 / {V1_C3_CHECKPOINT_SHA256}"),
-        ("Selection", SELECTION_SHA256),
-        ("Valid-row ranks", RANKS_SHA256),
-        ("Action normalization", ACTION_SHA256),
-        ("Paired CSV", f"{paired_sha256} · reports/artifacts/actor_free_td_lewm_v1_c_c3_o25_20260906/paired_outcomes.csv"),
-    )
-    table = helpers._add_table(document, headers=("Field", "Locked value"), rows=protocol_rows, widths=(3100, 11300))
-    _format_table(table, helpers, font_size=8.4)
-
-    document.add_heading("Training objectives and inference scores", level=2)
     document.add_paragraph(
-        "V1-C shares E10 and L_C=mean(l)+mean_goal(q-qY)^2; C3 uses "
-        "L_C3=mean_i omega_tau(r_i)Huber_1(r_i). O25 reuses both checkpoints. "
-        "Zcand is the within-candidate-population z-score."
+        "All results use the same 50 O25 pairs. The six V1-C E10 score columns "
+        "share one checkpoint; the C3 column uses V1-C3 E12. Training losses, "
+        "score formulas and the full outcome metrics are already recorded above."
     )
-    score_rows = []
-    for spec in CELL_SPECS:
-        execution = "Replan after A1; real z0" if spec.key == "g_only" else "Replan after A1-A5"
-        if spec.key == "mean_q":
-            execution += "; q1 uses real z0; q2-q5 use F-imagined states"
-        elif spec.key == "c3":
-            execution += "; EMA State-V reads the F terminal; online G reads real z0"
-        score_rows.append(
-            (
-                spec.label,
-                SCORE_PATHS[spec.label],
-                f"H{spec.horizon}/RH{spec.receding_horizon}",
-                execution,
-            )
-        )
-    table = helpers._add_table(
-        document,
-        headers=("Score", "Cost minimized by CEM", "H/RH", "Execution and state source"),
-        rows=score_rows,
-        widths=(2800, 6000, 1400, 4200),
-    )
-    _format_table(table, helpers, font_size=7.8)
 
     document.add_heading("Methods by inference score, relative to F-only", level=2)
     document.add_paragraph(
-        "Each row is one trained method/checkpoint; every following column is an "
-        "inference score. Each measured non-F-only cell reports O25 success, newly "
-        "successful pairs, and lost F-only successes. A dash means not evaluated."
+        "Each row is one trained method/checkpoint. Every score column is followed "
+        "by one adjacent New / Lost / F+New column. A dash means not evaluated."
     )
     legend = document.add_paragraph(
-        "New = F-only fails and the score succeeds. Lost = F-only succeeds and the "
-        "score fails. F-only is the reference, so its cells show only the baseline "
-        "result and never show New or Lost."
+        "The adjacent column contains counts only: newly successful pairs / lost "
+        "F successes / total if all F successes are retained and New is added."
     )
     for run in legend.runs:
         helpers._set_run_font(run, size=9.5, color="374151", bold=True)
@@ -670,58 +602,31 @@ def build_docx(base_path: Path, summary: Mapping[str, Any], outcomes: Mapping[st
         document,
         headers=(
             "Method / checkpoint",
-            "F-only",
+            "F-only\nbaseline",
             "G-only",
+            "New / Lost / F+New",
             "F+G tail",
+            "New / Lost / F+New",
             "First-Q\nalpha=.25",
+            "New / Lost / F+New",
             "Mean-Q",
+            "New / Lost / F+New",
             "First-Q2\nalpha=.25",
+            "New / Lost / F+New",
             "C3 State-V + First-Q2\nalpha=.10",
+            "New / Lost / F+New",
         ),
         rows=result_matrix_rows(cells),
-        widths=(1900, 1500, 1650, 1700, 1650, 1650, 1750, 2600),
+        widths=(1800, 1200, 900, 700, 900, 700, 900, 700, 900, 700, 950, 700, 2200, 1150),
     )
     _format_table(table, helpers, font_size=7.1, centered_from=1)
-    helpers._shade_cell(table.rows[2].cells[7], "FFF2CC")
+    helpers._shade_cell(table.rows[2].cells[12], "FFF2CC")
     footnote = document.add_paragraph(
         "* C3 freezes and reuses V1-C's F. Its F-only cell is therefore the same "
         "37/50 baseline reference, not a separate C3 F-only rerun."
     )
     for run in footnote.runs:
         helpers._set_run_font(run, size=8.3, color="5C6975")
-
-    document.add_heading("Exact F-only successes and failures", level=2)
-    document.add_paragraph("F-only succeeds on 37 pairs: " + ", ".join(summary["f_success_pair_ids"]))
-    document.add_paragraph("F-only fails on 13 pairs: " + ", ".join(summary["f_failure_pair_ids"]))
-
-    document.add_heading("Exact pair transitions relative to F-only", level=2)
-    transition_rows = []
-    for spec in CELL_SPECS:
-        if spec.key == "f_only":
-            continue
-        cell = cells[spec.key]
-        transition_rows.append((spec.label, ", ".join(cell["new_rescues"]) or "None", ", ".join(cell["lost_f_successes"]) or "None", ", ".join(cell["both_fail"]) or "None"))
-    table = helpers._add_table(document, headers=("Score", "Newly rescued F failures", "Lost F successes", "Both fail"), rows=transition_rows, widths=(2800, 3800, 3800, 4000))
-    _format_table(table, helpers, font_size=8.0)
-
-    heading = document.add_heading("Complete P01 to P50 outcome matrix", level=2)
-    heading.paragraph_format.page_break_before = True
-    document.add_paragraph("S means success and F means failure. Light green marks a rescued F-only failure; light red marks a lost F-only success; gray marks a pair failed by both F-only and the method.")
-    pair_rows = []
-    for index in range(EPISODES):
-        pair_rows.append((f"P{index + 1:02d}", str(selection["episode_indices"][index]), str(selection["start_steps"][index]), str(selection["goal_steps"][index]), str(selection["valid_row_ranks"][index]), *[("S" if outcomes[spec.key][index] else "F") for spec in CELL_SPECS]))
-    table = helpers._add_table(document, headers=("Pair", "Episode", "Start", "Goal", "Rank", "F", "G", "F+G", "First-Q", "Mean-Q", "First-Q2", "C3 combo"), rows=pair_rows, widths=(650, 1200, 900, 900, 1650, 1300, 1300, 1300, 1300, 1300, 1300, 1300))
-    _format_table(table, helpers, font_size=7.3, centered_from=0)
-    baseline = outcomes["f_only"]
-    for pair_index, row in enumerate(table.rows[1:]):
-        for spec_index, spec in enumerate(CELL_SPECS[1:], start=6):
-            old, new = baseline[pair_index], outcomes[spec.key][pair_index]
-            if not old and new:
-                helpers._shade_cell(row.cells[spec_index], "E2F0D9")
-            elif old and not new:
-                helpers._shade_cell(row.cells[spec_index], "FCE4D6")
-            elif not old and not new:
-                helpers._shade_cell(row.cells[spec_index], "E7E6E6")
 
     document.add_heading("Conclusions and the next gating objective", level=2)
     oracle = summary["oracle"]

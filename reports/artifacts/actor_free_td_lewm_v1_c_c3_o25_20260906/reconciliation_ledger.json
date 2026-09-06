@@ -586,9 +586,9 @@
   "outcome_count": 350,
   "outputs": {
     "docx": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/results_td_actor_free_td_lewm_complete_cube_seed3072.docx",
-    "docx_sha256": "4e02397988303b3fa9fc00b649ec89f985fdcfd9e642bd4bc6cd550b483c97b0",
+    "docx_sha256": "0d1f0266a4767a27c38a53b7a4d0c48ba451e57946ddefe28acced6ee0338689",
     "markdown": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/actor_free_td_lewm_complete_cube_seed3072.md",
-    "markdown_sha256": "7a69ee4240eb4bb7307f87bb49b8d2143a0e289b932c3fb9651d4b10f926d4fb",
+    "markdown_sha256": "924ae087591abf4283c89a064e8c9b4968574534bbe5db9049947cb9c1b230bb",
     "paired_outcomes_csv": "reports/artifacts/actor_free_td_lewm_v1_c_c3_o25_20260906/paired_outcomes.csv",
     "paired_outcomes_sha256": "fce408129a880866243fdbb372774af462af26af7687d972a529599826314b51",
     "project_docx": "/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/Results TD.docx"

@@ -24,33 +24,38 @@ REPO_DOCX = (
 PROJECT_DOCX = REPOSITORY_ROOT.parents[1] / "Results TD.docx"
 
 OLD_HEADER_PREFIX = ("Checkpoint", "Score", "Loss", "O25")
-NEW_HEADER_PREFIX = ("Method / checkpoint", "F-only", "G-only", "F+G tail")
+NEW_HEADER_PREFIX = ("Method / checkpoint",)
 NEW_HEADERS = (
     "Method / checkpoint",
-    "F-only",
+    "F-only\nbaseline",
     "G-only",
+    "New / Lost / F+New",
     "F+G tail",
+    "New / Lost / F+New",
     "First-Q\nalpha=.25",
+    "New / Lost / F+New",
     "Mean-Q",
+    "New / Lost / F+New",
     "First-Q2\nalpha=.25",
+    "New / Lost / F+New",
     "C3 State-V + First-Q2\nalpha=.10",
+    "New / Lost / F+New",
 )
-NEW_WIDTHS = (1900, 1500, 1650, 1700, 1650, 1650, 1750, 2600)
+NEW_WIDTHS = (1800, 1200, 900, 700, 900, 700, 900, 700, 900, 700, 950, 700, 2200, 1150)
 
 NEW_HEADING = "Methods by inference score, relative to F-only"
 NEW_EXPLANATION = (
-    "Each row is one trained method/checkpoint; every following column is an "
-    "inference score. Each measured non-F-only cell reports O25 success, newly "
-    "successful pairs, and lost F-only successes. A dash means not evaluated."
+    "Each row is one trained method/checkpoint. Every score column is followed "
+    "by one adjacent New / Lost / F+New column. A dash means not evaluated."
 )
 NEW_LEGEND = (
-    "New = F-only fails and the score succeeds. Lost = F-only succeeds and the "
-    "score fails. F-only is the reference, so its cells show only the baseline "
-    "result and never show New or Lost."
+    "The adjacent column contains counts only: newly successful pairs / lost F "
+    "successes / total if all F successes are retained and New is added."
 )
 NEW_FOOTNOTE = (
     "* C3 freezes and reuses V1-C's F. Its F-only cell is therefore the same "
-    "37/50 baseline reference, not a separate C3 F-only rerun."
+    "37/50 baseline reference, not a separate C3 F-only rerun. Exact pair-level "
+    "records remain in the audit CSV rather than a second results table."
 )
 
 
@@ -90,6 +95,7 @@ def _replace_neighbor_copy(document: Any, report: ModuleType) -> None:
     legend_prefixes = (
         "Yellow fill marks the highest standalone O25 result",
         "New = F-only fails and the score succeeds",
+        "The adjacent column contains counts only",
     )
 
     headings = [p for p in document.paragraphs if p.text in heading_candidates]
@@ -109,8 +115,78 @@ def _replace_neighbor_copy(document: Any, report: ModuleType) -> None:
 
 def _remove_existing_footnote(document: Any) -> None:
     for paragraph in list(document.paragraphs):
-        if paragraph.text == NEW_FOOTNOTE:
+        if paragraph.text.startswith("* C3 freezes and reuses V1-C's F."):
             paragraph._element.getparent().remove(paragraph._element)
+
+
+def _remove_legacy_detail_block(document: Any) -> int:
+    """Remove the old transition and P01-P50 result tables from the O25 section."""
+    from docx.oxml.ns import qn
+
+    starts = [
+        paragraph
+        for paragraph in document.paragraphs
+        if paragraph.text == "Exact F-only successes and failures"
+    ]
+    ends = [
+        paragraph
+        for paragraph in document.paragraphs
+        if paragraph.text == "Conclusions and the next gating objective"
+    ]
+    if not starts:
+        return 0
+    if len(starts) != 1 or len(ends) != 1:
+        raise ValueError(
+            "expected one O25 legacy-detail start and conclusion heading; found "
+            f"{len(starts)} and {len(ends)}"
+        )
+    body = document._element.body
+    children = list(body)
+    start_index = children.index(starts[0]._p)
+    end_index = children.index(ends[0]._p)
+    if end_index <= start_index:
+        raise ValueError("O25 legacy-detail block is reversed")
+    removed_tables = sum(
+        child.tag == qn("w:tbl") for child in children[start_index:end_index]
+    )
+    for child in children[start_index:end_index]:
+        body.remove(child)
+    return removed_tables
+
+
+def _remove_protocol_and_score_tables(document: Any) -> int:
+    """Leave the O25 extension with exactly one results table."""
+    from docx.oxml.ns import qn
+
+    starts = [
+        paragraph
+        for paragraph in document.paragraphs
+        if paragraph.text == "Protocol and evidence fingerprints"
+    ]
+    ends = [
+        paragraph
+        for paragraph in document.paragraphs
+        if paragraph.text == NEW_HEADING
+    ]
+    if not starts:
+        return 0
+    if len(starts) != 1 or len(ends) != 1:
+        raise ValueError(
+            "expected one O25 protocol start and result heading; found "
+            f"{len(starts)} and {len(ends)}"
+        )
+    body = document._element.body
+    children = list(body)
+    start_index = children.index(starts[0]._p)
+    end_index = children.index(ends[0]._p)
+    if end_index <= start_index:
+        raise ValueError("O25 protocol block is reversed")
+    removed_tables = sum(
+        child.tag == qn("w:tbl") for child in children[start_index:end_index]
+    )
+    for child in children[start_index:end_index]:
+        body.remove(child)
+    return removed_tables
 
 
 def reformat(path: Path, report: ModuleType) -> None:
@@ -145,12 +221,14 @@ def reformat(path: Path, report: ModuleType) -> None:
         widths=NEW_WIDTHS,
     )
     report._format_table(new_table, helpers, font_size=7.1, centered_from=1)
-    helpers._shade_cell(new_table.rows[2].cells[7], "FFF2CC")
+    helpers._shade_cell(new_table.rows[2].cells[12], "FFF2CC")
 
     old_table._tbl.addprevious(new_table._tbl)
     old_table._element.getparent().remove(old_table._element)
     _replace_neighbor_copy(document, report)
     _remove_existing_footnote(document)
+    removed_tables = _remove_legacy_detail_block(document)
+    removed_tables += _remove_protocol_and_score_tables(document)
 
     footnote = document.add_paragraph()
     helpers._set_run_font(
@@ -158,8 +236,8 @@ def reformat(path: Path, report: ModuleType) -> None:
     )
     new_table._tbl.addnext(footnote._p)
 
-    if len(document.tables) != prior_table_count:
-        raise AssertionError("table count changed while replacing the O25 summary")
+    if len(document.tables) != prior_table_count - removed_tables:
+        raise AssertionError("unexpected table-count change while consolidating O25 results")
     if len(document.sections) != prior_section_count:
         raise AssertionError("section count changed while replacing the O25 summary")
     if related_work_was_present and not any(
@@ -168,7 +246,7 @@ def reformat(path: Path, report: ModuleType) -> None:
         raise AssertionError("a later related-work section was lost")
     if "New" in new_table.rows[1].cells[1].text or "Lost" in new_table.rows[1].cells[1].text:
         raise AssertionError("F-only baseline must not contain New/Lost counts")
-    if "New +6" not in new_table.rows[2].cells[7].text or "Lost 5" not in new_table.rows[2].cells[7].text:
+    if new_table.rows[2].cells[13].text != "6/5/43":
         raise AssertionError("C3 paired counts are missing")
 
     with tempfile.NamedTemporaryFile(
