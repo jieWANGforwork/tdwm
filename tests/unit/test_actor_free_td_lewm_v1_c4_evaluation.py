@@ -19,6 +19,7 @@ from tdwm.adapters.actor_free_td_lewm_v1_c4 import (
     load_actor_free_td_lewm_v1_c4_checkpoint,
     validate_actor_free_td_lewm_v1_c4_payload,
 )
+from tdwm.evaluation import frozen_actor_free_td_v1_common as v1_runtime
 from tdwm.evaluation.actor_free_td_lewm_v1_c4 import (
     FORMAL_SELECTION_SHA256_BY_PROTOCOL,
     METHOD_SPEC,
@@ -28,7 +29,6 @@ from tdwm.evaluation.actor_free_td_lewm_v1_c4 import (
     validate_actor_free_td_lewm_v1_c4_checkpoint_protocol,
     validate_actor_free_td_lewm_v1_c4_evaluation_protocol,
 )
-from tdwm.evaluation import frozen_actor_free_td_v1_common as v1_runtime
 from tdwm.methods.actor_free_td_lewm_v1_c4 import ActorFreeTDJEPAPredictorV1C4
 from tdwm.training.actor_free_td_lewm_v1_c4 import (
     _deployment_payload,
@@ -401,11 +401,24 @@ def test_real_training_payload_contract_passes_formal_eval_validator() -> None:
 def test_evaluation_manifest_uses_g_config_not_old_predictor_config(
     tmp_path: Path,
 ) -> None:
+    score_definition = {
+        "formula": "terminal_summed_mse(zhat5_f,z_goal)",
+        "action_enters_g": False,
+    }
     result_path = tmp_path / "results.json"
     manifest_path = tmp_path / "protocol_manifest.json"
     result_path.write_text(json.dumps({"score_mode": "f_only"}))
     manifest_path.write_text(
-        json.dumps({"checkpoint": {"predictor_config": {"action_input": "none"}}})
+        json.dumps(
+            {
+                "checkpoint": {"predictor_config": {"action_input": "none"}},
+                "protocol": {
+                    "inference_objective": {
+                        "score_definition": score_definition,
+                    }
+                },
+            }
+        )
     )
     with patch(
         "tdwm.evaluation.actor_free_td_lewm_v1_c4."
@@ -414,18 +427,31 @@ def test_evaluation_manifest_uses_g_config_not_old_predictor_config(
     ):
         result = evaluate_actor_free_td_lewm_v1_c4(output_dir=tmp_path)
 
+    stored_result = json.loads(result_path.read_text())
     stored_manifest = json.loads(manifest_path.read_text())
     assert "predictor_config" not in stored_manifest["checkpoint"]
     assert stored_manifest["checkpoint"]["g_config"]["action_input"] == "none"
+    assert stored_result["score_definition"] == score_definition
+    assert stored_manifest["score_definition"] == score_definition
+    assert result["score_definition"] == score_definition
+    result["score_definition"]["formula"] = "mutated returned copy"
+    assert stored_result["score_definition"]["formula"] != "mutated returned copy"
+    assert stored_manifest["score_definition"]["formula"] != "mutated returned copy"
     assert result["state_only_g"] is True
     assert result["action_enters_g"] is False
 
 
-def test_c4_common_runtime_assembles_result_using_validated_g_gamma(
+@pytest.mark.parametrize(
+    ("score_mode", "g_first_weight"),
+    (("f_only", None), ("f_plus_g_first_q2", 0.25)),
+)
+def test_c4_wrapper_persists_score_definition_after_real_common_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    score_mode: str,
+    g_first_weight: float | None,
 ) -> None:
-    """Exercise the real common runtime past policy creation and result assembly."""
+    """Exercise common runtime plus the C4 metadata-persistence wrapper."""
 
     formal = load_actor_free_td_lewm_v1_c4_evaluation_protocol(CONFIGS["o50"])
     source_sha = formal["pretrained_world_model"]["checkpoint_sha256"]
@@ -536,28 +562,45 @@ def test_c4_common_runtime_assembles_result_using_validated_g_gamma(
         captured["policy_gamma"] = kwargs["gamma"]
         return object()
 
-    result = v1_runtime.evaluate_actor_free_td_predictor_runtime(
-        spec=METHOD_SPEC,
-        checkpoint_loader=load_checkpoint,
-        policy_factory=make_policy,
-        protocol_loader=load_actor_free_td_lewm_v1_c4_evaluation_protocol,
-        protocol_configurer=configure_actor_free_td_lewm_v1_c4_evaluation_mode,
-        checkpoint_validator=validate_actor_free_td_lewm_v1_c4_checkpoint_protocol,
-        raw_action_validator=lambda **kwargs: None,
-        checkpoint_provenance_keys=("pretrained_world_model_provenance",),
+    monkeypatch.setattr(
+        "tdwm.evaluation.actor_free_td_lewm_v1_c4."
+        "load_actor_free_td_lewm_v1_c4_checkpoint",
+        load_checkpoint,
+    )
+    monkeypatch.setattr(
+        "tdwm.evaluation.actor_free_td_lewm_v1_c4."
+        "make_actor_free_td_lewm_v1_c4_policy",
+        make_policy,
+    )
+    result = evaluate_actor_free_td_lewm_v1_c4(
         protocol_path=CONFIGS["o50"],
         dataset_path=dataset,
         output_dir=output,
         checkpoint_path=checkpoint,
         smoke=True,
-        score_mode="f_plus_g",
+        score_mode=score_mode,
+        g_first_weight=g_first_weight,
     )
 
     manifest = json.loads((output / "protocol_manifest.json").read_text())
     stored_result = json.loads((output / "results.json").read_text())
+    expected_definition = manifest["protocol"]["inference_objective"][
+        "score_definition"
+    ]
     assert captured["policy_gamma"] == formal["g"]["gamma"] == 0.95
     assert captured["closed"] is True
     assert result["method"] == formal["method"]
-    assert stored_result["score_mode"] == "f_plus_g"
+    assert stored_result["score_mode"] == score_mode
     assert manifest["protocol"]["g"]["gamma"] == 0.95
     assert "predictor" not in manifest["protocol"]
+    assert stored_result["score_definition"] == expected_definition
+    assert manifest["score_definition"] == expected_definition
+    assert result["score_definition"] == expected_definition
+    assert stored_result["score_definition"]["action_enters_g"] is False
+    if score_mode == "f_plus_g_first_q2":
+        assert stored_result["score_definition"]["normalization"] == (
+            "population_z_score"
+        )
+    result["score_definition"]["formula"] = "mutated returned copy"
+    assert stored_result["score_definition"]["formula"] != "mutated returned copy"
+    assert manifest["score_definition"]["formula"] != "mutated returned copy"

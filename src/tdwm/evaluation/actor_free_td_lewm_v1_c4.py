@@ -561,10 +561,18 @@ def evaluate_actor_free_td_lewm_v1_c4(**kwargs) -> dict[str, Any]:
         manifest = json.load(stream)
     checkpoint = manifest["checkpoint"]
     checkpoint["g_config"] = checkpoint.pop("predictor_config")
+    score_definition = manifest["protocol"]["inference_objective"].get(
+        "score_definition"
+    )
+    if not isinstance(score_definition, Mapping):
+        raise ValueError(
+            "C4 protocol is missing inference_objective.score_definition."
+        )
     for values in (stored_result, manifest, result):
         values["state_only_g"] = True
         values["action_enters_g"] = False
         values["action_effect"] = "only_via_f_predicted_state"
+        values["score_definition"] = deepcopy(score_definition)
     _write_json(result_path, stored_result)
     _write_json(manifest_path, manifest)
     return result
