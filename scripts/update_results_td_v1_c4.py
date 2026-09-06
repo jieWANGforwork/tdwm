@@ -17,13 +17,22 @@ from tdwm.results.actor_free_td_lewm_v1_c4 import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate 18 C4 formal cells / 900 outcomes plus training evidence, "
-            "then update the existing Results TD DOCX and Markdown. Run the "
+            "Validate 18 objective-v1 C4 formal cells / 900 outcomes, the exact "
+            "superseded objective-v0 summary, and training evidence, then update "
+            "the existing Results TD DOCX and Markdown. Run the "
             "document-operation marker before invoking a non-dry run, and render "
             "the staged DOCX before promotion."
         )
     )
     parser.add_argument("--summary", required=True)
+    parser.add_argument(
+        "--historical-v0-summary",
+        required=True,
+        help=(
+            "Exact pre-versioned objective-v0 formal summary. It is preserved in a "
+            "historical section but excluded from the current ledger and winners."
+        ),
+    )
     parser.add_argument("--training-manifest", required=True)
     parser.add_argument("--metrics", required=True)
     parser.add_argument("--checkpoint", required=True)
@@ -53,6 +62,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     evidence = load_report_evidence(
         summary_path=args.summary,
+        historical_v0_summary_path=args.historical_v0_summary,
         training_manifest_path=args.training_manifest,
         metrics_path=args.metrics,
         checkpoint_path=args.checkpoint,
@@ -62,6 +72,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "c4_cells": 18,
         "c4_boolean_outcomes": 900,
         "summary_sha256": evidence.summary_sha256,
+        "historical_v0_cells": 18,
+        "historical_v0_boolean_outcomes": 900,
+        "historical_v0_summary_sha256": evidence.historical_v0_summary_sha256,
         "training_manifest_sha256": evidence.training_manifest_sha256,
         "metrics_sha256": evidence.metrics_sha256,
         "checkpoint_sha256": evidence.checkpoint_sha256,

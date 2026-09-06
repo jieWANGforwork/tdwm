@@ -14,6 +14,10 @@ from tdwm.results.actor_free_td_lewm_v1_c4 import (
     C4_ACTION_EFFECT,
     C4_JOINT_OBJECTIVE,
     C4_TIME_ALIGNMENT,
+    HISTORICAL_V0_CHECKPOINT_SHA256,
+    HISTORICAL_V0_DOCX_END_MARKER,
+    HISTORICAL_V0_SECTION_END,
+    HISTORICAL_V0_SECTION_START,
     LOSS_METRICS,
     OBJECTIVE_VERSION,
     PROTOCOLS,
@@ -26,6 +30,7 @@ from tdwm.results.actor_free_td_lewm_v1_c4 import (
     load_report_evidence,
     update_docx_document,
     update_markdown_text,
+    validate_historical_v0_summary,
     validate_summary,
 )
 
@@ -175,6 +180,13 @@ def _summary(checkpoint_sha: str = "c" * 64) -> dict:
     }
 
 
+def _historical_v0_summary() -> dict:
+    summary = _summary(HISTORICAL_V0_CHECKPOINT_SHA256)
+    del summary["study"]["objective_version"]
+    del summary["study"]["training_objective"]
+    return summary
+
+
 def _manifest() -> dict:
     return {
         "method": "actor_free_td_lewm_v1_c4",
@@ -254,6 +266,9 @@ def _evidence(summary: dict) -> C4ReportEvidence:
         summary=summary,
         summary_path=Path("/tmp/summary.json"),
         summary_sha256="a" * 64,
+        historical_v0_summary=_historical_v0_summary(),
+        historical_v0_summary_path=Path("/tmp/historical_v0_summary.json"),
+        historical_v0_summary_sha256="e" * 64,
         training_manifest=_manifest(),
         training_manifest_path=Path("/tmp/run_manifest.json"),
         training_manifest_sha256="b" * 64,
@@ -287,6 +302,40 @@ def test_validate_summary_rejects_missing_cell_and_paired_drift() -> None:
         validate_summary(drifted)
 
 
+def test_validate_historical_v0_summary_requires_exact_legacy_identity_and_matrix() -> None:
+    summary = _historical_v0_summary()
+    before = deepcopy(summary)
+    validated = validate_historical_v0_summary(summary)
+    assert validated == before
+    assert "objective_version" not in validated["study"]
+    assert sum(
+        len(
+            validated["protocols"][protocol]["methods"]["c4"]["scores"][mode][
+                "episode_successes"
+            ]
+        )
+        for protocol in PROTOCOLS
+        for mode in SCORE_MODES
+    ) == 900
+
+    wrong_checkpoint = _historical_v0_summary()
+    wrong_checkpoint["study"]["c4_checkpoint_sha256"] = "f" * 64
+    with pytest.raises(C4ResultsUpdateError, match="unexpected checkpoint"):
+        validate_historical_v0_summary(wrong_checkpoint)
+
+    relabelled = _historical_v0_summary()
+    relabelled["study"]["objective_version"] = OBJECTIVE_VERSION
+    with pytest.raises(C4ResultsUpdateError, match="pre-versioned study schema"):
+        validate_historical_v0_summary(relabelled)
+
+    drifted = _historical_v0_summary()
+    drifted["protocols"]["o25"]["methods"]["c4"]["scores"]["g_only"][
+        "success_count"
+    ] += 1
+    with pytest.raises(C4ResultsUpdateError, match="disagrees with its outcomes"):
+        validate_historical_v0_summary(drifted)
+
+
 def test_load_loss_series_requires_ten_complete_consistent_epochs(tmp_path: Path) -> None:
     metrics = tmp_path / "metrics.csv"
     _write_metrics(metrics)
@@ -310,6 +359,11 @@ def test_load_report_evidence_binds_checkpoint_and_optional_png(tmp_path: Path) 
     checkpoint_sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     summary = tmp_path / "summary.json"
     summary.write_text(json.dumps(_summary(checkpoint_sha)), encoding="utf-8")
+    historical_v0_summary = tmp_path / "historical_v0_summary.json"
+    historical_v0_summary.write_text(
+        json.dumps(_historical_v0_summary()),
+        encoding="utf-8",
+    )
     manifest = tmp_path / "run_manifest.json"
     manifest.write_text(json.dumps(_manifest()), encoding="utf-8")
     metrics = tmp_path / "metrics.csv"
@@ -333,6 +387,7 @@ def test_load_report_evidence_binds_checkpoint_and_optional_png(tmp_path: Path) 
 
     evidence = load_report_evidence(
         summary_path=summary,
+        historical_v0_summary_path=historical_v0_summary,
         training_manifest_path=manifest,
         metrics_path=metrics,
         checkpoint_path=checkpoint,
@@ -340,11 +395,13 @@ def test_load_report_evidence_binds_checkpoint_and_optional_png(tmp_path: Path) 
     )
     assert evidence.checkpoint_sha256 == checkpoint_sha
     assert evidence.loss_plot_path == png
+    assert evidence.historical_v0_summary_path == historical_v0_summary
 
     checkpoint.write_bytes(b"wrong")
     with pytest.raises(C4ResultsUpdateError, match="checkpoint bytes differ"):
         load_report_evidence(
             summary_path=summary,
+            historical_v0_summary_path=historical_v0_summary,
             training_manifest_path=manifest,
             metrics_path=metrics,
             checkpoint_path=checkpoint,
@@ -353,10 +410,11 @@ def test_load_report_evidence_binds_checkpoint_and_optional_png(tmp_path: Path) 
 
 def test_markdown_update_keeps_one_master_table_and_adds_paired_c4_matrices() -> None:
     report = _PRE_C4_FIXTURE_DIR / "results_td_before_c4.md"
-    updated = update_markdown_text(report.read_text(encoding="utf-8"), _evidence(_summary()))
+    evidence = _evidence(_summary())
+    updated = update_markdown_text(report.read_text(encoding="utf-8"), evidence)
     assert "## 27 个训练方法 × 7 种评分" in updated
     assert updated.count("| V1 | C4 |") == 1
-    assert "| V1-C4 formal O50 | 1 | E10 |" in updated
+    assert "| V1-C4 objective-v1 formal O50 | 1 | E10 |" in updated
     assert "| **TOTAL** | — | — | same locked O50 selection | **511** |" in updated
     assert updated.count("### Protocol by score matrix") == 1
     assert updated.count("### Paired outcomes relative to same-protocol F-only") == 1
@@ -369,6 +427,81 @@ def test_markdown_update_keeps_one_master_table_and_adds_paired_c4_matrices() ->
     )[1].split("### Training loss and evidence", 1)[0]
     assert "| O25 | F-only |" not in paired_section
     assert "18 C4 cells and 900 C4 Boolean outcomes" in updated
+    assert updated.count(HISTORICAL_V0_SECTION_START) == 1
+    assert updated.count(HISTORICAL_V0_SECTION_END) == 1
+    assert updated.count("objective v0 historical record - superseded") == 1
+    assert updated.count("objective v1 formal O25 O50 O100") == 1
+    historical_section = updated.split(HISTORICAL_V0_SECTION_START, 1)[1].split(
+        HISTORICAL_V0_SECTION_END,
+        1,
+    )[0]
+    historical_summary = _historical_v0_summary()
+    for protocol in PROTOCOLS:
+        cells = []
+        for mode in SCORE_MODES:
+            count = sum(
+                historical_summary["protocols"][protocol]["methods"]["c4"][
+                    "scores"
+                ][mode]["episode_successes"]
+            )
+            cells.append(f"{count}/50 ({2 * count}%)")
+        expected = f"| {protocol.upper()} | " + " | ".join(cells) + " |"
+        assert expected in historical_section
+    assert "excluded from the current 511-cell O50 ledger" in historical_section
+    assert "| V1 | C4 |" not in historical_section
+
+    with pytest.raises(C4ResultsUpdateError, match="already contains"):
+        update_markdown_text(updated, evidence)
+
+
+def test_historical_v0_results_do_not_enter_main_ledger_or_winners() -> None:
+    report = _PRE_C4_FIXTURE_DIR / "results_td_before_c4.md"
+    evidence = _evidence(_summary())
+    history = evidence.historical_v0_summary
+    protocol = "o50"
+    mode = "g_only"
+    outcomes = [True] * 50
+    score = history["protocols"][protocol]["methods"]["c4"]["scores"][mode]
+    score["episode_successes"] = outcomes
+    score["success_count"] = 50
+    score["success_rate_percent"] = 100.0
+    f_reference = history["protocols"][protocol]["methods"]["c4"]["scores"][
+        "f_only"
+    ]["episode_successes"]
+    v1_c_reference = history["protocols"][protocol]["methods"]["v1_c"]["scores"][
+        mode
+    ]["episode_successes"]
+    comparisons = history["protocols"][protocol]["comparisons"]
+    comparisons["c4_vs_same_protocol_f_only"][mode] = _paired(
+        f_reference,
+        outcomes,
+        f_plus=True,
+    )
+    comparisons["c4_vs_v1_c_same_score_mode"][mode] = _paired(
+        v1_c_reference,
+        outcomes,
+        f_plus=False,
+    )
+    for row in history["episode_matrix"]:
+        if row["protocol"] == protocol:
+            row["c4"][mode] = True
+    validate_historical_v0_summary(history)
+
+    updated = update_markdown_text(report.read_text(encoding="utf-8"), evidence)
+    historical_section = updated.split(HISTORICAL_V0_SECTION_START, 1)[1].split(
+        HISTORICAL_V0_SECTION_END,
+        1,
+    )[0]
+    master_row = next(
+        line for line in updated.splitlines() if line.startswith("| V1 | C4 |")
+    )
+    winner_row = next(
+        line for line in updated.splitlines() if line.startswith("| V1 fixed |")
+    )
+    assert "50/50 (100%)" in historical_section
+    assert "50/50 (100%)" not in master_row
+    assert "objective v0" not in winner_row
+    assert "| **TOTAL** | — | — | same locked O50 selection | **511** |" in updated
 
 
 def test_analysis_is_dynamic_evidence_driven_and_predeclares_next_steps() -> None:
@@ -447,13 +580,47 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
     assert document.tables[39].rows[3].cells[1].text == (
         "0e5b541bdb11cf6d647fc1e679499a02c3aa430d64e37c8819d02c44e1dcb900"
     )
-    assert any(paragraph.text == "RESULTS TD / V1-C4 FORMAL EXTENSION END" for paragraph in document.paragraphs)
-    assert len(document.tables) == 50
-    assert len(document.tables[47].rows) == 16
-    assert all(row.cells[1].text != "F-only" for row in document.tables[47].rows[1:])
+    assert sum(
+        paragraph.text == "RESULTS TD / V1-C4 FORMAL EXTENSION END"
+        for paragraph in document.paragraphs
+    ) == 1
+    assert sum(
+        paragraph.text == HISTORICAL_V0_DOCX_END_MARKER
+        for paragraph in document.paragraphs
+    ) == 1
+    assert len(document.tables) == 51
+    historical_table = document.tables[46]
+    assert len(historical_table.rows) == 4
+    historical_summary = _historical_v0_summary()
+    for protocol_index, protocol in enumerate(PROTOCOLS, start=1):
+        assert historical_table.rows[protocol_index].cells[0].text == protocol.upper()
+        for mode_index, mode in enumerate(SCORE_MODES, start=1):
+            count = historical_summary["protocols"][protocol]["methods"]["c4"][
+                "scores"
+            ][mode]["success_count"]
+            assert historical_table.rows[protocol_index].cells[mode_index].text == (
+                f"{count}/50 ({2 * count}%)"
+            )
     assert len(document.tables[48].rows) == 16
-    assert document.tables[48].rows[0].cells[2].text == "V1-C"
-    assert len(document.sections) == 11
+    assert all(row.cells[1].text != "F-only" for row in document.tables[48].rows[1:])
+    assert len(document.tables[49].rows) == 16
+    assert document.tables[49].rows[0].cells[2].text == "V1-C"
+    assert len(document.sections) == 12
+    historical_section = document.sections[-4]
+    for header in (
+        historical_section.header,
+        historical_section.first_page_header,
+        historical_section.even_page_header,
+    ):
+        assert header.is_linked_to_previous is False
+        assert "objective v0 historical record" in header.paragraphs[0].text
+    for footer in (
+        historical_section.footer,
+        historical_section.first_page_footer,
+        historical_section.even_page_footer,
+    ):
+        assert footer.is_linked_to_previous is False
+        assert "Superseded V1-C4 objective v0 evidence" in footer.paragraphs[0].text
     for c4_section in document.sections[-3:]:
         assert c4_section.different_first_page_header_footer is True
         for header in (
@@ -462,15 +629,15 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
             c4_section.even_page_header,
         ):
             assert header.is_linked_to_previous is False
-            assert "V1-C4 formal O25 O50 O100" in header.paragraphs[0].text
+            assert "V1-C4 objective v1 formal O25 O50 O100" in header.paragraphs[0].text
         for footer in (
             c4_section.footer,
             c4_section.first_page_footer,
             c4_section.even_page_footer,
         ):
             assert footer.is_linked_to_previous is False
-            assert "Validated V1-C4 paired outcomes" in footer.paragraphs[0].text
-    repeat = document.tables[49].rows[0]._tr.get_or_add_trPr().find(qn("w:tblHeader"))
+            assert "Validated V1-C4 objective v1 paired outcomes" in footer.paragraphs[0].text
+    repeat = document.tables[50].rows[0]._tr.get_or_add_trPr().find(qn("w:tblHeader"))
     assert repeat is not None
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "w(g)=sqrt(192) z_g/||z_g||_2" in text
@@ -479,5 +646,10 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
     assert "single state-only online branch" in text
     assert "x_i = stop-gradient F(z_i^real,a_i)" in text
     assert "L_vector + L_goal" in text
+    assert "objective v0 historical record superseded" in text
+    assert "excluded from the current 511-cell O50 ledger" in text
     assert "equal real and stopped-F-predicted" not in text
     assert "real z_i and stop-gradient F(z_(i-1),a_(i-1)) share the target" not in text
+
+    with pytest.raises(C4ResultsUpdateError, match="already contains"):
+        update_docx_document(document, _evidence(_summary()), repository)

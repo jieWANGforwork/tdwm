@@ -68,6 +68,18 @@ VARIANT = "c4"
 SECTION_START = "<!-- RESULTS_TD_V1_C4_FORMAL_START -->"
 SECTION_END = "<!-- RESULTS_TD_V1_C4_FORMAL_END -->"
 DOCX_END_MARKER = "RESULTS TD / V1-C4 FORMAL EXTENSION END"
+HISTORICAL_V0_SECTION_START = (
+    "<!-- RESULTS_TD_V1_C4_OBJECTIVE_V0_HISTORY_START -->"
+)
+HISTORICAL_V0_SECTION_END = (
+    "<!-- RESULTS_TD_V1_C4_OBJECTIVE_V0_HISTORY_END -->"
+)
+HISTORICAL_V0_DOCX_END_MARKER = (
+    "RESULTS TD / V1-C4 OBJECTIVE-V0 HISTORICAL RECORD END"
+)
+HISTORICAL_V0_CHECKPOINT_SHA256 = (
+    "28a59d0b07cb2e0ea66b34c57fdc1eb8dce513ca80b8a8700cc36ad9458ef99b"
+)
 
 V1_FIXED_COUNTS: dict[str, tuple[int | None, ...]] = {
     "C": (23, 18, 22, 28, 21, 26, None),
@@ -105,6 +117,9 @@ class C4ReportEvidence:
     summary: dict[str, Any]
     summary_path: Path
     summary_sha256: str
+    historical_v0_summary: dict[str, Any]
+    historical_v0_summary_path: Path
+    historical_v0_summary_sha256: str
     training_manifest: dict[str, Any]
     training_manifest_path: Path
     training_manifest_sha256: str
@@ -454,6 +469,44 @@ def validate_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
     return dict(summary)
 
 
+def validate_historical_v0_summary(
+    summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate the exact superseded, pre-versioned C4 objective-v0 summary.
+
+    The historical bundle predates the explicit ``objective_version`` and
+    ``training_objective`` study fields.  Its complete 18-cell/900-outcome
+    schema is otherwise the same as the current formal summary.  Normalize a
+    deep copy only long enough to reuse the strict structural, source-hash,
+    episode-matrix, and paired-comparison validation; return the untouched
+    historical payload so it cannot be mistaken for objective v1 evidence.
+    """
+
+    if summary.get("schema_version") != 1:
+        raise C4ResultsUpdateError(
+            "historical C4 objective-v0 summary schema_version must be 1"
+        )
+    study = _mapping(summary.get("study"), "historical_v0.study")
+    if "objective_version" in study or "training_objective" in study:
+        raise C4ResultsUpdateError(
+            "historical C4 objective-v0 summary must use the exact pre-versioned study schema"
+        )
+    if study.get("c4_checkpoint_sha256") != HISTORICAL_V0_CHECKPOINT_SHA256:
+        raise C4ResultsUpdateError(
+            "historical C4 objective-v0 summary has an unexpected checkpoint SHA-256"
+        )
+
+    normalized = deepcopy(summary)
+    normalized_study = dict(
+        _mapping(normalized.get("study"), "historical_v0.study")
+    )
+    normalized_study["objective_version"] = OBJECTIVE_VERSION
+    normalized_study["training_objective"] = C4_JOINT_OBJECTIVE["objective"]
+    normalized["study"] = normalized_study
+    validate_summary(normalized)
+    return dict(summary)
+
+
 def _validate_training_manifest(manifest: Mapping[str, Any]) -> None:
     exact = {
         "method": METHOD,
@@ -596,6 +649,7 @@ def load_loss_series(path: Path) -> dict[str, dict[str, LossSeries]]:
 def load_report_evidence(
     *,
     summary_path: str | Path,
+    historical_v0_summary_path: str | Path,
     training_manifest_path: str | Path,
     metrics_path: str | Path,
     checkpoint_path: str | Path,
@@ -604,10 +658,19 @@ def load_report_evidence(
     """Validate every result/training input before document construction."""
 
     summary_file = Path(summary_path).expanduser().resolve()
+    historical_v0_summary_file = (
+        Path(historical_v0_summary_path).expanduser().resolve()
+    )
     manifest_file = Path(training_manifest_path).expanduser().resolve()
     metrics_file = Path(metrics_path).expanduser().resolve()
     checkpoint_file = Path(checkpoint_path).expanduser().resolve()
     summary = validate_summary(_load_json(summary_file, "C4 formal summary"))
+    historical_v0_summary = validate_historical_v0_summary(
+        _load_json(
+            historical_v0_summary_file,
+            "historical C4 objective-v0 formal summary",
+        )
+    )
     manifest = _load_json(manifest_file, "C4 training manifest")
     _validate_training_manifest(manifest)
     losses = load_loss_series(metrics_file)
@@ -631,6 +694,9 @@ def load_report_evidence(
         summary=summary,
         summary_path=summary_file,
         summary_sha256=_sha256(summary_file),
+        historical_v0_summary=historical_v0_summary,
+        historical_v0_summary_path=historical_v0_summary_file,
+        historical_v0_summary_sha256=_sha256(historical_v0_summary_file),
         training_manifest=manifest,
         training_manifest_path=manifest_file,
         training_manifest_sha256=_sha256(manifest_file),
@@ -648,6 +714,19 @@ def _score(evidence: C4ReportEvidence, protocol: str, mode: str) -> Mapping[str,
     return _mapping(
         evidence.summary["protocols"][protocol]["methods"]["c4"]["scores"][mode],
         f"{protocol}.c4.{mode}",
+    )
+
+
+def _historical_v0_score(
+    evidence: C4ReportEvidence,
+    protocol: str,
+    mode: str,
+) -> Mapping[str, Any]:
+    return _mapping(
+        evidence.historical_v0_summary["protocols"][protocol]["methods"]["c4"][
+            "scores"
+        ][mode],
+        f"historical_v0.{protocol}.c4.{mode}",
     )
 
 
@@ -734,10 +813,11 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
         )
 
     lines.append(
-        "C4 changes the action route, successor time semantics, and action-conditioned "
-        "G interface together. Therefore the C4-versus-V1-C scorer "
-        "pattern is descriptive and cannot isolate a causal effect of routing action "
-        "through frozen F or of removing action from G by itself."
+        "C4 simultaneously changes the action route and successor time semantics, and "
+        "replaces the action-conditioned G interface with a state-only G interface. "
+        "Therefore the C4-versus-V1-C scorer pattern is descriptive and cannot isolate "
+        "a causal effect of routing action through frozen F or of removing action from G "
+        "by itself."
     )
 
     for protocol in PROTOCOLS:
@@ -878,10 +958,65 @@ def _loss_interpretation(evidence: C4ReportEvidence) -> str:
     )
 
 
+def _historical_v0_markdown_section(evidence: C4ReportEvidence) -> str:
+    study = _mapping(evidence.historical_v0_summary["study"], "historical_v0.study")
+    lines = [
+        HISTORICAL_V0_SECTION_START,
+        "## V1-C4 objective v0 historical record - superseded",
+        "",
+        (
+            "This is the exact pre-versioned C4 run, retrospectively labelled objective v0. "
+            "It used two aligned online branches, `x_real=z_i` and "
+            "`x_pred=sg[F(z_(i-1),a_(i-1))]`, with the shared target "
+            "`Y_i=sg[z_i+gamma(1-d_i)Gbar_C4(z_(i+1),m)]`. Its loss was "
+            "`L_C4=0.5*((L_vector^real+L_goal^real)+"
+            "(L_vector^pred+L_goal^pred))`, with lambda_C=1."
+        ),
+        "",
+        (
+            "Objective v0 is preserved only as historical evidence. It is superseded by "
+            "the objective-v1 post-action-ghost formulation below and is excluded from "
+            "the current 511-cell O50 ledger, 25,550-outcome total, master-table row, "
+            "winner markers, and objective-v1 conclusions."
+        ),
+        "",
+        "| Protocol | " + " | ".join(SCORE_LABELS[mode] for mode in SCORE_MODES) + " |",
+        "|---|" + "---:|" * len(SCORE_MODES),
+    ]
+    for protocol in PROTOCOLS:
+        cells = [
+            _rate(
+                int(
+                    _historical_v0_score(evidence, protocol, mode)[
+                        "success_count"
+                    ]
+                )
+            )
+            for mode in SCORE_MODES
+        ]
+        lines.append(f"| {protocol.upper()} | " + " | ".join(cells) + " |")
+    lines.extend(
+        [
+            "",
+            f"- Historical summary SHA-256: `{evidence.historical_v0_summary_sha256}`",
+            (
+                "- Historical objective-v0 C4 checkpoint SHA-256: "
+                f"`{study['c4_checkpoint_sha256']}`"
+            ),
+            f"- Historical evidence: `{evidence.historical_v0_summary_path}`",
+            "- Historical coverage retained: 18 cells and 900 Boolean outcomes.",
+            "",
+            HISTORICAL_V0_SECTION_END,
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
     lines = [
         SECTION_START,
-        "## V1-C4 formal O25 O50 O100 paired evaluation",
+        "## V1-C4 objective v1 formal O25 O50 O100 paired evaluation",
         "",
         (
             "C4 keeps the V1 LeWM observation encoder, Action Encoder and world-model "
@@ -1160,12 +1295,20 @@ def _rewrite_markdown_fixed_winner_summary(
 def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
     """Return the canonical Markdown report with one C4 extension."""
 
-    if SECTION_START in text or SECTION_END in text:
+    if any(
+        marker in text
+        for marker in (
+            SECTION_START,
+            SECTION_END,
+            HISTORICAL_V0_SECTION_START,
+            HISTORICAL_V0_SECTION_END,
+        )
+    ):
         raise C4ResultsUpdateError("Markdown report already contains a C4 formal extension")
     text = _replace_once(
         text,
         "20 个 First-Q 权重扫描单元，共 505 格、25,250 个逐-pair outcome",
-        "20 个 First-Q 权重扫描单元，以及 6 个 V1-C4 O50 单元，共 511 格、25,550 个逐-pair outcome",
+        "20 个 First-Q 权重扫描单元，以及 6 个 V1-C4 objective-v1 O50 单元，共 511 格、25,550 个逐-pair outcome",
     )
     text = _replace_once(
         text,
@@ -1180,7 +1323,7 @@ def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
     coverage_replacement = (
         "| First-Q alpha sweep | V1-C / V1-C3 | C E10 / C3 E12 | "
         "5 original First-Q + 5 C3 Raw First-Q + 10 C3 Z-score First-Q2 | 20 |\n"
-        "| V1-C4 formal O50 | 1 | E10 | six predeclared state-only C4 scores | 6 |\n"
+        "| V1-C4 objective-v1 formal O50 | 1 | E10 | six predeclared state-only C4 scores | 6 |\n"
         "| **TOTAL** | — | — | same locked O50 selection | **511** |"
     )
     text = _replace_once(text, coverage_anchor, coverage_replacement)
@@ -1191,7 +1334,7 @@ def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
     if method_anchor is None:
         raise C4ResultsUpdateError("Markdown method table has no V1-C3 row")
     method_row = (
-        "| C4 (V1 only) | state-only G on stopped F(z_i,a_i) post-action ghost states | "
+        "| C4 objective v1 (V1 only) | state-only G on stopped F(z_i,a_i) post-action ghost states | "
         "L_C4=L_vector+L_goal, lambda_C=1 | "
         "Freeze encoder, Action Encoder and F; action affects G_C4 only through the F-produced state |"
     )
@@ -1246,7 +1389,13 @@ def update_markdown_text(text: str, evidence: C4ReportEvidence) -> str:
         "三部分合计 505 格 / 25,250 个 outcomes。",
         "三部分仍为原 505 格 / 25,250 个 outcomes；C4 另增加 6 个 O50 格 / 300 个 outcomes，总计 511 格 / 25,550 个 outcomes。",
     )
-    text = text.rstrip() + "\n\n" + _formal_markdown_section(evidence)
+    text = (
+        text.rstrip()
+        + "\n\n"
+        + _historical_v0_markdown_section(evidence)
+        + "\n"
+        + _formal_markdown_section(evidence)
+    )
     return text
 
 
@@ -1538,7 +1687,13 @@ def _update_coverage_docx(document: Any) -> None:
         raise C4ResultsUpdateError("DOCX table 24 is not the canonical 505-cell coverage table")
     total = table.rows[-1]
     inserted = _insert_cloned_row_before(table, total, table.rows[-2])
-    values = ("V1-C4 formal O50", "1", "E10", "Six predeclared state-only C4 scores", "6")
+    values = (
+        "V1-C4 objective-v1 formal O50",
+        "1",
+        "E10",
+        "Six predeclared state-only C4 scores",
+        "6",
+    )
     for cell, value in zip(inserted.cells, values):
         _set_cell_text(cell, value, center=cell is not inserted.cells[0])
     _set_cell_text(total.cells[-1], "511", bold=True, center=True)
@@ -1546,11 +1701,11 @@ def _update_coverage_docx(document: Any) -> None:
 
 def _update_method_docx(document: Any) -> None:
     table = document.tables[25]
-    if any(row.cells[0].text == "C4 (V1 only)" for row in table.rows):
+    if any(row.cells[0].text == "C4 objective v1 (V1 only)" for row in table.rows):
         raise C4ResultsUpdateError("DOCX method table already contains C4")
     row = table.add_row()
     values = (
-        "C4 (V1 only)",
+        "C4 objective v1 (V1 only)",
         "x_i=sg[F(z_i^real,a_i)]; Y_i=sg[z_(i+1)^real+gamma(1-d_i)Gbar_C4(sg[F(z_(i+1)^real,a_(i+1))],m)]",
         "L_C4=L_vector+L_goal, lambda_C=1",
         "Freeze encoder, Action Encoder and F; action reaches state-only G_C4 only through F",
@@ -1584,10 +1739,13 @@ def _update_audit_docx(document: Any, evidence: C4ReportEvidence, repository_roo
     anchor = _find_label_row(table, "Alpha-sweep evidence")
     additions = (
         (
-            "C4 formal summary",
+            "C4 objective-v1 formal summary",
             f"{_relative_path(evidence.summary_path, repository_root)}; SHA-256 {evidence.summary_sha256}",
         ),
-        ("C4 O50 extension", "6 / 6 strict cells; 300 pair-level Boolean outcomes"),
+        (
+            "C4 objective-v1 O50 extension",
+            "6 / 6 strict cells; 300 pair-level Boolean outcomes",
+        ),
         (
             "C4 training evidence",
             f"manifest SHA-256 {evidence.training_manifest_sha256}; metrics SHA-256 {evidence.metrics_sha256}",
@@ -1663,8 +1821,13 @@ def _add_docx_body(document: Any, text: str, *, bold: bool = False) -> Any:
     return paragraph
 
 
-def _start_c4_docx_section(document: Any) -> None:
-    """Start a separately labelled section instead of inheriting O100/C3."""
+def _start_labelled_docx_section(
+    document: Any,
+    *,
+    header_text: str,
+    footer_text: str,
+) -> None:
+    """Start a section whose header/footer cannot inherit an earlier label."""
 
     from docx.enum.section import WD_SECTION_START
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1697,7 +1860,7 @@ def _start_c4_docx_section(document: Any) -> None:
     ):
         write_container(
             header,
-            "Results TD · V1-C4 formal O25 O50 O100 paired evaluation",
+            header_text,
             WD_ALIGN_PARAGRAPH.LEFT,
         )
     for footer in (
@@ -1707,16 +1870,104 @@ def _start_c4_docx_section(document: Any) -> None:
     ):
         write_container(
             footer,
-            "Validated V1-C4 paired outcomes",
+            footer_text,
             WD_ALIGN_PARAGRAPH.RIGHT,
         )
+
+
+def _start_c4_docx_section(document: Any) -> None:
+    _start_labelled_docx_section(
+        document,
+        header_text=(
+            "Results TD · V1-C4 objective v1 formal O25 O50 O100 paired evaluation"
+        ),
+        footer_text="Validated V1-C4 objective v1 paired outcomes",
+    )
+
+
+def _append_historical_v0_docx(
+    document: Any,
+    evidence: C4ReportEvidence,
+    repository_root: Path,
+) -> None:
+    if any(
+        paragraph.text == HISTORICAL_V0_DOCX_END_MARKER
+        for paragraph in document.paragraphs
+    ):
+        raise C4ResultsUpdateError(
+            "DOCX already contains a C4 objective-v0 historical record"
+        )
+    _start_labelled_docx_section(
+        document,
+        header_text="Results TD · V1-C4 objective v0 historical record",
+        footer_text="Superseded V1-C4 objective v0 evidence",
+    )
+    _add_docx_heading(
+        document,
+        "V1 C4 objective v0 historical record superseded",
+        1,
+    )
+    _add_docx_body(
+        document,
+        "This is the exact pre-versioned C4 run, retrospectively labelled objective v0. "
+        "It used x_real = z_i and x_pred = stop-gradient F(z_(i-1),a_(i-1)), with "
+        "Y_i = stop-gradient[z_i + gamma(1-d_i) Gbar_C4(z_(i+1),m)]. Its loss was "
+        "L_C4 = 1/2[(L_vector^real + L_goal^real) + "
+        "(L_vector^pred + L_goal^pred)], with lambda_C = 1.",
+    )
+    _add_docx_body(
+        document,
+        "Objective v0 is preserved only as historical evidence. It is superseded by "
+        "the objective-v1 post-action-ghost formulation and is excluded from the "
+        "current 511-cell O50 ledger, 25,550-outcome total, master-table row, winner "
+        "markers, and objective-v1 conclusions.",
+        bold=True,
+    )
+    table = document.add_table(rows=1, cols=7)
+    headers = ["Protocol", *(SCORE_LABELS[mode] for mode in SCORE_MODES)]
+    for cell, value in zip(table.rows[0].cells, headers):
+        _set_cell_text(cell, value, bold=True, center=True)
+    for protocol in PROTOCOLS:
+        row = table.add_row()
+        values = [
+            protocol.upper(),
+            *(
+                _rate(
+                    int(
+                        _historical_v0_score(evidence, protocol, mode)[
+                            "success_count"
+                        ]
+                    )
+                )
+                for mode in SCORE_MODES
+            ),
+        ]
+        for cell, value in zip(row.cells, values):
+            _set_cell_text(cell, value, center=True)
+    _style_new_table(table)
+    historical_study = _mapping(
+        evidence.historical_v0_summary["study"],
+        "historical_v0.study",
+    )
+    _add_docx_body(
+        document,
+        "Historical evidence: 18 cells / 900 Boolean outcomes; summary SHA-256 "
+        f"{evidence.historical_v0_summary_sha256}; objective-v0 checkpoint SHA-256 "
+        f"{historical_study['c4_checkpoint_sha256']}; source "
+        f"{_relative_path(evidence.historical_v0_summary_path, repository_root)}.",
+    )
+    _add_docx_body(document, HISTORICAL_V0_DOCX_END_MARKER, bold=True)
 
 
 def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
     if any(paragraph.text == DOCX_END_MARKER for paragraph in document.paragraphs):
         raise C4ResultsUpdateError("DOCX already contains a C4 formal extension")
     _start_c4_docx_section(document)
-    _add_docx_heading(document, "V1 C4 formal O25 O50 O100 paired evaluation", 1)
+    _add_docx_heading(
+        document,
+        "V1 C4 objective v1 formal O25 O50 O100 paired evaluation",
+        1,
+    )
     _add_docx_body(
         document,
         "C4 freezes the V1 observation encoder, Action Encoder and world-model predictor F; every F output is stopped. Only online state-only G_C4 is optimized, with a frozen EMA target. G_C4 accepts state and task only and returns a 192-dimensional successor vector. Raw action and action embedding never enter G_C4.",
@@ -1850,6 +2101,16 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
 def update_docx_document(document: Any, evidence: C4ReportEvidence, repository_root: Path) -> None:
     """Mutate a validated canonical Results TD Document object in memory."""
 
+    existing_markers = {
+        paragraph.text
+        for paragraph in document.paragraphs
+        if paragraph.text
+        in {DOCX_END_MARKER, HISTORICAL_V0_DOCX_END_MARKER}
+    }
+    if existing_markers:
+        raise C4ResultsUpdateError(
+            "DOCX already contains a C4 formal or historical extension"
+        )
     if len(document.tables) != 46 or len(document.paragraphs) != 276:
         raise C4ResultsUpdateError(
             "DOCX is not the canonical pre-C4 Results TD artifact (expected 46 tables / 276 paragraphs)"
@@ -1954,6 +2215,7 @@ def update_docx_document(document: Any, evidence: C4ReportEvidence, repository_r
     _update_coverage_docx(document)
     _update_method_docx(document)
     _update_audit_docx(document, evidence, repository_root)
+    _append_historical_v0_docx(document, evidence, repository_root)
     _append_formal_docx(document, evidence)
 
 
@@ -2035,6 +2297,10 @@ __all__ = [
     "C4ResultsUpdateError",
     "EXPECTED_C4_CELLS",
     "EXPECTED_C4_OUTCOMES",
+    "HISTORICAL_V0_CHECKPOINT_SHA256",
+    "HISTORICAL_V0_DOCX_END_MARKER",
+    "HISTORICAL_V0_SECTION_END",
+    "HISTORICAL_V0_SECTION_START",
     "LOSS_METRICS",
     "PROTOCOLS",
     "SCORE_MODES",
@@ -2042,6 +2308,7 @@ __all__ = [
     "load_report_evidence",
     "update_docx_document",
     "update_markdown_text",
+    "validate_historical_v0_summary",
     "validate_summary",
     "write_updated_reports",
 ]
