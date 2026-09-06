@@ -1,0 +1,21 @@
+extends: actor_free_td_lewm_v1_c4_cube_checkpoint_o50.yaml
+id: actor_free_td_lewm_v1_c4_cube_checkpoint_o25
+
+evaluation:
+  goal_offset: 25
+
+planning:
+  receding_horizon: 5
+  executed_environment_steps_before_replanning: 25
+  episode_budget: 50
+
+inference_objective:
+  score_definition:
+    executed_action_block: all_five_blocks
+    replanning: every_five_action_blocks
+  replanning: every_five_action_blocks
+
+provenance:
+  comparison_protocol: configs/experiment/actor_free_td_lewm_v1_c_cube_checkpoint_o25.yaml
+  status: audited_o25_evaluation_ready
+  note: Formal O25 uses H5/RH5 except C4-only, which is configured as H1/RH1; every C4 score remains downstream of frozen F.

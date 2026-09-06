@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from tdwm.training.frozen_actor_free_td_v1_data import (
+    FrozenActorFreeTDV1C4TransitionDataset,
     FrozenActorFreeTDV1TransitionDataset,
     sample_reachable_future_latents_v1,
 )
@@ -379,6 +380,67 @@ def test_finite_next_action_is_terminal_when_next_next_leaves_episode(
     )
     assert boundary["goal_future_start_row"].item() == 65
     assert boundary["goal_future_end_row"].item() == 65
+
+
+def test_c4_view_shifts_base_records_to_the_next_state_time(tmp_path: Path) -> None:
+    store, latents = _build_store(tmp_path / "cache")
+    clips = FrozenLatentClipDataset(_SourceDataset(), store)
+    transitions = FrozenActorFreeTDV1C4TransitionDataset(clips, [0, 1])
+
+    records = transitions.__getitems__([0, 1, 2])
+
+    assert [record["global_row"].item() for record in records] == [15, 20, 25]
+    assert [record["c4_current_global_row"].item() for record in records] == [
+        20,
+        25,
+        30,
+    ]
+    # The last item is terminal at z_30; its bootstrap uses z_30 only as a safe
+    # placeholder and must later be removed by the explicit terminal mask.
+    assert [record["c4_bootstrap_global_row"].item() for record in records] == [
+        25,
+        30,
+        30,
+    ]
+    assert [record["c4_terminal"].item() for record in records] == [
+        False,
+        False,
+        True,
+    ]
+    for record in records:
+        assert torch.equal(record["c4_real_state"], record["next_state"])
+        assert record["c4_f_state_history"].shape == (3, 192)
+        assert record["c4_f_previous_actions"].shape == (2, 25)
+
+    assert records[0]["c4_f_state_history"][:, 0].tolist() == [5.0, 10.0, 15.0]
+    assert records[1]["c4_f_state_history"][:, 0].tolist() == [10.0, 15.0, 20.0]
+    torch.testing.assert_close(
+        records[0]["c4_f_previous_actions"],
+        torch.from_numpy(np.array(store.actions[[5, 10]], copy=True)),
+    )
+    torch.testing.assert_close(
+        records[0]["c4_bootstrap_next_state"], torch.from_numpy(latents[25])
+    )
+    torch.testing.assert_close(
+        records[-1]["c4_bootstrap_next_state"], records[-1]["c4_real_state"]
+    )
+
+
+def test_c4_terminal_mapping_never_reads_next_episode(tmp_path: Path) -> None:
+    store, _ = _build_store(tmp_path / "cache")
+    clips = FrozenLatentClipDataset(_SourceDataset(), store)
+    transitions = FrozenActorFreeTDV1C4TransitionDataset(clips, [3])
+
+    boundary = transitions[-1]
+
+    assert boundary["global_row"].item() == 60
+    assert boundary["c4_current_global_row"].item() == 65
+    assert boundary["c4_terminal"].item() is True
+    assert boundary["c4_bootstrap_global_row"].item() == 65
+    assert torch.equal(
+        boundary["c4_bootstrap_next_state"], boundary["c4_real_state"]
+    )
+    assert boundary["c4_f_state_history"][:, 0].tolist() == [50.0, 55.0, 60.0]
 
 
 def test_transition_dataset_rejects_non_v1_index_contract(tmp_path: Path) -> None:

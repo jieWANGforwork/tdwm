@@ -1,0 +1,14 @@
+extends: actor_free_td_lewm_v1_c4_cube_checkpoint_o50.yaml
+id: actor_free_td_lewm_v1_c4_cube_checkpoint_o100
+
+evaluation:
+  goal_offset: 100
+  selection_sha256: 8a87815e8e1816ccb5021af81a5e2307a5b342d094eec3edf221a0e24851d10c
+
+planning:
+  episode_budget: 200
+
+provenance:
+  comparison_protocol: configs/experiment/actor_free_td_lewm_v1_c_cube_checkpoint_o100.yaml
+  status: audited_o100_evaluation_ready
+  note: Formal O100 uses the same six locked score paths with H5/RH1, except C4-only H1/RH1, and a 200-step budget.

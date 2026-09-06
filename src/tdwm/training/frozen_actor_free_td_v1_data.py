@@ -416,6 +416,125 @@ class FrozenActorFreeTDV1TransitionDataset:
         ]
 
 
+class FrozenActorFreeTDV1C4TransitionDataset(FrozenActorFreeTDV1TransitionDataset):
+    """Expose the time-shifted real/predicted state tuple required by C4.
+
+    The base V1 record at global row ``r`` describes the transition from
+    ``z_(i-1)`` to ``z_i``.  Its ``terminal`` flag is already the terminal
+    status of ``z_i`` because it is derived from the action block beginning at
+    ``r + frame_skip``.  C4 therefore maps the record as follows::
+
+        c4_real_state = z_i = base next_state
+        c4_f_state_history = [z_(i-3), z_(i-2), z_(i-1)]
+        c4_f_previous_actions = [a_(i-3), a_(i-2)]
+        base action = a_(i-1)
+        c4_bootstrap_next_state = z_(i+1), only when terminal is false
+
+    A terminal record has no legal ``z_(i+1)``.  Its bootstrap field and row
+    are therefore set to ``z_i`` itself as a finite, same-episode placeholder;
+    the explicit terminal mask must remove that value from the TD target.
+    This class preserves every base replay anchor and its sampled-goal bounds.
+    """
+
+    def __getitems__(
+        self,
+        indices: Sequence[int],
+    ) -> list[dict[str, torch.Tensor]]:
+        records = super().__getitems__(indices)
+        if not records:
+            return records
+
+        self.store._assert_immutable()
+        anchors = np.fromiter(
+            (int(record["global_row"].item()) for record in records),
+            dtype=np.int64,
+            count=len(records),
+        )
+        terminals = np.fromiter(
+            (bool(record["terminal"].item()) for record in records),
+            dtype=np.bool_,
+            count=len(records),
+        )
+        frame_skip = int(self.frame_skip)
+        current_rows = anchors + frame_skip
+        candidate_bootstrap_rows = anchors + 2 * frame_skip
+        safe_bootstrap_rows = np.where(
+            terminals,
+            current_rows,
+            candidate_bootstrap_rows,
+        )
+        history_offsets = frame_skip * np.arange(-2, 1, dtype=np.int64)
+        previous_action_offsets = history_offsets[:-1]
+        state_history_rows = anchors[:, None] + history_offsets[None, :]
+        previous_action_rows = anchors[:, None] + previous_action_offsets[None, :]
+
+        all_requested_rows = np.concatenate(
+            (
+                state_history_rows,
+                previous_action_rows,
+                current_rows[:, None],
+                safe_bootstrap_rows[:, None],
+            ),
+            axis=1,
+        )
+        if np.any(all_requested_rows < 0) or np.any(
+            all_requested_rows >= int(self.store.total_rows)
+        ):
+            raise RuntimeError("A C4 aligned row lies outside the frozen store.")
+        anchor_episodes = np.asarray(
+            self.store.episode_ids[anchors], dtype=np.int64
+        )
+        requested_episodes = np.asarray(
+            self.store.episode_ids[all_requested_rows], dtype=np.int64
+        )
+        if np.any(requested_episodes != anchor_episodes[:, None]):
+            raise RuntimeError("A C4 aligned tuple crosses an episode boundary.")
+
+        state_histories = np.array(
+            self.store.latents[state_history_rows], dtype=np.float32, copy=True
+        )
+        previous_actions = np.array(
+            self.store.actions[previous_action_rows], dtype=np.float32, copy=True
+        )
+        current_states = np.array(
+            self.store.latents[current_rows], dtype=np.float32, copy=True
+        )
+        bootstrap_states = np.array(
+            self.store.latents[safe_bootstrap_rows], dtype=np.float32, copy=True
+        )
+        if not (
+            np.isfinite(state_histories).all()
+            and np.isfinite(previous_actions).all()
+            and np.isfinite(current_states).all()
+            and np.isfinite(bootstrap_states).all()
+        ):
+            raise RuntimeError("A C4 aligned frozen input is non-finite.")
+
+        for position, record in enumerate(records):
+            cached_next_state = record["next_state"]
+            current_state = torch.from_numpy(current_states[position])
+            if not torch.equal(cached_next_state, current_state):
+                raise RuntimeError("C4 current state differs from base V1 next_state.")
+            record["c4_real_state"] = cached_next_state.detach().clone()
+            record["c4_bootstrap_next_state"] = torch.from_numpy(
+                bootstrap_states[position]
+            )
+            record["c4_f_state_history"] = torch.from_numpy(
+                state_histories[position]
+            )
+            record["c4_f_previous_actions"] = torch.from_numpy(
+                previous_actions[position]
+            )
+            record["c4_current_global_row"] = torch.tensor(
+                int(current_rows[position]), dtype=torch.int64
+            )
+            record["c4_bootstrap_global_row"] = torch.tensor(
+                int(safe_bootstrap_rows[position]), dtype=torch.int64
+            )
+            record["c4_terminal"] = record["terminal"].detach().clone()
+        return records
+
+
 class FrozenActorFreeTDV1C2TransitionDataset(FrozenActorFreeTDV1TransitionDataset):
     """Add frozen-F rollout context without changing the V1 replay population.
 
@@ -619,6 +738,7 @@ def sample_reachable_future_latents_v1(
 
 __all__ = [
     "FrozenActorFreeTDV1TransitionDataset",
+    "FrozenActorFreeTDV1C4TransitionDataset",
     "FrozenActorFreeTDV1C2TransitionDataset",
     "ReachableFutureLatentsV1",
     "V1_C2_ALIGNMENT_ACTION_HISTORY",

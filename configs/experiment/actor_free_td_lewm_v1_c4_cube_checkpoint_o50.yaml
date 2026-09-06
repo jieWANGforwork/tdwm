@@ -1,0 +1,192 @@
+schema_version: 1
+id: actor_free_td_lewm_v1_c4_cube_checkpoint_o50
+method: actor_free_td_lewm_v1_c4
+method_family: actor_free_td_lewm_v1
+variant: c4
+display_name: Actor-Free TD-JEPA V1 C4 State-Only Frozen-F Successor
+implementation_version: v1
+environment: cube
+stage: planner_evaluation
+
+runtime:
+  stable_worldmodel_version: 0.1.1
+  import: import stable_worldmodel as swm
+  precision: fp32
+
+pretrained_world_model:
+  source_method: lewm
+  source_seed: 3072
+  source_epoch: 10
+  checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
+  frozen: true
+
+image_preprocessing:
+  source: stable_pretraining.data.dataset_stats.ImageNet
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+dataset:
+  identifier: quentinll/lewm-cube
+  file: cube_single_expert_chunk1.h5
+  expected_size_bytes: 101942558720
+  accepted_size_bytes: [101942558720, 74104077358]
+  expected_episodes: 10000
+  expected_transitions: 2010000
+  episode_steps: 201
+  source:
+    file: cube_single_expert_chunk1.h5
+    size_bytes: 74104077358
+    sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  lance:
+    suffix: .lance
+    manifest_suffix: .manifest.json
+    manifest_sha256: 9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd
+    image_codec: jpeg
+    jpeg_quality: 100
+  keys_to_load:
+    - pixels
+    - action
+    - qpos
+    - qvel
+    - privileged_block_0_pos
+    - privileged_block_0_quat
+
+checkpoint:
+  source: actor_free_td_lewm_v1_c4_deployment_export
+  checkpoint_path: required_cli_argument
+  contains_world_model: true
+  contains_online_g: true
+  contains_target_g: true
+  deployment_checkpoint_version: 1
+
+model:
+  embed_dim: 192
+
+context:
+  g_state_frames: 1
+  lewm_rollout_history_frames: 3
+  plan_config_history_len: 1
+
+g:
+  objective_version: 0
+  architecture: td_jepa_state_only_forward_map_v1_c4
+  state_dim: 192
+  task_dim: 192
+  output_dim: 192
+  hidden_dim: 256
+  hidden_layers: 1
+  embedding_layers: 2
+  num_parallel: 1
+  action_input: none
+  action_effect: only_via_f_predicted_state
+  goal_conditioning: task_input
+  successor_semantics: includes_current_input_state
+  gamma: 0.95
+  target_ema_decay: 0.995
+  actor: none
+  reward: none
+
+task_sampling:
+  sampling: per_transition_bernoulli
+  goal_probability: 0.5
+  random_source: isotropic_gaussian_sphere
+  goal_source: uniform_reachable_future_frozen_latent_same_clip
+  normalization: sqrt_dim_l2_sphere
+  mix_unit: transition_minibatch
+  goal_sampling_seed_offset: 170003
+  task_sampling_seed_offset: 270007
+
+time_alignment:
+  replay_anchor: z_i_minus_1
+  real_online_input: real_z_i
+  predicted_online_input: stop_gradient_f_of_z_i_minus_1_a_i_minus_1
+  shared_target_current_feature: real_z_i
+  shared_target_bootstrap_input: real_z_i_plus_1
+  terminal_semantics: d_i_true_when_real_z_i_is_terminal
+  terminal_target: y_i_equals_z_i
+  f_history_states: 3
+  f_output_gradient: stop_gradient
+
+joint_objective:
+  objective: equal_real_predicted_state_only_goal_projected_td
+  vector_td_population: all_transitions_both_branches
+  vector_reduction: mean_of_squared_l2_norm
+  goal_subset: goal_derived_tasks_only
+  goal_projection_weight: 1.0
+  goal_projection_target: detached_shared_td_target_projection
+  branch_combination: one_half_real_plus_predicted
+  target_gradient: stop_gradient
+  trainable_modules: [online_g_c4]
+  frozen_modules:
+    - lewm_observation_encoder
+    - lewm_action_encoder
+    - lewm_world_model_predictor_f
+    - target_g_c4
+  lewm_prediction_loss: none
+  sigreg_loss: none
+
+world:
+  env_name: swm/OGBCube-v0
+  env_type: single
+  ob_type: states
+  image_size: 224
+  multiview: false
+  visualize_info: false
+  terminate_at_goal: true
+  success_threshold_meters: 0.04
+
+evaluation:
+  episodes: 50
+  goal_offset: 50
+  start_goal_source: same_dataset_episode
+
+planning:
+  solver: CEM
+  horizon: 5
+  candidates: 300
+  iterations: 30
+  elites: 30
+  initial_variance: 1.0
+  action_block: 5
+  frame_skip: 5
+  receding_horizon: 1
+  episode_budget: 100
+  planning_seed: 42
+  solver_batch_size: 1
+  history_len: 1
+  warm_start: true
+  initial_distribution: cem_gaussian_no_actor
+
+inference_objective:
+  score_mode: f_plus_g
+  score_definition:
+    optimization: cem_minimize
+    action_enters_g: false
+    action_path: candidate_action_to_frozen_f_to_predicted_state_to_c4
+    task: sqrt_dim_l2_normalized_goal_vector
+    online_g_used: true
+    target_g_used: false
+    formula: terminal_summed_mse(zhat4_f,z_goal) - gamma_power_4 * dot(G_C4(zhat5_f,m),m)
+    f_rollout: full_five_action_blocks_A1_through_A5
+    f_prefix_state: frozen_f_predicted_state_after_A4_zhat4
+    g_state: frozen_f_predicted_state_after_A5_zhat5
+    final_action_path: A5_to_frozen_f_to_zhat5_to_state_only_g
+    executed_action_block: first_block_only
+    replanning: every_action_block
+  f_score: lewm_rollout_goal_distance
+  f_score_reducer: final_predicted_latent_summed_mse
+  g_score: negative_goal_projection_of_state_only_c4
+  action_enters_g: false
+  action_effect: only_via_f_predicted_state
+  goal_enters_g: true
+  learned_actor: false
+  training_only_auxiliary: [dual_branch_goal_projected_td]
+  training_only_auxiliary_used_at_evaluation: false
+  replanning: every_action_block
+
+provenance:
+  training_protocol: configs/experiment/actor_free_td_lewm_v1_c4_cube_train.yaml
+  comparison_protocol: configs/experiment/actor_free_td_lewm_v1_c_cube_checkpoint_o50.yaml
+  status: implementation_ready_checkpoint_pending
+  note: C4 preserves the six predeclared V1-C score columns, but every C4 G read consumes an F-predicted successor state and no action tensor.
