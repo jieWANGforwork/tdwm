@@ -1928,8 +1928,9 @@ def update_docx_document(document: Any, evidence: C4ReportEvidence, repository_r
         document,
         "The Training loss column shows",
         append=(
-            "C4 is the only V1 row with equal real and stopped-F-predicted "
-            "state-only branches: one half of its four vector/goal terms."
+            "C4 is the only V1 row with a single state-only online branch on "
+            "the stopped post-action ghost state x_i = F(z_i,a_i); its training "
+            "loss is L_vector + L_goal."
         ),
     )
     _edit_paragraph(
@@ -1937,8 +1938,9 @@ def update_docx_document(document: Any, evidence: C4ReportEvidence, repository_r
         "V1-C2 initializes every parameter",
         append=(
             "V1-C4 instead starts a new state-only G_C4 over the same frozen V1 "
-            "LeWM: real z_i and stop-gradient F(z_(i-1),a_(i-1)) share the target "
-            "z_i + gamma(1-d_i)Gbar_C4(z_(i+1),m), and only online G_C4 is optimized."
+            "LeWM: x_i = stop-gradient F(z_i^real,a_i), with target "
+            "Y_i = stop-gradient[z_(i+1)^real + gamma(1-d_i)Gbar_C4("
+            "stop-gradient F(z_(i+1)^real,a_(i+1)),m)]; only online G_C4 is optimized."
         ),
     )
     _replace_paragraph(

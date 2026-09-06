@@ -476,3 +476,8 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
     assert "w(g)=sqrt(192) z_g/||z_g||_2" in text
     assert "Every A_k is one 25D block of five consecutive 5D primitive actions" in text
     assert "tau=0.03, gamma=0.98, n<=50 primitive steps" in text
+    assert "single state-only online branch" in text
+    assert "x_i = stop-gradient F(z_i^real,a_i)" in text
+    assert "L_vector + L_goal" in text
+    assert "equal real and stopped-F-predicted" not in text
+    assert "real z_i and stop-gradient F(z_(i-1),a_(i-1)) share the target" not in text
