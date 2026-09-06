@@ -1190,6 +1190,8 @@ def train_actor_free_td_lewm_v1_c4(
         "method_family": METHOD_FAMILY,
         "variant": VARIANT,
         "implementation_version": IMPLEMENTATION_VERSION,
+        "objective_version": OBJECTIVE_VERSION,
+        "deployment_checkpoint_version": DEPLOYMENT_CHECKPOINT_VERSION,
         "run_dir": str(run_dir),
         "seed": int(seed),
         "last_checkpoint": str(last_checkpoint),
