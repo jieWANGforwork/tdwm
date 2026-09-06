@@ -1096,7 +1096,11 @@ def evaluate_actor_free_td_predictor_runtime(
         "world_model": world_model,
         "predictor": predictor,
         "planning": planning,
-        "gamma": float(protocol["predictor"]["gamma"]),
+        # The method-specific checkpoint validator has already bound this
+        # loaded head configuration to the formal protocol.  Read gamma from
+        # that validated configuration rather than assuming every method calls
+        # its protocol section ``predictor`` (C4 intentionally calls it ``g``).
+        "gamma": float(predictor_config["gamma"]),
         "process": {"action": action_processor},
         "transform": {"pixels": image_transform, "goal": image_transform},
         "device": device,

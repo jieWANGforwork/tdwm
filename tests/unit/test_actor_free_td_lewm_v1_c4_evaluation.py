@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,6 +28,7 @@ from tdwm.evaluation.actor_free_td_lewm_v1_c4 import (
     validate_actor_free_td_lewm_v1_c4_checkpoint_protocol,
     validate_actor_free_td_lewm_v1_c4_evaluation_protocol,
 )
+from tdwm.evaluation import frozen_actor_free_td_v1_common as v1_runtime
 from tdwm.methods.actor_free_td_lewm_v1_c4 import ActorFreeTDJEPAPredictorV1C4
 from tdwm.training.actor_free_td_lewm_v1_c4 import (
     _deployment_payload,
@@ -416,3 +419,145 @@ def test_evaluation_manifest_uses_g_config_not_old_predictor_config(
     assert stored_manifest["checkpoint"]["g_config"]["action_input"] == "none"
     assert result["state_only_g"] is True
     assert result["action_enters_g"] is False
+
+
+def test_c4_common_runtime_assembles_result_using_validated_g_gamma(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Exercise the real common runtime past policy creation and result assembly."""
+
+    formal = load_actor_free_td_lewm_v1_c4_evaluation_protocol(CONFIGS["o50"])
+    source_sha = formal["pretrained_world_model"]["checkpoint_sha256"]
+    g_config = {
+        "method": formal["method"],
+        "method_family": formal["method_family"],
+        "variant": formal["variant"],
+        "implementation_version": formal["implementation_version"],
+        "objective_version": formal["g"]["objective_version"],
+        "deployment_checkpoint_version": 1,
+        **formal["g"],
+        "task_sampling": formal["task_sampling"],
+        "time_alignment": formal["time_alignment"],
+        "joint_objective": formal["joint_objective"],
+        "pretrained_world_model": formal["pretrained_world_model"],
+    }
+    payload = {
+        "method": formal["method"],
+        "method_family": formal["method_family"],
+        "variant": formal["variant"],
+        "implementation_version": formal["implementation_version"],
+        "objective_version": formal["g"]["objective_version"],
+        "deployment_checkpoint_version": 1,
+        "epoch": 10,
+        "global_step": 127_960,
+        "pretrained_world_model_provenance": {
+            "source_checkpoint_sha256": source_sha
+        },
+    }
+
+    class Dataset:
+        lengths = [201] * 10_000
+
+        @staticmethod
+        def get_dim(key: str) -> int:
+            assert key == "action"
+            return 5
+
+    captured: dict[str, object] = {}
+
+    class World:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["world_init"] = (args, kwargs)
+
+        def set_policy(self, policy) -> None:
+            captured["policy"] = policy
+
+        def evaluate(self, **kwargs):
+            captured["evaluate"] = kwargs
+            return {"success": [True]}
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    class IdentityTransform:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __call__(self, value):
+            return value
+
+    fake_v2 = types.SimpleNamespace(
+        Compose=IdentityTransform,
+        ToImage=IdentityTransform,
+        ToDtype=IdentityTransform,
+        Normalize=IdentityTransform,
+        Resize=IdentityTransform,
+    )
+    fake_transforms = types.ModuleType("torchvision.transforms")
+    fake_transforms.v2 = fake_v2
+    fake_torchvision = types.ModuleType("torchvision")
+    fake_torchvision.transforms = fake_transforms
+    fake_swm = types.ModuleType("stable_worldmodel")
+    fake_swm.data = types.SimpleNamespace(load_dataset=lambda *args, **kwargs: Dataset())
+    fake_swm.World = World
+    monkeypatch.setitem(sys.modules, "stable_worldmodel", fake_swm)
+    monkeypatch.setitem(sys.modules, "torchvision", fake_torchvision)
+    monkeypatch.setitem(sys.modules, "torchvision.transforms", fake_transforms)
+    monkeypatch.setattr(v1_runtime, "prepare_cloud_runtime", lambda: {})
+    monkeypatch.setattr(
+        v1_runtime.importlib.metadata,
+        "version",
+        lambda name: "0.1.1" if name == "stable-worldmodel" else "unknown",
+    )
+    monkeypatch.setattr(
+        v1_runtime,
+        "_resolve_frozen_dataset_source",
+        lambda *args, **kwargs: {"format": "lance", "sha256": "a" * 64},
+    )
+    monkeypatch.setattr(
+        v1_runtime,
+        "_load_action_processor",
+        lambda *args, **kwargs: (lambda action: action, {"kind": "identity"}),
+    )
+
+    checkpoint = tmp_path / "c4.pt"
+    checkpoint.write_bytes(b"c4")
+    dataset = tmp_path / "cube.lance"
+    dataset.mkdir()
+    output = tmp_path / "output"
+    model = RecordingWorld()
+    online_g = RecordingStateOnlyG()
+
+    def load_checkpoint(*args, **kwargs):
+        return model, online_g, g_config, payload
+
+    def make_policy(**kwargs):
+        captured["policy_gamma"] = kwargs["gamma"]
+        return object()
+
+    result = v1_runtime.evaluate_actor_free_td_predictor_runtime(
+        spec=METHOD_SPEC,
+        checkpoint_loader=load_checkpoint,
+        policy_factory=make_policy,
+        protocol_loader=load_actor_free_td_lewm_v1_c4_evaluation_protocol,
+        protocol_configurer=configure_actor_free_td_lewm_v1_c4_evaluation_mode,
+        checkpoint_validator=validate_actor_free_td_lewm_v1_c4_checkpoint_protocol,
+        raw_action_validator=lambda **kwargs: None,
+        checkpoint_provenance_keys=("pretrained_world_model_provenance",),
+        protocol_path=CONFIGS["o50"],
+        dataset_path=dataset,
+        output_dir=output,
+        checkpoint_path=checkpoint,
+        smoke=True,
+        score_mode="f_plus_g",
+    )
+
+    manifest = json.loads((output / "protocol_manifest.json").read_text())
+    stored_result = json.loads((output / "results.json").read_text())
+    assert captured["policy_gamma"] == formal["g"]["gamma"] == 0.95
+    assert captured["closed"] is True
+    assert result["method"] == formal["method"]
+    assert stored_result["score_mode"] == "f_plus_g"
+    assert manifest["protocol"]["g"]["gamma"] == 0.95
+    assert "predictor" not in manifest["protocol"]
