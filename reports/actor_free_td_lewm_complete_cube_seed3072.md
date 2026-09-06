@@ -296,3 +296,134 @@ V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G ta
 - 原固定 E10 Mean-Q 覆盖 V0/V1/V2/V2-EMA × C/D/F/G1/G2/G3，共 24 格且无缺格；新增 First-Q2/State-V 不适用处用中性 `—`，不参与赢家计算。
 - 主结果表只展示 E10；E3–E10 全轨迹仍保存在 `all_o50_results.csv`，没有因版式精简而删除。
 - 只有一个 training seed；所有跨版本结果都是描述性结构消融，不声称多 seed 总体最优或统计显著。
+
+<!-- RESULTS_TD_O25_V1_C_C3_START -->
+## O25 配对补测 V1 C 与 C3
+
+同一组 50 个 O25 start-goal pair 上，单方法最高为 **C3 State-V + First-Q2 alpha=.10：38/50 (76%)**；V1-C F-only 为 **37/50 (74%)**。前六行是先前补测的 V1-C E10 六种评分；最后一行是把此前 O50 得到 31/50 (62%) 的同一个 C3 scorer 原样移到 O25，未重新训练。C3 相对 F-only 新救回 6 个 pair，同时丢失 5 个原 F 成功 pair。若事后使用成功标签做 oracle 选择，F-only 与 C3 的并集为 **43/50 (86%)**；把全部六种替代评分也纳入，oracle 上限为 **44/50 (88%)**。这些 oracle 数字不是可部署结果。
+
+### 协议与证据指纹
+
+| 字段 | 锁定值 |
+| --- | --- |
+| 任务 | Cube O25；50 个固定 start-goal pair；goal step - start step = 25 |
+| 规划 | CEM；300 candidates；30 iterations；30 elites；planning seed 42；action block 5 |
+| 执行节奏 | 除 G-only 外均 H=5/RH=5、每 25 环境步重规划；G-only 为 H=1/RH=1、每 5 步重规划 |
+| V1-C checkpoint | E10/global step 127960；SHA-256 `88bd65c48a6c701852f50552ec8f9109d6ae8ac57c467de207aa2c652c0f59a3` |
+| V1-C3 checkpoint | E12/global step 12000；SHA-256 `5e240053d7c33fc016ef2ff64f3a4a79706dbe10dfde347d5c5f3cd45043e5b2` |
+| Selection / ranks | `56546fe8725ce0e4670f308c5b325bd64ff2a792373add8c20ddbcab02da6b37` / `72af45d4bad65a25288c5d405072d18ab5c0b4f0b67ddc970ac3f344b3c22fd9` |
+| Action normalization | `57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723` |
+| 逐-pair CSV | `reports/artifacts/actor_free_td_lewm_v1_c_c3_o25_20260906/paired_outcomes.csv`；SHA-256 `fce408129a880866243fdbb372774af462af26af7687d972a529599826314b51` |
+
+### 训练目标与推理评分定义
+
+V1-C 的六种 O25 评分共享同一个 E10 checkpoint 与训练目标 `L_C=mean(l)+mean_goal(q-qY)^2`；C3 使用 `L_C3=mean_i omega_tau(r_i)Huber_1(r_i)`。本轮只改变或复用推理评分，没有为 O25 重新训练。`Zcand` 表示在每次 CEM candidate population 内分别做 z-score。
+
+| 评分 | CEM 最小化 cost | H/RH | 执行与状态来源 |
+| --- | --- | --- | --- |
+| F-only | J_F = \|\|z5^F - z_goal\|\|^2 | H5/RH5 | A1-A5 后重规划 |
+| G-only | J_G = -Q_G(z0,A1,g); H=1 | H1/RH1 | A1 后重规划；真实 z0 |
+| F+G tail | J_tail = \|\|z4^F-z_goal\|\|^2 - gamma^4 Q_G(z4^F,A5,g) | H5/RH5 | A1-A5 后重规划 |
+| First-Q alpha=.25 | J = J_F - .25 Q_G(z0,A1,g) | H5/RH5 | A1-A5 后重规划 |
+| Mean-Q rollout | J = -mean[k=1..5] Q_G(z{k-1}^F,Ak,g) | H5/RH5 | A1-A5 后重规划；q1 用真实 z0，q2-q5 用 F imagined states |
+| First-Q2 alpha=.25 | J = Zcand(J_F) - .25 Zcand(Q_G(z0,A1,g)) | H5/RH5 | A1-A5 后重规划 |
+| C3 State-V + First-Q2 alpha=.10 | J = Zcand(Vbar(F^5,z_goal)) - .10 Zcand(Q_G(z0,A1,g)) | H5/RH5 | A1-A5 后重规划；EMA State-V 读 F imagined terminal，online G 读真实 z0 |
+
+### 七种评分结果与 F-only 配对覆盖
+
+下表中‘救回’是 F-only 失败而该方法成功；‘丢失’是 F-only 成功而该方法失败；`F∪方法`是使用真实成功标签事后选择得到的 oracle，并非已实现的门控器。O50 仅作既有结果参照，不能与 O25 直接比较难度。
+
+| 评分 | 训练 loss | O25 | 同 scorer 既有 O50 | 保留 F 成功 | 新救回 | 丢失 F 成功 | 两者均失败 | 相对 F | F∪方法 oracle |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| F-only | L_C | 37/50 (74%) | 23/50 (46%) | 37 | 0 | 0 | 13 | +0 pp | 37/50 (74%) |
+| G-only | L_C | 29/50 (58%) | 18/50 (36%) | 26 | 3 | 11 | 10 | -16 pp | 40/50 (80%) |
+| F+G tail | L_C | 35/50 (70%) | 22/50 (44%) | 29 | 6 | 8 | 7 | -4 pp | 43/50 (86%) |
+| First-Q alpha=.25 | L_C | 36/50 (72%) | 28/50 (56%) | 34 | 2 | 3 | 11 | -2 pp | 39/50 (78%) |
+| Mean-Q rollout | L_C | 30/50 (60%) | 21/50 (42%) | 29 | 1 | 8 | 12 | -14 pp | 38/50 (76%) |
+| First-Q2 alpha=.25 | L_C | 35/50 (70%) | 26/50 (52%) | 33 | 2 | 4 | 11 | -4 pp | 39/50 (78%) |
+| C3 State-V + First-Q2 alpha=.10 | L_C3 | 38/50 (76%) | 31/50 (62%) | 32 | 6 | 5 | 7 | +2 pp | 43/50 (86%) |
+
+### F-only 成功与失败 pair
+
+- F-only 成功 37 个：P03, P04, P05, P06, P09, P10, P11, P13, P14, P16, P17, P19, P21, P22, P24, P26, P27, P29, P30, P31, P33, P34, P35, P36, P37, P38, P40, P41, P42, P43, P44, P45, P46, P47, P48, P49, P50
+- F-only 失败 13 个：P01, P02, P07, P08, P12, P15, P18, P20, P23, P25, P28, P32, P39
+
+### 每种方法相对 F-only 的逐-pair 转移
+
+| 评分 | 新救回 F 失败 | 丢失 F 成功 | 两者均失败 |
+| --- | --- | --- | --- |
+| F-only | 无 | 无 | P01, P02, P07, P08, P12, P15, P18, P20, P23, P25, P28, P32, P39 |
+| G-only | P08, P20, P23 | P06, P10, P13, P17, P24, P26, P27, P30, P42, P43, P47 | P01, P02, P07, P12, P15, P18, P25, P28, P32, P39 |
+| F+G tail | P01, P02, P08, P20, P23, P32 | P05, P10, P17, P27, P33, P37, P38, P46 | P07, P12, P15, P18, P25, P28, P39 |
+| First-Q alpha=.25 | P01, P08 | P10, P27, P47 | P02, P07, P12, P15, P18, P20, P23, P25, P28, P32, P39 |
+| Mean-Q rollout | P08 | P06, P10, P13, P17, P27, P35, P42, P45 | P01, P02, P07, P12, P15, P18, P20, P23, P25, P28, P32, P39 |
+| First-Q2 alpha=.25 | P08, P20 | P10, P13, P27, P47 | P01, P02, P07, P12, P15, P18, P23, P25, P28, P32, P39 |
+| C3 State-V + First-Q2 alpha=.10 | P01, P02, P08, P20, P23, P25 | P10, P13, P24, P27, P34 | P07, P12, P15, P18, P28, P32, P39 |
+
+### P01 到 P50 完整结果
+
+`S` 表示成功，`F` 表示失败。
+
+| Pair | Episode | Start | Goal | Rank | F | G | F+G | First-Q | Mean-Q | First-Q2 | C3 combo |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| P01 | 638 | 29 | 54 | 112317 | F | F | S | S | F | F | S |
+| P02 | 679 | 34 | 59 | 119538 | F | F | S | F | F | F | S |
+| P03 | 859 | 76 | 101 | 151260 | S | S | S | S | S | S | S |
+| P04 | 892 | 85 | 110 | 157077 | S | S | S | S | S | S | S |
+| P05 | 921 | 61 | 86 | 162157 | S | S | F | S | S | S | S |
+| P06 | 941 | 132 | 157 | 165748 | S | F | S | S | F | S | S |
+| P07 | 1281 | 19 | 44 | 225475 | F | F | F | F | F | F | F |
+| P08 | 1652 | 49 | 74 | 290801 | F | S | S | S | S | S | S |
+| P09 | 1825 | 82 | 107 | 321282 | S | S | S | S | S | S | S |
+| P10 | 2014 | 113 | 138 | 354577 | S | F | F | F | F | F | F |
+| P11 | 2272 | 63 | 88 | 399935 | S | S | S | S | S | S | S |
+| P12 | 2767 | 101 | 126 | 487093 | F | F | F | F | F | F | F |
+| P13 | 3545 | 43 | 68 | 623963 | S | F | S | S | F | F | F |
+| P14 | 3707 | 161 | 186 | 652593 | S | S | S | S | S | S | S |
+| P15 | 4024 | 15 | 40 | 708239 | F | F | F | F | F | F | F |
+| P16 | 4330 | 6 | 31 | 762086 | S | S | S | S | S | S | S |
+| P17 | 4388 | 117 | 142 | 772405 | S | F | F | S | F | S | S |
+| P18 | 4434 | 15 | 40 | 780399 | F | F | F | F | F | F | F |
+| P19 | 4456 | 152 | 177 | 784408 | S | S | S | S | S | S | S |
+| P20 | 4503 | 137 | 162 | 792665 | F | S | S | F | F | S | S |
+| P21 | 4504 | 95 | 120 | 792799 | S | S | S | S | S | S | S |
+| P22 | 5003 | 76 | 101 | 880604 | S | S | S | S | S | S | S |
+| P23 | 5132 | 29 | 54 | 903261 | F | S | S | F | F | F | S |
+| P24 | 5264 | 117 | 142 | 926581 | S | F | S | S | S | S | F |
+| P25 | 5454 | 39 | 64 | 959943 | F | F | F | F | F | F | S |
+| P26 | 5545 | 139 | 164 | 976059 | S | F | S | S | S | S | S |
+| P27 | 6316 | 106 | 131 | 1111722 | S | F | F | F | F | F | F |
+| P28 | 6438 | 98 | 123 | 1133186 | F | F | F | F | F | F | F |
+| P29 | 6545 | 94 | 119 | 1152014 | S | S | S | S | S | S | S |
+| P30 | 6779 | 32 | 57 | 1193136 | S | F | S | S | S | S | S |
+| P31 | 6973 | 89 | 114 | 1227337 | S | S | S | S | S | S | S |
+| P32 | 7005 | 34 | 59 | 1232914 | F | F | S | F | F | F | F |
+| P33 | 7174 | 110 | 135 | 1262734 | S | S | F | S | S | S | S |
+| P34 | 7357 | 64 | 89 | 1294896 | S | S | S | S | S | S | F |
+| P35 | 7580 | 147 | 172 | 1334227 | S | S | S | S | F | S | S |
+| P36 | 7611 | 41 | 66 | 1339577 | S | S | S | S | S | S | S |
+| P37 | 7739 | 60 | 85 | 1362124 | S | S | F | S | S | S | S |
+| P38 | 7783 | 146 | 171 | 1369954 | S | S | F | S | S | S | S |
+| P39 | 7815 | 98 | 123 | 1375538 | F | F | F | F | F | F | F |
+| P40 | 7860 | 85 | 110 | 1383445 | S | S | S | S | S | S | S |
+| P41 | 8227 | 89 | 114 | 1448041 | S | S | S | S | S | S | S |
+| P42 | 8276 | 44 | 69 | 1456620 | S | F | S | S | F | S | S |
+| P43 | 8397 | 58 | 83 | 1477930 | S | F | S | S | S | S | S |
+| P44 | 8582 | 148 | 173 | 1510580 | S | S | S | S | S | S | S |
+| P45 | 8585 | 133 | 158 | 1511093 | S | S | S | S | F | S | S |
+| P46 | 8878 | 143 | 168 | 1562671 | S | S | F | S | S | S | S |
+| P47 | 8931 | 34 | 59 | 1571890 | S | F | S | F | S | F | S |
+| P48 | 9267 | 89 | 114 | 1631081 | S | S | S | S | S | S | S |
+| P49 | 9706 | 167 | 192 | 1708423 | S | S | S | S | S | S | S |
+| P50 | 9756 | 1 | 26 | 1717057 | S | S | S | S | S | S | S |
+
+### 结论与下一步门控目标
+
+- C3 是 O25 单方法最高值 38/50 (76%)，但它只是对 F-only 净增加 1 个成功：新增 P01, P02, P08, P20, P23, P25，同时丢失 P10, P13, P24, P27, P34。
+- C3 与 F-only 的配对不一致数为 6 对 5，双侧 exact McNemar `p=1.0`；当前单 seed 不能据此声称统计显著优于 F。
+- F-only + C3 的 oracle 并集是 43/50 (86%)。全部替代评分的新增覆盖并集为 P01, P02, P08, P20, P23, P25, P32，所以 F + 全部方法的 oracle 为 44/50 (88%)；其中 P25 只被 C3 救回，P32 只被 F+G tail 救回。
+- 所有七种评分都失败的 pair 为 P07, P12, P15, P18, P28, P39。
+- 下一步不是把 86% 或 88% 当成真实控制成绩，而是在与正式 O25 分离的开发 pairs 上训练或校准门控器：先判断保留 F 还是切换 C3，再考虑增加 F+G tail 的第三路，以覆盖 P32 类型。门控规则和阈值锁定后，才能在未见 test pairs 与多个 planning seeds 上报告可部署结果。
+- 口径限制：一个 training seed、一个 planning seed、同一正式 50 pairs；C3 的 alpha=.10 曾在同一 O50 上探索选择。O25 与 O50 的 offset、难度和执行协议不同，不可用百分比差直接宣称跨协议提升。
+
+<!-- RESULTS_TD_O25_V1_C_C3_END -->

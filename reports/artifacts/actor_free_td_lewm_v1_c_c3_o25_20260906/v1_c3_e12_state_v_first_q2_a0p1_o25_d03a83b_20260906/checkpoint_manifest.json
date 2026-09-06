@@ -1,0 +1,14 @@
+{
+  "checkpoint": {
+    "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c3_33157d9_20260905/seed_3072/checkpoints/actor_free_td_lewm_v1_c3/c3/epoch_12.pt",
+    "sha256": "5e240053d7c33fc016ef2ff64f3a4a79706dbe10dfde347d5c5f3cd45043e5b2"
+  },
+  "expected_action_normalization_sha256": "57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723",
+  "expected_selection_file_sha256": "56546fe8725ce0e4670f308c5b325bd64ff2a792373add8c20ddbcab02da6b37",
+  "expected_selection_ranks_sha256": "72af45d4bad65a25288c5d405072d18ab5c0b4f0b67ddc970ac3f344b3c22fd9",
+  "g_first_weight": 0.1,
+  "protocol_label": "o25",
+  "purpose": "v1_c3_e12_state_v_plus_first_q2_alpha_0p1_formal_o25",
+  "schema_version": 1,
+  "score_mode": "state_v_plus_first_q2"
+}
