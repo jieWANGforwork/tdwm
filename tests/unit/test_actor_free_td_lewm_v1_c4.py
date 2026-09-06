@@ -8,9 +8,9 @@ from torch import nn
 
 from tdwm.methods.actor_free_td_lewm_v1_c4 import (
     ActorFreeTDJEPAPredictorV1C4,
-    build_two_branch_td_loss_v1_c4,
+    build_td_loss_v1_c4,
     ema_update_target_v1_c4,
-    predict_frozen_lewm_aligned_state_v1_c4,
+    predict_frozen_lewm_ghost_next_state_v1_c4,
     successor_td_target_v1_c4,
 )
 
@@ -77,16 +77,16 @@ def test_c4_predictor_interface_is_strictly_state_task_and_outputs_192() -> None
         predictor(torch.randn(2, 192), torch.randn(2, 25), torch.randn(2, 192))
 
 
-def test_frozen_f_predicts_the_same_time_as_real_c4_state_and_detaches() -> None:
+def test_frozen_f_predicts_detached_ghost_next_state_from_current_action() -> None:
     world = _frozen_world()
     state_history = torch.zeros(2, 3, 192, requires_grad=True)
     previous_actions = torch.zeros(2, 2, 25, requires_grad=True)
-    predecessor_action = torch.zeros(2, 25)
-    predecessor_action[:, 0] = torch.tensor([2.0, 3.0])
-    predecessor_action.requires_grad_()
+    current_action = torch.zeros(2, 25)
+    current_action[:, 0] = torch.tensor([2.0, 3.0])
+    current_action.requires_grad_()
 
-    prediction = predict_frozen_lewm_aligned_state_v1_c4(
-        world, state_history, previous_actions, predecessor_action
+    prediction = predict_frozen_lewm_ghost_next_state_v1_c4(
+        world, state_history, previous_actions, current_action
     )
 
     assert prediction.shape == (2, 192)
@@ -98,12 +98,12 @@ def test_frozen_f_predicts_the_same_time_as_real_c4_state_and_detaches() -> None
     assert prediction[:, 0].tolist() == [2.0, 3.0]
     assert state_history.grad is None
     assert previous_actions.grad is None
-    assert predecessor_action.grad is None
+    assert current_action.grad is None
     assert all(parameter.grad is None for parameter in world.parameters())
 
-    changed_action = predecessor_action.detach().clone()
+    changed_action = current_action.detach().clone()
     changed_action[:, 0].add_(5.0)
-    changed = predict_frozen_lewm_aligned_state_v1_c4(
+    changed = predict_frozen_lewm_ghost_next_state_v1_c4(
         world, state_history.detach(), previous_actions.detach(), changed_action
     )
     assert not torch.equal(prediction, changed)
@@ -113,13 +113,13 @@ def test_frozen_f_prediction_restores_the_latent_store_dtype() -> None:
     world = _BFloat16FrozenWorld().requires_grad_(False).eval()
     state_history = torch.randn(2, 3, 192, dtype=torch.float32)
     previous_actions = torch.randn(2, 2, 25, dtype=torch.float32)
-    predecessor_action = torch.randn(2, 25, dtype=torch.float32)
+    current_action = torch.randn(2, 25, dtype=torch.float32)
 
-    prediction = predict_frozen_lewm_aligned_state_v1_c4(
+    prediction = predict_frozen_lewm_ghost_next_state_v1_c4(
         world,
         state_history,
         previous_actions,
-        predecessor_action,
+        current_action,
     )
 
     assert prediction.dtype == state_history.dtype
@@ -127,15 +127,17 @@ def test_frozen_f_prediction_restores_the_latent_store_dtype() -> None:
     assert not prediction.requires_grad
 
 
-def test_c4_target_includes_current_once_bootstraps_next_and_masks_terminal() -> None:
+def test_c4_target_uses_real_next_once_bootstraps_ghost_and_masks_terminal() -> None:
     target = _predictor()
     target.requires_grad_(False).eval()
     with torch.no_grad():
         for parameter in target.parameters():
             parameter.zero_()
         target.output[-1].bias.fill_(4.0)
-    current = torch.stack((torch.full((192,), 2.0), torch.full((192,), 3.0)))
-    next_state = torch.stack((torch.full((192,), 7.0), torch.full((192,), 9.0)))
+    real_next = torch.stack((torch.full((192,), 2.0), torch.full((192,), 3.0)))
+    ghost_next_next = torch.stack(
+        (torch.full((192,), 7.0), torch.full((192,), 9.0))
+    )
     task = torch.ones(2, 192)
     seen: list[torch.Tensor] = []
     target.register_forward_pre_hook(
@@ -144,37 +146,47 @@ def test_c4_target_includes_current_once_bootstraps_next_and_masks_terminal() ->
 
     result = successor_td_target_v1_c4(
         target,
-        current.requires_grad_(),
-        next_state.requires_grad_(),
+        real_next.requires_grad_(),
+        ghost_next_next.requires_grad_(),
         task.requires_grad_(),
         gamma=0.5,
         terminal=torch.tensor([False, True]),
     )
 
-    assert torch.equal(seen[0], next_state.detach())
+    assert seen[0].shape == (1, 192)
+    assert torch.equal(seen[0], ghost_next_next[:1].detach())
     assert torch.equal(result[0], torch.full((192,), 4.0))
     assert torch.equal(result[1], torch.full((192,), 3.0))
     assert not result.requires_grad
-    # If current had accidentally been passed to G_bar, the recorded input and
-    # the first numerical result above would both differ.
+    # If real z_(i+1) had accidentally been passed to G_bar, the recorded input
+    # and the first numerical result above would both differ.
 
 
-def test_two_branch_loss_shares_target_masks_goal_loss_and_only_updates_online() -> None:
+def test_single_branch_loss_uses_post_action_ghosts_and_real_immediate() -> None:
     torch.manual_seed(19)
     online = _predictor()
     target = online.make_target()
-    real = torch.randn(3, 192, requires_grad=True)
-    predicted = torch.randn(3, 192, requires_grad=True)
-    next_state = torch.randn(3, 192, requires_grad=True)
+    online_ghost = torch.randn(3, 192, requires_grad=True)
+    real_next = torch.randn(3, 192, requires_grad=True)
+    target_ghost = torch.randn(3, 192, requires_grad=True)
     task = torch.randn(3, 192, requires_grad=True)
     goal_mask = torch.tensor([True, False, True])
 
-    output = build_two_branch_td_loss_v1_c4(
+    online_inputs: list[torch.Tensor] = []
+    target_inputs: list[torch.Tensor] = []
+    online.register_forward_pre_hook(
+        lambda _module, inputs: online_inputs.append(inputs[0].detach().clone())
+    )
+    target.register_forward_pre_hook(
+        lambda _module, inputs: target_inputs.append(inputs[0].detach().clone())
+    )
+
+    output = build_td_loss_v1_c4(
         online,
         target,
-        real,
-        predicted,
-        next_state,
+        online_ghost,
+        real_next,
+        target_ghost,
         task,
         goal_mask,
         gamma=0.95,
@@ -183,19 +195,23 @@ def test_two_branch_loss_shares_target_masks_goal_loss_and_only_updates_online()
     )
     output.total_loss.backward()
 
-    assert output.target.shape == output.real.prediction.shape == (3, 192)
-    assert output.predicted.prediction.shape == (3, 192)
+    assert output.target.shape == output.prediction.shape == (3, 192)
+    assert torch.equal(online_inputs[0], online_ghost.detach())
+    assert torch.equal(target_inputs[0], target_ghost[:2].detach())
     assert not output.target.requires_grad
     assert output.goal_indices.tolist() == [0, 2]
     assert torch.allclose(
-        output.real.goal_loss,
-        output.real.score_residual[[0, 2]].square().mean(),
+        output.goal_loss,
+        output.score_residual[[0, 2]].square().mean(),
     )
     assert torch.allclose(
         output.total_loss,
-        0.5 * (output.real.loss + output.predicted.loss),
+        output.vector_loss + output.goal_loss,
     )
-    assert all(value.grad is None for value in (real, predicted, next_state, task))
+    assert all(
+        value.grad is None
+        for value in (online_ghost, real_next, target_ghost, task)
+    )
     assert all(parameter.grad is None for parameter in target.parameters())
     assert any(parameter.grad is not None for parameter in online.parameters())
 
@@ -204,7 +220,7 @@ def test_random_only_batch_has_vector_td_but_zero_goal_projection() -> None:
     online = _predictor()
     target = online.make_target()
     batch = 2
-    output = build_two_branch_td_loss_v1_c4(
+    output = build_td_loss_v1_c4(
         online,
         target,
         torch.randn(batch, 192),
@@ -216,10 +232,8 @@ def test_random_only_batch_has_vector_td_but_zero_goal_projection() -> None:
     )
 
     assert output.goal_indices.numel() == 0
-    assert output.real.goal_loss.item() == 0.0
-    assert output.predicted.goal_loss.item() == 0.0
-    assert output.real.vector_loss.item() > 0.0
-    assert output.predicted.vector_loss.item() > 0.0
+    assert output.goal_loss.item() == 0.0
+    assert output.vector_loss.item() > 0.0
 
 
 def test_c4_ema_updates_target_by_decay_and_keeps_it_frozen() -> None:

@@ -55,6 +55,7 @@ class _FrozenWorld(nn.Module):
         self.encode_calls = 0
         self.predict_calls = 0
         self.predict_grad_enabled: list[bool] = []
+        self.seen_state_histories: list[torch.Tensor] = []
 
     def encode(self, _data):
         self.encode_calls += 1
@@ -65,6 +66,7 @@ class _FrozenWorld(nn.Module):
     ) -> torch.Tensor:
         self.predict_calls += 1
         self.predict_grad_enabled.append(torch.is_grad_enabled())
+        self.seen_state_histories.append(state_history.detach().clone())
         return state_history + action_embedding + self.forward_bias
 
 
@@ -98,8 +100,11 @@ def _batch(batch_size: int = 4) -> dict[str, torch.Tensor]:
     terminal = torch.tensor(
         [index == batch_size - 1 for index in range(batch_size)], dtype=torch.bool
     )
+    state = torch.randn(batch_size, 192)
+    state_history = torch.randn(batch_size, 3, 192)
+    state_history[:, -1, :] = state
     return {
-        "state": torch.randn(batch_size, 192),
+        "state": state,
         "next_state": torch.randn(batch_size, 192),
         "action": torch.randn(batch_size, 25),
         "next_action": torch.randn(batch_size, 25),
@@ -111,7 +116,7 @@ def _batch(batch_size: int = 4) -> dict[str, torch.Tensor]:
         "_tdwm_matched_goal": torch.randn(batch_size, 192),
         "c4_real_state": torch.randn(batch_size, 192),
         "c4_bootstrap_next_state": torch.randn(batch_size, 192),
-        "c4_f_state_history": torch.randn(batch_size, 3, 192),
+        "c4_f_state_history": state_history,
         "c4_f_previous_actions": torch.randn(batch_size, 2, 25),
         "c4_current_global_row": (
             torch.arange(batch_size, dtype=torch.int64) * 5 + 105
@@ -133,7 +138,15 @@ def test_c4_formal_protocol_is_v1_c_paired_and_has_no_g_action_input() -> None:
     assert 10 * 12_796 == 127_960
     assert protocol["optimizer"]["world_model_learning_rate"] == 0.0
     assert protocol["joint_objective"]["goal_projection_weight"] == 1.0
+    assert protocol["joint_objective"]["branch_combination"] == "single_online_branch"
     assert protocol["g"]["action_input"] == "none"
+    assert protocol["g"]["action_effect"] == "only_via_f_post_action_states"
+    assert protocol["time_alignment"]["online_input"] == (
+        "stop_gradient_f_of_real_z_i_a_i"
+    )
+    assert protocol["time_alignment"]["target_bootstrap_input"] == (
+        "stop_gradient_ema_g_of_f_real_z_i_plus_1_a_i_plus_1"
+    )
     assert not {
         "raw_action_dim",
         "action_dim",
@@ -165,33 +178,105 @@ def test_c4_module_freezes_all_lewm_and_optimizer_is_exactly_online_g(
     assert optimized.isdisjoint({id(parameter) for parameter in module.target_g.parameters()})
 
     captured: dict[str, torch.Tensor] = {}
+    online_inputs: list[torch.Tensor] = []
+    target_inputs: list[torch.Tensor] = []
+    module.online_g.register_forward_pre_hook(
+        lambda _module, inputs: online_inputs.append(inputs[0].detach().clone())
+    )
+    module.target_g.register_forward_pre_hook(
+        lambda _module, inputs: target_inputs.append(inputs[0].detach().clone())
+    )
     monkeypatch.setattr(
         module,
         "log_dict",
         lambda values, **_kwargs: captured.update(values),
     )
-    loss = module._forward_loss(_batch(), "train")
+    batch = _batch()
+    loss = module._forward_loss(batch, "train")
     loss.backward()
 
     assert torch.isfinite(loss)
     assert world.encode_calls == 0
-    assert world.predict_calls == 1
-    assert len(world.action_encoder.seen) == 1
-    assert world.action_encoder.grad_enabled == [False]
-    assert world.predict_grad_enabled == [False]
+    assert world.predict_calls == 2
+    assert len(world.action_encoder.seen) == 2
+    assert world.action_encoder.grad_enabled == [False, False]
+    assert world.predict_grad_enabled == [False, False]
     assert all(parameter.grad is None for parameter in world.parameters())
     assert all(parameter.grad is None for parameter in module.target_g.parameters())
     assert any(parameter.grad is not None for parameter in module.online_g.parameters())
-    for name in (
-        "real_vector_loss",
-        "real_goal_loss",
-        "predicted_vector_loss",
-        "predicted_goal_loss",
-        "c4_total_loss",
-    ):
+    assert len(online_inputs) == len(target_inputs) == 1
+    expected_online_ghost = batch["state"] + world.forward_bias.detach()
+    expected_online_ghost[:, :25] += batch["action"]
+    torch.testing.assert_close(online_inputs[0], expected_online_ghost)
+    expected_target_ghost = batch["next_state"][:-1] + world.forward_bias.detach()
+    expected_target_ghost[:, :25] += batch["next_action"][:-1]
+    torch.testing.assert_close(target_inputs[0], expected_target_ghost)
+    online_f_actions = world.action_encoder.seen[0].reshape(4, 3, 25)
+    target_f_actions = world.action_encoder.seen[1].reshape(3, 3, 25)
+    expected_online_f_actions = torch.cat(
+        (batch["c4_f_previous_actions"], batch["action"].unsqueeze(1)),
+        dim=1,
+    )
+    expected_target_f_actions = torch.cat(
+        (
+            batch["c4_f_previous_actions"][:-1, 1:, :],
+            batch["action"][:-1].unsqueeze(1),
+            batch["next_action"][:-1].unsqueeze(1),
+        ),
+        dim=1,
+    )
+    torch.testing.assert_close(online_f_actions, expected_online_f_actions)
+    torch.testing.assert_close(target_f_actions, expected_target_f_actions)
+    expected_target_history = torch.cat(
+        (
+            batch["c4_f_state_history"][:-1, 1:, :],
+            batch["next_state"][:-1].unsqueeze(1),
+        ),
+        dim=1,
+    )
+    torch.testing.assert_close(
+        world.seen_state_histories[0], batch["c4_f_state_history"]
+    )
+    torch.testing.assert_close(
+        world.seen_state_histories[1], expected_target_history
+    )
+    for name in ("vector_td_loss", "goal_projection_loss", "c4_total_loss"):
         assert f"train/{name}" in captured
         assert torch.isfinite(captured[f"train/{name}"])
+    assert "train/real_vector_loss" not in captured
+    assert "train/predicted_vector_loss" not in captured
     torch.testing.assert_close(captured["train/loss"], captured["train/c4_total_loss"])
+
+
+def test_c4_module_rejects_f_history_not_ending_at_online_state() -> None:
+    module, _world, _generators = _module()
+    batch = _batch()
+    batch["c4_f_state_history"][:, -1, :].add_(1.0)
+
+    with pytest.raises(RuntimeError, match="history must end at the online real state"):
+        module._forward_loss(batch, "train")
+
+
+def test_c4_terminal_batch_skips_second_f_and_ema_g_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, world, _generators = _module()
+    batch = _batch()
+    batch["terminal"].fill_(True)
+    batch["c4_terminal"].fill_(True)
+    target_inputs: list[torch.Tensor] = []
+    module.target_g.register_forward_pre_hook(
+        lambda _module, inputs: target_inputs.append(inputs[0].detach().clone())
+    )
+    monkeypatch.setattr(module, "log_dict", lambda *_args, **_kwargs: None)
+
+    loss = module._forward_loss(batch, "train")
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert world.predict_calls == 1
+    assert len(world.action_encoder.seen) == 1
+    assert target_inputs == []
 
 
 def test_c4_module_rejects_terminal_mapping_drift() -> None:

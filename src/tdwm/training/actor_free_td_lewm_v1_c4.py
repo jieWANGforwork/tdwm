@@ -2,9 +2,10 @@
 
 C4 is a separate ablation from V1-C.  It loads the same completed LeWM
 checkpoint and the same immutable latent store, freezes every LeWM parameter,
-and optimizes only one online state/task successor.  A frozen EMA copy supplies
-the shared TD target for aligned real-state and frozen-F-predicted-state
-branches.
+and optimizes only one online state/task successor on post-action ghost states.
+Frozen LeWM predictions supply both the online post-action state and the next
+post-action state used by the frozen EMA bootstrap; the immediate TD feature
+is the real encoder state after the current action.
 """
 
 from __future__ import annotations
@@ -31,9 +32,9 @@ from tdwm.methods.actor_free_td_lewm_v1 import (
 )
 from tdwm.methods.actor_free_td_lewm_v1_c4 import (
     ActorFreeTDJEPAPredictorV1C4,
-    build_two_branch_td_loss_v1_c4,
+    build_td_loss_v1_c4,
     ema_update_target_v1_c4,
-    predict_frozen_lewm_aligned_state_v1_c4,
+    predict_frozen_lewm_ghost_next_state_v1_c4,
 )
 from tdwm.training.cube_data import validate_cube_training_dataset
 from tdwm.training.frozen_actor_free_td import (
@@ -72,7 +73,7 @@ METHOD = "actor_free_td_lewm_v1_c4"
 METHOD_FAMILY = "actor_free_td_lewm_v1"
 VARIANT = "c4"
 IMPLEMENTATION_VERSION = "v1"
-OBJECTIVE_VERSION = 0
+OBJECTIVE_VERSION = 1
 DEPLOYMENT_CHECKPOINT_VERSION = 1
 FORMAL_EPOCHS = 10
 FORMAL_STEPS_PER_EPOCH = 12_796
@@ -188,7 +189,7 @@ def validate_actor_free_td_lewm_v1_c4_training_protocol(
             "embedding_layers": 2,
             "num_parallel": 1,
             "action_input": "none",
-            "action_effect": "only_via_f_predicted_state",
+            "action_effect": "only_via_f_post_action_states",
             "goal_conditioning": "task_input",
             "successor_semantics": "includes_current_input_state",
             "actor": "none",
@@ -222,14 +223,16 @@ def validate_actor_free_td_lewm_v1_c4_training_protocol(
     _require_exact(
         protocol.get("time_alignment", {}),
         {
-            "replay_anchor": "z_i_minus_1",
-            "real_online_input": "real_z_i",
-            "predicted_online_input": "stop_gradient_f_of_z_i_minus_1_a_i_minus_1",
-            "shared_target_current_feature": "real_z_i",
-            "shared_target_bootstrap_input": "real_z_i_plus_1",
-            "terminal_semantics": "d_i_true_when_real_z_i_is_terminal",
-            "terminal_target": "y_i_equals_z_i",
+            "replay_anchor": "z_i",
+            "online_input": "stop_gradient_f_of_real_z_i_a_i",
+            "target_current_feature": "real_z_i_plus_1",
+            "target_bootstrap_input": (
+                "stop_gradient_ema_g_of_f_real_z_i_plus_1_a_i_plus_1"
+            ),
+            "terminal_semantics": "d_i_true_when_transition_after_a_i_terminates",
+            "terminal_target": "y_i_equals_real_z_i_plus_1",
             "f_history_states": 3,
+            "f_output_role": "online_and_ema_bootstrap_post_action_states",
             "f_output_gradient": "stop_gradient",
         },
         label="time_alignment",
@@ -238,13 +241,13 @@ def validate_actor_free_td_lewm_v1_c4_training_protocol(
     _require_exact(
         objective,
         {
-            "objective": "equal_real_predicted_state_only_goal_projected_td",
-            "vector_td_population": "all_transitions_both_branches",
+            "objective": "single_post_action_ghost_goal_projected_td",
+            "vector_td_population": "all_transitions_single_online_branch",
             "vector_reduction": "mean_of_squared_l2_norm",
             "goal_subset": "goal_derived_tasks_only",
             "goal_projection_weight": 1.0,
-            "goal_projection_target": "detached_shared_td_target_projection",
-            "branch_combination": "one_half_real_plus_predicted",
+            "goal_projection_target": "detached_real_immediate_ghost_bootstrap_projection",
+            "branch_combination": "single_online_branch",
             "target_gradient": "stop_gradient",
             "trainable_modules": ["online_g_c4"],
             "frozen_modules": [
@@ -438,17 +441,24 @@ def _build_v1_c4_training_module(
             return value
 
         def _forward_loss(self, batch: dict[str, Any], stage: str) -> torch.Tensor:
-            real_state = self._finite_batch_vector(
-                batch, "c4_real_state", V1_STATE_DIM
+            current_state = self._finite_batch_vector(
+                batch, "state", V1_STATE_DIM
             )
-            next_state = self._finite_batch_vector(
-                batch, "c4_bootstrap_next_state", V1_STATE_DIM
-            )
-            predecessor_action = self._finite_batch_vector(
+            current_action = self._finite_batch_vector(
                 batch, "action", V1_RAW_ACTION_DIM
             )
-            batch_size = int(real_state.shape[0])
-            if next_state.shape[0] != batch_size or predecessor_action.shape[0] != batch_size:
+            real_next_state = self._finite_batch_vector(
+                batch, "next_state", V1_STATE_DIM
+            )
+            next_action = self._finite_batch_vector(
+                batch, "next_action", V1_RAW_ACTION_DIM
+            )
+            batch_size = int(current_state.shape[0])
+            if (
+                current_action.shape[0] != batch_size
+                or real_next_state.shape[0] != batch_size
+                or next_action.shape[0] != batch_size
+            ):
                 raise RuntimeError("V1-C4 transition fields have different batch sizes.")
             state_history = batch.get("c4_f_state_history")
             previous_actions = batch.get("c4_f_previous_actions")
@@ -466,6 +476,12 @@ def _build_v1_c4_training_module(
                 or not bool(torch.isfinite(previous_actions).all())
             ):
                 raise RuntimeError("V1-C4 F action history must be [B,2,25].")
+            state_history = state_history.to(current_state)
+            previous_actions = previous_actions.to(current_state)
+            if not torch.equal(state_history[:, -1, :], current_state):
+                raise RuntimeError(
+                    "V1-C4 frozen F history must end at the online real state z_i."
+                )
             terminal = batch.get("c4_terminal")
             if (
                 not isinstance(terminal, torch.Tensor)
@@ -481,7 +497,7 @@ def _build_v1_c4_training_module(
                 or not torch.equal(base_terminal, terminal)
             ):
                 raise RuntimeError(
-                    "V1-C4 terminal mapping must equal the base next-state terminal."
+                    "V1-C4 terminal mapping must equal the base transition terminal."
                 )
             rows = batch.get("global_row")
             ends = batch.get("goal_future_end_row")
@@ -501,7 +517,7 @@ def _build_v1_c4_training_module(
                     or matched_goals.shape != (batch_size, V1_STATE_DIM)
                 ):
                     raise RuntimeError("V1-C4 requires real matched goal latents.")
-                matched_goals = matched_goals.to(real_state)
+                matched_goals = matched_goals.to(current_state)
             else:
                 matched_goals = sample_reachable_future_latents_v1(
                     self.latent_store,
@@ -512,8 +528,8 @@ def _build_v1_c4_training_module(
                         if stage == "train"
                         else self.validation_goal_generator
                     ),
-                    device=real_state.device,
-                ).latents.to(dtype=real_state.dtype)
+                    device=current_state.device,
+                ).latents.to(dtype=current_state.dtype)
             mixed = sample_mixed_tasks_v1(
                 matched_goals,
                 goal_probability=float(
@@ -525,22 +541,57 @@ def _build_v1_c4_training_module(
                     else self.validation_task_generator
                 ),
             )
-            task = mixed.task.to(real_state)
-            goal_mask = mixed.goal_mask.to(device=real_state.device)
-            predicted_state = predict_frozen_lewm_aligned_state_v1_c4(
+            task = mixed.task.to(current_state)
+            goal_mask = mixed.goal_mask.to(device=current_state.device)
+            online_ghost_next_state = predict_frozen_lewm_ghost_next_state_v1_c4(
                 self.model,
-                state_history.to(real_state),
-                previous_actions.to(real_state),
-                predecessor_action,
+                state_history,
+                previous_actions,
+                current_action,
             )
-            if predicted_state.requires_grad or predicted_state.grad_fn is not None:
-                raise RuntimeError("V1-C4 frozen F output must be fully detached.")
-            output = build_two_branch_td_loss_v1_c4(
+            if (
+                online_ghost_next_state.requires_grad
+                or online_ghost_next_state.grad_fn is not None
+            ):
+                raise RuntimeError("V1-C4 online F ghost must be fully detached.")
+
+            # Shift the exact real history by one step so the second frozen-F
+            # call starts from real z_(i+1) and consumes logged a_(i+1).  A
+            # terminal transition has no legal continuation; neither F nor
+            # EMA G is evaluated for those indices.
+            target_ghost_next_next_state = real_next_state.detach().clone()
+            continuation_indices = torch.nonzero(
+                ~terminal, as_tuple=False
+            ).flatten()
+            if continuation_indices.numel():
+                next_state_history = torch.cat(
+                    (state_history[:, 1:, :], real_next_state.unsqueeze(1)),
+                    dim=1,
+                ).index_select(0, continuation_indices)
+                next_previous_actions = torch.cat(
+                    (previous_actions[:, 1:, :], current_action.unsqueeze(1)),
+                    dim=1,
+                ).index_select(0, continuation_indices)
+                continued_ghost = predict_frozen_lewm_ghost_next_state_v1_c4(
+                    self.model,
+                    next_state_history,
+                    next_previous_actions,
+                    next_action.index_select(0, continuation_indices),
+                )
+                target_ghost_next_next_state.index_copy_(
+                    0, continuation_indices, continued_ghost
+                )
+            if (
+                target_ghost_next_next_state.requires_grad
+                or target_ghost_next_next_state.grad_fn is not None
+            ):
+                raise RuntimeError("V1-C4 target F ghost must be fully detached.")
+            output = build_td_loss_v1_c4(
                 self.online_g,
                 self.target_g,
-                real_state,
-                predicted_state,
-                next_state,
+                online_ghost_next_state,
+                real_next_state,
+                target_ghost_next_next_state,
                 task,
                 goal_mask,
                 gamma=self.gamma,
@@ -552,24 +603,20 @@ def _build_v1_c4_training_module(
             loss = output.total_loss
             metrics = {
                 f"{stage}/loss": loss.detach(),
-                f"{stage}/real_vector_loss": output.real.vector_loss.detach(),
-                f"{stage}/real_goal_loss": output.real.goal_loss.detach(),
-                f"{stage}/predicted_vector_loss": (
-                    output.predicted.vector_loss.detach()
-                ),
-                f"{stage}/predicted_goal_loss": output.predicted.goal_loss.detach(),
+                f"{stage}/vector_td_loss": output.vector_loss.detach(),
+                f"{stage}/goal_projection_loss": output.goal_loss.detach(),
                 f"{stage}/c4_total_loss": loss.detach(),
                 f"{stage}/goal_task_fraction": goal_mask.float().mean(),
                 f"{stage}/random_task_fraction": (~goal_mask).float().mean(),
                 f"{stage}/terminal_fraction": terminal.float().mean(),
                 f"{stage}/td_pairs": loss.new_tensor(float(batch_size)),
-                f"{stage}/real_prediction_mean": output.real.prediction.detach().mean(),
-                f"{stage}/predicted_prediction_mean": (
-                    output.predicted.prediction.detach().mean()
-                ),
+                f"{stage}/prediction_mean": output.prediction.detach().mean(),
                 f"{stage}/td_target_mean": output.target.detach().mean(),
-                f"{stage}/f_prediction_alignment_mse": (
-                    (predicted_state.float() - real_state.detach().float())
+                f"{stage}/f_online_ghost_alignment_mse": (
+                    (
+                        online_ghost_next_state.float()
+                        - real_next_state.detach().float()
+                    )
                     .square()
                     .mean()
                 ),
@@ -1084,10 +1131,8 @@ def train_actor_free_td_lewm_v1_c4(
             "lewm_prediction_loss": False,
             "sigreg_loss": False,
             "loss_metrics": [
-                "real_vector_loss",
-                "real_goal_loss",
-                "predicted_vector_loss",
-                "predicted_goal_loss",
+                "vector_td_loss",
+                "goal_projection_loss",
                 "c4_total_loss",
             ],
         },

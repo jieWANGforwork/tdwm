@@ -1,17 +1,19 @@
 """State-only successor primitives for Actor-Free TD-LeWM V1-C4.
 
-C4 compares the action-conditioned V1-C successor with a successor that sees
-actions only through the frozen LeWM transition model.  At replay anchor
-``r = i - 1`` the two online inputs are aligned to the same macro time ``i``::
+C4 compares V1-C's action-conditioned successor with one state-only online
+successor evaluated after the logged action.  Both G inputs are frozen-LeWM
+post-action ghost states, while the immediate TD feature stays real::
 
-    x_i_real = z_i
-    x_i_pred = stop_gradient(F(z_{i-1}, a_{i-1}))
+    prediction_i = G(stop_gradient(F(z_i, a_i)), m)
+    Y_i = stop_gradient(
+        z_(i+1)_real
+        + gamma * (1 - d_i) * G_bar(stop_gradient(F(z_(i+1)_real, a_(i+1))), m)
+    )
+    L_C4 = L_vector(prediction_i, Y_i) + L_goal(prediction_i, Y_i, m)
 
-Both branches share the real, current-state-including TD target::
-
-    Y_i = stop_gradient(z_i + gamma * (1 - d_i) * G_bar(z_{i+1}, m)).
-
-Neither the online nor EMA C4 successor accepts an action argument.
+There is one online branch and no online call on a real state.  Neither the
+online nor EMA C4 successor accepts an action argument, and every LeWM output
+is detached.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from tdwm.methods.actor_free_td_lewm_v1 import (
     V1_TASK_DIM,
     encode_frozen_action_blocks_v1,
 )
+from tdwm.methods.actor_free_td_lewm_v1_objectives import goal_projected_v1_loss
 
 C4_OUTPUT_DIM = V1_STATE_DIM
 C4_F_HISTORY_STATES = 3
@@ -114,8 +117,8 @@ class ActorFreeTDJEPAPredictorV1C4(nn.Module):
         self.hidden_layers = int(hidden_layers)
         self.embedding_layers = int(embedding_layers)
 
-        # Match V1-C's two-branch capacity while replacing its state/action
-        # branch with a strictly state-only branch.
+        # Match V1-C's two embedding-path capacity while replacing its
+        # state/action path with a strictly state-only path.
         self.embed_state_task = _simple_embedding(
             V1_STATE_DIM + V1_TASK_DIM,
             self.hidden_dim,
@@ -211,19 +214,18 @@ def _validate_frozen_world_model(world_model: Any) -> nn.Module:
     return action_encoder
 
 
-def predict_frozen_lewm_aligned_state_v1_c4(
+def predict_frozen_lewm_ghost_next_state_v1_c4(
     world_model: Any,
     state_history: torch.Tensor,
     previous_raw_actions: torch.Tensor,
-    predecessor_raw_action: torch.Tensor,
+    current_raw_action: torch.Tensor,
 ) -> torch.Tensor:
-    """Predict ``z_i`` from the frozen LeWM history ending at ``i-1``.
+    """Predict the detached ghost ``z_(i+1)`` from history ending at ``z_i``.
 
-    ``state_history`` is ``[z_(i-3), z_(i-2), z_(i-1)]`` and
+    ``state_history`` is ``[z_(i-2), z_(i-1), z_i]`` and
     ``previous_raw_actions`` contains the first two corresponding macro-action
-    blocks.  ``predecessor_raw_action`` is ``a_(i-1)``.  LeWM predicts a shifted
-    three-state sequence; its final element is therefore the prediction at the
-    same time as the C4 real input ``z_i``.
+    blocks.  ``current_raw_action`` is ``a_i``.  LeWM predicts a shifted
+    three-state sequence; its final element is therefore the ghost next state.
     """
 
     action_encoder = _validate_frozen_world_model(world_model)
@@ -244,25 +246,25 @@ def predict_frozen_lewm_aligned_state_v1_c4(
     ):
         raise ValueError("previous_raw_actions must have shape [batch, 2, 25].")
     _validate_floating_vector(
-        "predecessor_raw_action",
-        predecessor_raw_action,
+        "current_raw_action",
+        current_raw_action,
         final_dim=V1_RAW_ACTION_DIM,
     )
     batch = state_history.shape[0]
-    if previous_raw_actions.shape[0] != batch or predecessor_raw_action.shape != (
+    if previous_raw_actions.shape[0] != batch or current_raw_action.shape != (
         batch,
         V1_RAW_ACTION_DIM,
     ):
-        raise ValueError("C4 frozen-F histories must share one batch axis.")
+        raise ValueError("C4 ghost-state inputs must share one batch axis.")
     for name, value in (
         ("previous_raw_actions", previous_raw_actions),
-        ("predecessor_raw_action", predecessor_raw_action),
+        ("current_raw_action", current_raw_action),
     ):
         if value.device != state_history.device or value.dtype != state_history.dtype:
             raise ValueError(f"{name} must match state_history device and dtype.")
 
     raw_actions = torch.cat(
-        (previous_raw_actions.detach(), predecessor_raw_action.detach().unsqueeze(1)),
+        (previous_raw_actions.detach(), current_raw_action.detach().unsqueeze(1)),
         dim=1,
     )
     action_embeddings = encode_frozen_action_blocks_v1(
@@ -285,10 +287,8 @@ def predict_frozen_lewm_aligned_state_v1_c4(
     if not bool(torch.isfinite(predicted_sequence).all()):
         raise FloatingPointError("frozen LeWM produced a non-finite C4 state.")
     # Lightning's bf16 autocast may make the frozen LeWM prediction bfloat16
-    # even though the immutable latent store is float32.  C4 treats both
-    # online branches as two views of the same latent space, so restore the
-    # frozen prediction to the cache tensor's exact device/dtype before the
-    # shared loss validates and consumes it.
+    # even though the immutable latent store is float32.  Restore the ghost to
+    # that latent space before the EMA bootstrap validates and consumes it.
     return predicted_sequence[:, -1, :].to(
         device=state_history.device,
         dtype=state_history.dtype,
@@ -297,14 +297,14 @@ def predict_frozen_lewm_aligned_state_v1_c4(
 
 def successor_td_target_v1_c4(
     target: ActorFreeTDJEPAPredictorV1C4,
-    current_state: torch.Tensor,
-    next_state: torch.Tensor,
+    immediate_next_state: torch.Tensor,
+    ghost_next_next_state: torch.Tensor,
     task: torch.Tensor,
     *,
     gamma: float,
     terminal: torch.Tensor | bool = False,
 ) -> torch.Tensor:
-    """Build detached ``z_i + gamma*(1-d_i)*G_bar(z_(i+1),m)``."""
+    """Build detached ``z_(i+1)^real + gamma*(1-d_i)*G_bar(z_(i+2)^F,m)``."""
 
     if not isinstance(target, ActorFreeTDJEPAPredictorV1C4):
         raise TypeError("target must be ActorFreeTDJEPAPredictorV1C4.")
@@ -313,25 +313,50 @@ def successor_td_target_v1_c4(
     gamma_value = float(gamma)
     if not math.isfinite(gamma_value) or not 0.0 <= gamma_value <= 1.0:
         raise ValueError("gamma must be finite and lie in [0, 1].")
-    _validate_floating_vector("current_state", current_state, final_dim=V1_STATE_DIM)
-    _validate_floating_vector("next_state", next_state, final_dim=V1_STATE_DIM)
+    _validate_floating_vector(
+        "immediate_next_state", immediate_next_state, final_dim=V1_STATE_DIM
+    )
+    _validate_floating_vector(
+        "ghost_next_next_state", ghost_next_next_state, final_dim=V1_STATE_DIM
+    )
     _validate_floating_vector("task", task, final_dim=V1_TASK_DIM)
-    for name, value in (("next_state", next_state), ("task", task)):
-        _require_same_context("current_state", current_state, name, value)
+    for name, value in (
+        ("ghost_next_next_state", ghost_next_next_state),
+        ("task", task),
+    ):
+        _require_same_context(
+            "immediate_next_state", immediate_next_state, name, value
+        )
     terminal_bool = _normalize_terminal(
         terminal,
-        leading_shape=current_state.shape[:-1],
-        device=current_state.device,
+        leading_shape=immediate_next_state.shape[:-1],
+        device=immediate_next_state.device,
     )
     with torch.no_grad():
-        bootstrap = target(next_state.detach(), task.detach()).float()
-        continuation = (~terminal_bool).to(dtype=torch.float32).unsqueeze(-1)
-        result = current_state.detach().float() + gamma_value * continuation * bootstrap
-    return result.detach()
+        flat_immediate = immediate_next_state.detach().float().reshape(
+            -1, V1_STATE_DIM
+        )
+        flat_ghost = ghost_next_next_state.detach().reshape(-1, V1_STATE_DIM)
+        flat_task = task.detach().reshape(-1, V1_TASK_DIM)
+        flat_terminal = terminal_bool.reshape(-1)
+        result = flat_immediate.clone()
+        continuation_indices = torch.nonzero(
+            ~flat_terminal, as_tuple=False
+        ).flatten()
+        if continuation_indices.numel():
+            bootstrap = target(
+                flat_ghost.index_select(0, continuation_indices),
+                flat_task.index_select(0, continuation_indices),
+            ).float()
+            continued = flat_immediate.index_select(0, continuation_indices)
+            continued = continued + gamma_value * bootstrap
+            result.index_copy_(0, continuation_indices, continued)
+    return result.reshape_as(immediate_next_state).detach()
 
 
 @dataclass(frozen=True)
-class C4BranchLoss:
+class C4TDOutput:
+    target: torch.Tensor
     prediction: torch.Tensor
     per_transition_vector_loss: torch.Tensor
     vector_loss: torch.Tensor
@@ -339,59 +364,17 @@ class C4BranchLoss:
     target_score: torch.Tensor
     score_residual: torch.Tensor
     goal_loss: torch.Tensor
-    loss: torch.Tensor
-
-
-@dataclass(frozen=True)
-class C4TDOutput:
-    target: torch.Tensor
-    real: C4BranchLoss
-    predicted: C4BranchLoss
     total_loss: torch.Tensor
     goal_indices: torch.Tensor
     terminal: torch.Tensor
 
 
-def _branch_loss(
-    prediction: torch.Tensor,
-    target: torch.Tensor,
-    task: torch.Tensor,
-    goal_indices: torch.Tensor,
-    *,
-    goal_projection_weight: float,
-) -> C4BranchLoss:
-    per_vector = (prediction.float() - target.float()).square().sum(dim=-1)
-    vector_loss = per_vector.mean()
-    detached_task = task.detach().float()
-    prediction_score = (prediction.float() * detached_task).sum(dim=-1)
-    with torch.no_grad():
-        target_score = (target.detach().float() * detached_task).sum(dim=-1)
-    residual = prediction_score - target_score
-    if goal_indices.numel():
-        goal_loss = residual.index_select(0, goal_indices).square().mean()
-    else:
-        goal_loss = prediction_score.sum() * 0.0
-    loss = vector_loss + float(goal_projection_weight) * goal_loss
-    if not bool(torch.isfinite(loss.detach())):
-        raise FloatingPointError("C4 branch loss became non-finite.")
-    return C4BranchLoss(
-        prediction=prediction,
-        per_transition_vector_loss=per_vector,
-        vector_loss=vector_loss,
-        prediction_score=prediction_score,
-        target_score=target_score,
-        score_residual=residual,
-        goal_loss=goal_loss,
-        loss=loss,
-    )
-
-
-def build_two_branch_td_loss_v1_c4(
+def build_td_loss_v1_c4(
     online: ActorFreeTDJEPAPredictorV1C4,
     target: ActorFreeTDJEPAPredictorV1C4,
-    real_state: torch.Tensor,
-    predicted_state: torch.Tensor,
-    next_state: torch.Tensor,
+    online_ghost_next_state: torch.Tensor,
+    immediate_next_state: torch.Tensor,
+    target_ghost_next_next_state: torch.Tensor,
     task: torch.Tensor,
     goal_mask: torch.Tensor,
     *,
@@ -399,71 +382,83 @@ def build_two_branch_td_loss_v1_c4(
     terminal: torch.Tensor | bool = False,
     goal_projection_weight: float = 1.0,
 ) -> C4TDOutput:
-    """Compute the predeclared equal-weight real/predicted C4 objective."""
+    """Compute C4's one post-action online branch and ghost EMA bootstrap."""
 
     _validate_predictor_pair(online, target)
-    _validate_floating_vector("real_state", real_state, final_dim=V1_STATE_DIM)
     _validate_floating_vector(
-        "predicted_state", predicted_state, final_dim=V1_STATE_DIM
+        "online_ghost_next_state", online_ghost_next_state, final_dim=V1_STATE_DIM
     )
-    _validate_floating_vector("next_state", next_state, final_dim=V1_STATE_DIM)
+    _validate_floating_vector(
+        "immediate_next_state", immediate_next_state, final_dim=V1_STATE_DIM
+    )
+    _validate_floating_vector(
+        "target_ghost_next_next_state",
+        target_ghost_next_next_state,
+        final_dim=V1_STATE_DIM,
+    )
     _validate_floating_vector("task", task, final_dim=V1_TASK_DIM)
     for name, value in (
-        ("predicted_state", predicted_state),
-        ("next_state", next_state),
+        ("immediate_next_state", immediate_next_state),
+        ("target_ghost_next_next_state", target_ghost_next_next_state),
         ("task", task),
     ):
-        _require_same_context("real_state", real_state, name, value)
-    if real_state.ndim != 2:
+        _require_same_context(
+            "online_ghost_next_state", online_ghost_next_state, name, value
+        )
+    if online_ghost_next_state.ndim != 2:
         raise ValueError("C4 training states must have shape [batch, 192].")
     if not isinstance(goal_mask, torch.Tensor) or goal_mask.dtype != torch.bool:
         raise TypeError("goal_mask must be a boolean torch.Tensor.")
-    if goal_mask.shape != real_state.shape[:-1] or goal_mask.device != real_state.device:
+    if (
+        goal_mask.shape != online_ghost_next_state.shape[:-1]
+        or goal_mask.device != online_ghost_next_state.device
+    ):
         raise ValueError("goal_mask must be an aligned [batch] tensor.")
     coefficient = float(goal_projection_weight)
     if not math.isfinite(coefficient) or coefficient < 0.0:
         raise ValueError("goal_projection_weight must be finite and non-negative.")
     terminal_bool = _normalize_terminal(
         terminal,
-        leading_shape=real_state.shape[:-1],
-        device=real_state.device,
+        leading_shape=online_ghost_next_state.shape[:-1],
+        device=online_ghost_next_state.device,
     )
-    frozen_real = real_state.detach()
-    frozen_predicted = predicted_state.detach()
-    frozen_next = next_state.detach()
+    frozen_online_ghost = online_ghost_next_state.detach()
+    frozen_immediate = immediate_next_state.detach()
+    frozen_target_ghost = target_ghost_next_next_state.detach()
     frozen_task = task.detach()
-    shared_target = successor_td_target_v1_c4(
+    td_target = successor_td_target_v1_c4(
         target,
-        frozen_real,
-        frozen_next,
+        frozen_immediate,
+        frozen_target_ghost,
         frozen_task,
         gamma=gamma,
         terminal=terminal_bool,
     )
-    real_prediction = online(frozen_real, frozen_task)
-    predicted_prediction = online(frozen_predicted, frozen_task)
-    goal_indices = torch.nonzero(goal_mask, as_tuple=False).flatten()
-    real_output = _branch_loss(
-        real_prediction,
-        shared_target,
+    prediction = online(frozen_online_ghost, frozen_task)
+    per_transition = (
+        prediction.float() - td_target.float()
+    ).square().sum(dim=-1)
+    objective = goal_projected_v1_loss(
+        prediction,
+        td_target,
         frozen_task,
-        goal_indices,
-        goal_projection_weight=coefficient,
+        goal_mask,
+        per_transition,
+        projection_coefficient=coefficient,
     )
-    predicted_output = _branch_loss(
-        predicted_prediction,
-        shared_target,
-        frozen_task,
-        goal_indices,
-        goal_projection_weight=coefficient,
-    )
-    total = 0.5 * (real_output.loss + predicted_output.loss)
+    if not bool(torch.isfinite(objective.loss.detach())):
+        raise FloatingPointError("C4 TD loss became non-finite.")
     return C4TDOutput(
-        target=shared_target,
-        real=real_output,
-        predicted=predicted_output,
-        total_loss=total,
-        goal_indices=goal_indices,
+        target=td_target,
+        prediction=prediction,
+        per_transition_vector_loss=objective.per_transition_td_loss,
+        vector_loss=objective.base_td_loss,
+        prediction_score=objective.prediction_score,
+        target_score=objective.target_score,
+        score_residual=objective.score_residual,
+        goal_loss=objective.projection_loss,
+        total_loss=objective.loss,
+        goal_indices=objective.goal_indices,
         terminal=terminal_bool,
     )
 
@@ -499,13 +494,12 @@ def ema_update_target_v1_c4(
 
 __all__ = [
     "ActorFreeTDJEPAPredictorV1C4",
-    "C4BranchLoss",
     "C4TDOutput",
     "C4_F_HISTORY_STATES",
     "C4_F_PREVIOUS_ACTIONS",
     "C4_OUTPUT_DIM",
-    "build_two_branch_td_loss_v1_c4",
+    "build_td_loss_v1_c4",
     "ema_update_target_v1_c4",
-    "predict_frozen_lewm_aligned_state_v1_c4",
+    "predict_frozen_lewm_ghost_next_state_v1_c4",
     "successor_td_target_v1_c4",
 ]
