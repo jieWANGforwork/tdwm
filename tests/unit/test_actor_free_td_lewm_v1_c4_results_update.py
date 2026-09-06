@@ -25,6 +25,10 @@ from tdwm.results.actor_free_td_lewm_v1_c4 import (
     validate_summary,
 )
 
+_PRE_C4_FIXTURE_DIR = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "actor_free_td_lewm_v1_c4"
+)
+
 
 def _paired(reference: list[bool], candidate: list[bool], *, f_plus: bool) -> dict:
     both_success = sum(left and right for left, right in zip(reference, candidate))
@@ -358,7 +362,7 @@ def test_load_report_evidence_binds_checkpoint_and_optional_png(tmp_path: Path) 
 
 
 def test_markdown_update_keeps_one_master_table_and_adds_paired_c4_matrices() -> None:
-    report = Path(__file__).resolve().parents[2] / "reports" / "actor_free_td_lewm_complete_cube_seed3072.md"
+    report = _PRE_C4_FIXTURE_DIR / "results_td_before_c4.md"
     updated = update_markdown_text(report.read_text(encoding="utf-8"), _evidence(_summary()))
     assert "## 27 个训练方法 × 7 种评分" in updated
     assert updated.count("| V1 | C4 |") == 1
@@ -407,7 +411,7 @@ def test_summary_validation_does_not_mutate_input() -> None:
 
 
 def test_markdown_recomputes_v1_fixed_markers_and_winner_row() -> None:
-    report = Path(__file__).resolve().parents[2] / "reports" / "actor_free_td_lewm_complete_cube_seed3072.md"
+    report = _PRE_C4_FIXTURE_DIR / "results_td_before_c4.md"
     summary = _summary()
     summary["protocols"]["o50"]["methods"]["c4"]["scores"]["f_only"][
         "success_count"
@@ -434,7 +438,7 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
     from docx.oxml.ns import qn
 
     repository = Path(__file__).resolve().parents[2]
-    source = repository / "reports" / "results_td_actor_free_td_lewm_complete_cube_seed3072.docx"
+    source = _PRE_C4_FIXTURE_DIR / "results_td_before_c4.docx"
     document = docx.Document(source)
 
     update_docx_document(document, _evidence(_summary()), repository)

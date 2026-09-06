@@ -1,6 +1,6 @@
 # Results TD — 全部 Actor-Free TD-LeWM 实验总账（Cube seed 3072）
 
-本报告在同一份总账中保留 **477 个已核验 O50 基础单元、8 个 V1-C2/C3 严格 endpoint 单元，以及 20 个 First-Q 权重扫描单元，以及 6 个 V1-C4 O50 单元，共 511 格、25,550 个逐-pair outcome**。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。
+本报告在同一份总账中保留 **477 个已核验 O50 基础单元、8 个 V1-C2/C3 严格 endpoint 单元，以及 20 个 First-Q 权重扫描单元，共 505 格、25,250 个逐-pair outcome**。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。
 
 ## 一句话结论
 
@@ -8,8 +8,8 @@
 - **所有固定 E10 单格的最高结果为 V1-C + F + first-Q: 28/50 (56%)。**
 - **把 20 个权重扫描单元并入主表后，最高观察值为 V1-C3 Z-score First-Q2、alpha=0.1：31/50 (62%)。** 该 alpha 在同一 O50 上选择，因此只作为探索性结果，不替代固定 endpoint。
 - **按四版本、24 个训练配置的固定 E10 均值，描述性领先测试评分为 F + first-Q（44.8%）。** 单 seed 下不把它表述为统计稳健最优。
-- **在原 477 格基础账的 24 个训练配置内，若把五种评分等权平均，描述性领先训练配置为 V1-F, V1-G3（并列 48.8%）。** C4 作为独立正式扩展在文末按相同 O50 评分逐格报告。
-- **在原 477 格基础账的六方法 × 五评分版本均值中，V1 action encoder 最高（47.3%）。** C4 不回填改写该历史聚合口径。
+- **若把五种评分等权平均，描述性领先训练配置为 V1-F, V1-G3（并列 48.8%）。**
+- **按六个训练方法 × 五种评分的版本均值，V1 action encoder 最高（47.3%）。**
 - V1→V2 联合微调后，F-only 均值由 46.0% 变为 26.0%（-20.0 pp），F+G 由 47.7% 变为 27.3%（-20.3 pp）；这首先提示 world-model/control representation 变化，而不只是 G 的读出形式。
 
 ## 完整全账伴随文件
@@ -21,7 +21,7 @@
 | First-Q alpha scalar ledger | 20 个 O50 单元 | `reports/artifacts/actor_free_td_lewm_first_q_alpha_sweep_023e8f8_20260906/alpha_sweep_results.csv` | `ce6c7e99a1acbce2148fb26f14e824ddb08455672e22e694c58717e30b97f848` |
 | First-Q alpha validation ledger | 20 格 × 50 outcomes = 1,000 | `reports/artifacts/actor_free_td_lewm_first_q_alpha_sweep_023e8f8_20260906/posthoc_validation.json` | `bbdfe687179e7edd941159d60c1105d35173ae86119ad625f88f882e3293dc9d` |
 
-原 24×5 分析固定使用 E10；477 格基础账不被改写。主表同时接入 C2/C3 的 8 个严格 endpoint 格和 20 个 alpha 扫描格，再加入 V1-C4 的 6 个正式 O50 单元后，当前 O50 总覆盖为 511 格、25,550 个逐-pair 布尔结果。
+原 24×5 分析固定使用 E10；477 格基础账不被改写。主表同时接入 C2/C3 的 8 个严格 endpoint 格和 20 个 alpha 扫描格，所以当前文档总覆盖为 505 格、25,250 个逐-pair 布尔结果。
 
 ## 结果覆盖与版本定义
 
@@ -34,8 +34,7 @@
 | V2-EMA-SG | 6 | E3-E10 | all five scores | 240 |
 | V1-C2/C3 endpoint extension | 2 | C2 E10 / C3 E12 | First-Q2 + State-V integrated into seven-column matrix | 8 |
 | First-Q alpha sweep | V1-C / V1-C3 | C E10 / C3 E12 | 5 original First-Q + 5 C3 Raw First-Q + 10 C3 Z-score First-Q2 | 20 |
-| V1-C4 formal O50 | 1 | E10 | six predeclared state-only C4 scores | 6 |
-| **TOTAL** | — | — | same locked O50 selection | **511** |
+| **TOTAL** | — | — | same locked O50 selection | **505** |
 
 ## 方法、网络和训练 loss
 
@@ -61,7 +60,6 @@ $$L_{total}=L_{pred}+0.09L_{SIGReg}+\rho(u)(L_{method}^{real}+L_{method}^{pred})
 | G3 | A_i = sg[(1/4) sum_{j=1}^4(q_i,j+1-q_ij)] | L_G3^b = mean_i[w_i(A) l_i^b] | Five prefixes; mean adjacent marginal score gain. |
 | C2 (V1 only) | Frozen-F terminal goal-cost ranking over 16 candidate action sequences | L_C2=L_C+CE(p_F,p_Q); p_F=softmax(-z_cand(J_F)), p_Q=softmax(z_cand(Q_G(z0,A1,g))) | Initialize every parameter from V1-C E10, freeze LeWM/Action Encoder, and fine-tune only G so First-Q follows the planner ranking |
 | C3 (V1 only) | Same-episode temporal distance in primitive-step units with an EMA State-V bootstrap | L_C3=E[omega_tau(r)Huber_1(r)], r=V_psi(z,g)-sg(y), tau=0.03; y=delta inside n_eff, otherwise c_gamma(n_eff)+gamma^n_eff V_bar(z_succ,g) | Freeze the complete V1-C parent, including both G copies; train only a nonnegative MRN State-V critic (gamma=0.98, n<=50 primitives) |
-| C4 (V1 only) | state-only G on aligned real z_i and stopped F-predicted z_i | L_C4=0.5[(L_vec^real+L_goal^real)+(L_vec^pred+L_goal^pred)], lambda_C=1 | Freeze encoder, Action Encoder and F; action affects G_C4 only through the F-produced state |
 
 ## 七种测试方法怎么测
 
@@ -102,9 +100,9 @@ V2-EMA 的 EMA world model、EMA Action Encoder 和 EMA G 只构造训练 target
 | Imaginary Hybrid | 24/50 (48%) | 13/50 (26%) | 23/50 (46%) |
 | Direct Goal Critic Hybrid | 22/50 (44%) | 16/50 (32%) | 19/50 (38%) |
 
-## 27 个训练方法 × 7 种评分的唯一主结果矩阵（含 20 个 alpha 扫描格）
+## 26 个训练方法 × 7 种评分的唯一主结果矩阵（含 20 个 alpha 扫描格）
 
-横向读每一行，可以同时看到训练 loss，并比较同一个训练方法已有的评分；纵向读每一列时，以版本为边界比较该版本内所有可用方法。V1-C 的 First-Q、V1-C3 的 Raw First-Q 与 Z-score First-Q2 位置直接列出本轮全部 20 个 alpha 测试结果，不再只放在后面的附表。固定 27×7 结果与探索性 alpha 扫描分别计算赢家，避免事后调参覆盖固定 endpoint 的颜色。Markdown 中 **粗体**是行最佳，`◆` 是对应比较范围内的列最佳；并列全部标记。缺失格显示 `—`；DOCX 使用黄底表示行最佳、蓝底表示列最佳、青色底表示两者同时成立。
+横向读每一行，可以同时看到训练 loss，并比较同一个训练方法已有的评分；纵向读每一列时，以版本为边界比较该版本内所有可用方法。V1-C 的 First-Q、V1-C3 的 Raw First-Q 与 Z-score First-Q2 位置直接列出本轮全部 20 个 alpha 测试结果，不再只放在后面的附表。固定 26×7 结果与探索性 alpha 扫描分别计算赢家，避免事后调参覆盖固定 endpoint 的颜色。Markdown 中 **粗体**是行最佳，`◆` 是对应比较范围内的列最佳；并列全部标记。缺失格显示 `—`；DOCX 使用黄底表示行最佳、蓝底表示列最佳、青色底表示两者同时成立。
 
 Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`；D–G3 的 `w_i(·)` 是由括号内 stop-gradient 信号形成的归一化样本权重。V0/V1 只有 real 分支；V2/V2-EMA 的总目标为 `L_pred+0.09L_SIGReg+ρ(L_method^real+L_method^pred)`。精确信号、goal 子集和权重定义见前面的“方法、网络和训练 loss”表。
 
@@ -116,10 +114,9 @@ Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`
 | V0 | G1 | L_G1=mean_i w_i(A_neighbor)l_i | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 20/50 (40%) | 20/50 (40%) | — | — |
 | V0 | G2 | L_G2=mean_i w_i(A_prefix-mean)l_i | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 23/50 (46%) | 23/50 (46%) | — | — |
 | V0 | G3 | L_G3=mean_i w_i(A_prefix-gain)l_i | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **24/50 (48%)** | **24/50 (48%)** | — | — |
-| V1 | C | L_C=mean(l)+mean_goal(q-qY)^2 | ◆ 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | α=.10 24/50 (48%)<br>◆ **α=.25 28/50 (56%)**<br>α=.50 27/50 (54%)<br>◆ **α=1 28/50 (56%)**<br>α=2 25/50 (50%) | 21/50 (42%) | ◆ 26/50 (52%) | — |
-| V1 | C2 | L_C2=L_C+CE(p_F,p_Qfirst) | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **26/50 (52%)** | 22/50 (44%) | ◆ **26/50 (52%)** | — |
+| V1 | C | L_C=mean(l)+mean_goal(q-qY)^2 | ◆ 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | α=.10 24/50 (48%)<br>◆ **α=.25 28/50 (56%)**<br>α=.50 27/50 (54%)<br>◆ **α=1 28/50 (56%)**<br>α=2 25/50 (50%) | 21/50 (42%) | 26/50 (52%) | — |
+| V1 | C2 | L_C2=L_C+CE(p_F,p_Qfirst) | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **26/50 (52%)** | 22/50 (44%) | **26/50 (52%)** | — |
 | V1 | C3 | L_C3=mean_i omega_tau(r_i)Huber_1(r_i) | — | — | — | Raw: α=.10 26/50 (52%)<br>α=.25 22/50 (44%)<br>α=.50 21/50 (42%)<br>α=1 21/50 (42%)<br>α=2 22/50 (44%) | — | Z: α=.025 25/50 (50%)<br>α=.05 28/50 (56%)<br>α=.075 27/50 (54%)<br>◆ **α=.10 31/50 (62%)**<br>α=.15 23/50 (46%)<br>α=.20 28/50 (56%)<br>α=.25 26/50 (52%)<br>α=.50 24/50 (48%)<br>α=1 24/50 (48%)<br>α=2 25/50 (50%) | ◆ 26/50 (52%) |
-| V1 | C4 | L_C4=0.5[(L_vec^r+L_goal^r)+(L_vec^p+L_goal^p)] | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **25/50 (50%)** | 21/50 (42%) | 24/50 (48%) | — |
 | V1 | D | L_D=mean_i w_i[sg(qY)]l_i | ◆ 23/50 (46%) | 22/50 (44%) | 21/50 (42%) | 25/50 (50%) | **26/50 (52%)** | — | — |
 | V1 | F | L_F=mean_i w_i(A_goal)l_i | ◆ 23/50 (46%) | ◆ 23/50 (46%) | 24/50 (48%) | **26/50 (52%)** | **26/50 (52%)** | — | — |
 | V1 | G1 | L_G1=mean_i w_i(A_neighbor)l_i | ◆ 23/50 (46%) | 21/50 (42%) | 24/50 (48%) | **26/50 (52%)** | 25/50 (50%) | — | — |
@@ -143,7 +140,7 @@ Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`
 | 版本 | F-only | G-only | F+G tail | First-Q | Mean-Q | First-Q2 | State-V |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | V0 | C/D/F/G1/G2/G3 23/50 | D 20/50 | G1/G2 25/50 | C 26/50 | D 26/50 | — | — |
-| V1 fixed | C/C2/D/F/G1/G2/G3/C4 23/50 | F 23/50 | G3 27/50 | C 28/50 | G3 27/50 | C/C2 26/50 | C3 26/50 |
+| V1 fixed | C/C2/D/F/G1/G2/G3 23/50 | F 23/50 | G3 27/50 | C 28/50 | G3 27/50 | C/C2 26/50 | C3 26/50 |
 | V1 alpha sweep | — | — | — | C α=.25/1 28/50 | — | C3 Z-score α=.10 31/50 | C3 α=0 anchor 26/50 |
 | V2 | D 16/50 | C 20/50 | C/D 16/50 | D/F 21/50 | D 24/50 | — | — |
 | V2-EMA | D/F/G1 15/50 | G2 20/50 | F 17/50 | D/F 22/50 | F 23/50 | — | — |
@@ -256,7 +253,7 @@ C3 的 validation TD loss 从 0.3203 降至 0.2940，MC MAE 从 12.750 到 12.02
 
 ### 1. 哪个训练方法最好
 
-不存在脱离测试评分定义的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 **V1-G3: 27/50 (54%)**；在原 477 格基础账的 24 个训练配置内，把五种评分等权平均，则 **V1-F, V1-G3 并列领先（48.8%）**；加入 C4 后固定评分中的最高单格为 **V1-C + F + first-Q: 28/50 (56%)**。把本轮 20 个 alpha 扫描格纳入后，最高观察值变为 **V1-C3 Z-score First-Q2、alpha=0.1：31/50 (62%)**，但它是在同一 O50 上选权重的探索性结果。在 V2-EMA E10 内，五评分均值最高的训练变体为 **F（38.4%）**。这些都是描述性单 seed 结果。
+不存在脱离测试评分定义的唯一训练赢家。按原研究固定的 F+G 主列，领先配置为 **V1-G3: 27/50 (54%)**；若把五种评分等权平均，则 **V1-F, V1-G3 并列领先（48.8%）**；固定评分中的最高单格为 **V1-C + F + first-Q: 28/50 (56%)**。把本轮 20 个 alpha 扫描格纳入后，最高观察值变为 **V1-C3 Z-score First-Q2、alpha=0.1：31/50 (62%)**，但它是在同一 O50 上选权重的探索性结果。在 V2-EMA E10 内，五评分均值最高的训练变体为 **F（38.4%）**。这些都是描述性单 seed 结果。
 从版本整体看，V1 action encoder 的六方法 × 五评分均值最高（47.3%）。
 
 ### 2. 哪个测试方法最好
@@ -292,9 +289,9 @@ V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G ta
 
 ## 审计边界
 
-- 基础账 477/477 格、C2/C3 endpoint 8/8 格和 alpha sweep 20/20 格共享 episode-selection 文件 SHA-256 `e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7`；原 505 格保持其既有指纹，加入 C4 O50 的 6 格后总覆盖为 511 格、25,550 个逐-pair outcome。基础账 action normalization SHA-256 为 `57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723`。
+- 基础账 477/477 格、C2/C3 endpoint 8/8 格和 alpha sweep 20/20 格共享 episode-selection 文件 SHA-256 `e46ea81cce2e6a9a5df05ba04893b4181cbd8979340111a012c30f1efa2d7ee7`；总覆盖为 505 格、25,250 个逐-pair outcome。基础账 action normalization SHA-256 为 `57f4d3c252e1805f4af1f614d20d1d1a064fa0d1d463ed5eb8ecf9dfc2b1a723`。
 - fixed 新评分 launcher 另有 valid-row-ranks SHA-256 `88c204770f33c0b0220057d45b187766e3cfc54912e3f5ca49f2aa93d16437e9`；它是规范化索引哈希，不是 episode-selection 文件哈希，二者不能混写。
-- 每格成功数都由 50 个布尔 outcome 重算；基础 CSV/JSON 保留 477 格 / 23,850 个 outcomes，严格 C2/C3 endpoint 保留 8 格 / 400 个 outcomes，alpha sweep 的 CSV 与 posthoc validation 保留 20 格 / 1,000 个 outcomes。三部分仍为原 505 格 / 25,250 个 outcomes；C4 另增加 6 个 O50 格 / 300 个 outcomes，总计 511 格 / 25,550 个 outcomes。
+- 每格成功数都由 50 个布尔 outcome 重算；基础 CSV/JSON 保留 477 格 / 23,850 个 outcomes，严格 C2/C3 endpoint 保留 8 格 / 400 个 outcomes，alpha sweep 的 CSV 与 posthoc validation 保留 20 格 / 1,000 个 outcomes。三部分合计 505 格 / 25,250 个 outcomes。
 - EMA E3 的 G1/F+G 与 G2/F-only 使用隔离 retry attempt_02；原失败调度证据保留，不把失败单元伪装成原调度成功。
 - 原固定 E10 Mean-Q 覆盖 V0/V1/V2/V2-EMA × C/D/F/G1/G2/G3，共 24 格且无缺格；新增 First-Q2/State-V 不适用处用中性 `—`，不参与赢家计算。
 - 主结果表只展示 E10；E3–E10 全轨迹仍保存在 `all_o50_results.csv`，没有因版式精简而删除。
@@ -328,112 +325,3 @@ V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G ta
 - 口径限制：一个 training seed、一个 planning seed、同一正式 50 pairs；C3 的 alpha=.10 曾在同一 O50 上探索选择。O25 与 O50 的 offset、难度和执行协议不同，不可用百分比差直接宣称跨协议提升。
 
 <!-- RESULTS_TD_O25_V1_C_C3_END -->
-
-<!-- RESULTS_TD_V1_C4_FORMAL_START -->
-## V1-C4 formal O25 O50 O100 paired evaluation
-
-C4 keeps the V1 LeWM observation encoder, Action Encoder and world-model predictor F frozen, stops every F output, and trains only a new online state-only G_C4 with a frozen EMA target. G_C4 has interface `G_C4(z_i,m)->Psi_i in R^192`; raw action and action embedding never enter G_C4.
-
-The aligned online inputs are `x_real=z_i` and `x_pred=sg[F(z_{i-1},a_{i-1})]`. They share `Y_i=sg[z_i+gamma(1-d_i)Gbar_C4(z_{i+1},m)]`; when z_i is terminal, `Y_i=z_i`. Each branch uses full 192-D vector TD plus the goal projection residual on goal-derived samples only, and `L_C4=0.5*(L_real_vector+L_real_goal+L_pred_vector+L_pred_goal)` with lambda_C=1.
-
-### Protocol by score matrix
-
-| Protocol | F-only | C4-only | F+C4 tail | First-Q | Mean-Q | First-Q2 |
-|---|---:|---:|---:|---:|---:|---:|
-| O25 | 37/50 (74%) | 33/50 (66%) | 36/50 (72%) | 33/50 (66%) | 34/50 (68%) | 32/50 (64%) |
-| O50 | 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | 25/50 (50%) | 21/50 (42%) | 24/50 (48%) |
-| O100 | 25/50 (50%) | 25/50 (50%) | 24/50 (48%) | 29/50 (58%) | 28/50 (56%) | 31/50 (62%) |
-
-C4-only first rolls the candidate action through F and evaluates `-G_C4(z1^F,m)^T m`. F+C4 tail rolls all five actions through F, then evaluates G_C4 at z5^F; the last action cannot bypass F. First-Q and First-Q2 read z1^F, while Mean-Q averages aligned state-only Q over z1^F...z5^F. The two first-action weights were fixed at alpha=0.25 before evaluation.
-
-### Paired outcomes relative to same-protocol F-only
-
-| Protocol | Score | C4 result | New | Lost | F+New | Delta |
-|---|---|---:|---:|---:|---:|---:|
-| O25 | C4-only | 33/50 (66%) | 3 | 7 | 40 | -4 |
-| O25 | F+C4 tail | 36/50 (72%) | 4 | 5 | 41 | -1 |
-| O25 | First-Q | 33/50 (66%) | 3 | 7 | 40 | -4 |
-| O25 | Mean-Q | 34/50 (68%) | 6 | 9 | 43 | -3 |
-| O25 | First-Q2 | 32/50 (64%) | 3 | 8 | 40 | -5 |
-| O50 | C4-only | 18/50 (36%) | 4 | 9 | 27 | -5 |
-| O50 | F+C4 tail | 23/50 (46%) | 6 | 6 | 29 | +0 |
-| O50 | First-Q | 25/50 (50%) | 6 | 4 | 29 | +2 |
-| O50 | Mean-Q | 21/50 (42%) | 3 | 5 | 26 | -2 |
-| O50 | First-Q2 | 24/50 (48%) | 4 | 3 | 27 | +1 |
-| O100 | C4-only | 25/50 (50%) | 5 | 5 | 30 | +0 |
-| O100 | F+C4 tail | 24/50 (48%) | 3 | 4 | 28 | -1 |
-| O100 | First-Q | 29/50 (58%) | 6 | 2 | 31 | +4 |
-| O100 | Mean-Q | 28/50 (56%) | 7 | 4 | 32 | +3 |
-| O100 | First-Q2 | 31/50 (62%) | 9 | 3 | 34 | +6 |
-
-### Paired outcomes relative to V1-C under the same score
-
-| Protocol | Score | V1-C | C4 | New | Lost | Delta |
-|---|---|---:|---:|---:|---:|---:|
-| O25 | C4-only | 29/50 (58%) | 33/50 (66%) | 10 | 6 | +4 |
-| O25 | F+C4 tail | 35/50 (70%) | 36/50 (72%) | 5 | 4 | +1 |
-| O25 | First-Q | 36/50 (72%) | 33/50 (66%) | 3 | 6 | -3 |
-| O25 | Mean-Q | 30/50 (60%) | 34/50 (68%) | 8 | 4 | +4 |
-| O25 | First-Q2 | 35/50 (70%) | 32/50 (64%) | 3 | 6 | -3 |
-| O50 | C4-only | 18/50 (36%) | 18/50 (36%) | 6 | 6 | +0 |
-| O50 | F+C4 tail | 22/50 (44%) | 23/50 (46%) | 5 | 4 | +1 |
-| O50 | First-Q | 28/50 (56%) | 25/50 (50%) | 3 | 6 | -3 |
-| O50 | Mean-Q | 21/50 (42%) | 21/50 (42%) | 6 | 6 | +0 |
-| O50 | First-Q2 | 26/50 (52%) | 24/50 (48%) | 2 | 4 | -2 |
-| O100 | C4-only | 24/50 (48%) | 25/50 (50%) | 6 | 5 | +1 |
-| O100 | F+C4 tail | 22/50 (44%) | 24/50 (48%) | 6 | 4 | +2 |
-| O100 | First-Q | 32/50 (64%) | 29/50 (58%) | 2 | 5 | -3 |
-| O100 | Mean-Q | 25/50 (50%) | 28/50 (56%) | 7 | 4 | +3 |
-| O100 | First-Q2 | 26/50 (52%) | 31/50 (62%) | 8 | 3 | +5 |
-
-### Training loss and evidence
-
-| Stage | Component | E1 | E10 | Change |
-|---|---|---:|---:|---:|
-| Train | Real vector | 2051.62 | 1773.81 | -13.5% |
-| Train | Real goal | 28998.7 | 39493.4 | +36.2% |
-| Train | Predicted vector | 2075.25 | 1798.73 | -13.3% |
-| Train | Predicted goal | 29124.4 | 39514.1 | +35.7% |
-| Train | C4 total | 31125.1 | 41290.1 | +32.7% |
-| Validation | Real vector | 2375.68 | 1557.86 | -34.4% |
-| Validation | Real goal | 17359.1 | 16346.4 | -5.8% |
-| Validation | Predicted vector | 2411.96 | 1583.21 | -34.4% |
-| Validation | Predicted goal | 17514.1 | 16395.4 | -6.4% |
-| Validation | C4 total | 19830.4 | 17941.4 | -9.5% |
-
-The ten-epoch formal run completed 127,960 optimizer updates. Train C4 total changed from 31125.1 to 41290.1; validation C4 total changed from 19830.4 to 17941.4. Final train components are real/vector 1773.81, real/goal 39493.4, predicted/vector 1798.73, and predicted/goal 39514.1.
-
-train ends goal-projection-dominated (22.12x); validation ends goal-projection-dominated (10.42x). Absolute train/validation loss levels diagnose C4 optimization only; they are not directly comparable to the differently scaled C, C2, or C3 objectives.
-
-- Formal summary SHA-256: `351c8700a07484755510ed02580f50d049e299d0f700b0df519b262a02412db6`
-- Training manifest SHA-256: `6d7c900650133707462302011c5af2e2de1d2ed45f946f4ffc7e8cf435496b10`
-- Metrics CSV SHA-256: `0bc16785301dd14badd162b535396ce756e22ac506fd3ce050f6be4399d43b5c`
-- C4 E10 deployment checkpoint SHA-256: `28a59d0b07cb2e0ea66b34c57fdc1eb8dce513ca80b8a8700cc36ad9458ef99b`
-- Checkpoint: `/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/c4-final-artifacts-20260907/epoch_10.pt`
-- Evidence coverage: 18 C4 cells and 900 C4 Boolean outcomes; no smoke or pilot cell is included.
-- Loss plot: `/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v1_c4_20260907/training/actor_free_td_lewm_v1_c4_loss_curves.png` (SHA-256 `afdcf899892054c183d58f1e02fa311d9d693a8106146e1ff278de1ab3295cc5`)
-
-### Result analysis
-
-- O25: best C4 score is F-only at 37/50 (74%), +0/50 (+0 pp) versus its unchanged F-only baseline.
-- O50: best C4 score is First-Q at 25/50 (50%), +2/50 (+4 pp) versus its unchanged F-only baseline.
-- O100: best C4 score is First-Q2 at 31/50 (62%), +6/50 (+12 pp) versus its unchanged F-only baseline.
-- Across the 15 non-baseline protocol-score cells, C4 improves 5, ties 2, and harms 8 relative to the same-protocol F-only outcome.
-- Against V1-C under identical O25 scorers, C4's largest change is C4-only/Mean-Q +4/50 and its smallest is First-Q/First-Q2 -3/50.
-- O25 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 3/5, tied 0/5, lower 2/5; state-focused readouts [C4-only +4, Mean-Q +4], mixed F+C4 readouts [F+C4 tail +1, First-Q -3, First-Q2 -3] (all deltas are successes out of 50).
-- Against V1-C under identical O50 scorers, C4's largest change is F+C4 tail +1/50 and its smallest is First-Q -3/50.
-- O50 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 1/5, tied 2/5, lower 2/5; state-focused readouts [C4-only +0, Mean-Q +0], mixed F+C4 readouts [F+C4 tail +1, First-Q -3, First-Q2 -2] (all deltas are successes out of 50).
-- Against V1-C under identical O100 scorers, C4's largest change is First-Q2 +5/50 and its smallest is First-Q -3/50.
-- O100 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 4/5, tied 0/5, lower 1/5; state-focused readouts [C4-only +1, Mean-Q +3], mixed F+C4 readouts [F+C4 tail +2, First-Q -3, First-Q2 +5] (all deltas are successes out of 50).
-- C4 changes the action route, successor time semantics, and real/predicted dual-branch training objective together. Therefore the C4-versus-V1-C scorer pattern is descriptive and cannot isolate a causal effect of routing action through frozen F or of removing action from G by itself.
-- O25 complementarity: the largest F+New oracle union is 43/50, from Mean-Q 34/50 (68%), New 6, Lost 9, delta -3. The largest deployed delta is F+C4 tail -1/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
-- O50 complementarity: the largest F+New oracle union is 29/50, from F+C4 tail 23/50 (46%), New 6, Lost 6, delta +0; First-Q 25/50 (50%), New 6, Lost 4, delta +2. The largest deployed delta is First-Q +2/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
-- O100 complementarity: the largest F+New oracle union is 34/50, from First-Q2 31/50 (62%), New 9, Lost 3, delta +6. The largest deployed delta is First-Q2 +6/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
-- At E10 with lambda_C=1, train goal/vector 79007.6/3572.54 (22.12x); validation goal/vector 32741.8/3141.07 (10.42x). This raw-loss dominance measures optimization scale, not usefulness of the goal signal; it means representation conclusions are confounded by unequal component magnitudes until the loss scales are balanced.
-- First-Q2 minus First-Q is O25 -1/50, O50 -1/50, O100 +2/50. This quantifies sensitivity to F/Q scaling; it does not authorize choosing a scorer after seeing these formal cells.
-- Next predeclared experiment 1: keep C4 architecture, checkpoints, protocols, and six scorer definitions fixed; compare lambda_C or running-scale-normalized vector/goal losses chosen only on a disjoint development split, then run the locked choice once on each formal protocol.
-- Next predeclared experiment 2: fit F/Q calibration or an F-versus-C4 gate only on separate development pairs, freeze its rule and threshold before formal evaluation, and report its deployed result alongside New, Lost, and the non-deployable F+New oracle ceiling.
-- Confirmation target: repeat every locked comparison with multiple training seeds and planning seeds, reporting paired uncertainty separately for O25, O50, and O100 before making any overall superiority claim.
-- These are paired, single-training-seed and single-planning-seed results. O25, O50, and O100 use different goal offsets, so their percentages describe separate protocols and are not pooled as interchangeable episodes. No scorer is selected post hoc from these formal outcomes.
-
-<!-- RESULTS_TD_V1_C4_FORMAL_END -->

@@ -1,0 +1,3 @@
+# Preserve byte-identical formal evidence files, including their original line endings.
+reports/artifacts/actor_free_td_lewm_v1_c4_20260907/training/*.csv binary
+reports/artifacts/actor_free_td_lewm_v1_c4_20260907/formal/summary/*.csv binary

@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "method": "actor_free_td_lewm_v1_c4",
+  "method_family": "actor_free_td_lewm_v1",
+  "variant": "c4",
+  "formal_contract": {
+    "epochs": 10,
+    "optimizer_steps_per_epoch": 12796,
+    "optimizer_updates": 127960,
+    "lightning_final_step_zero_based": 127959,
+    "loss_fields": [
+      "real_vector_loss",
+      "real_goal_loss",
+      "predicted_vector_loss",
+      "predicted_goal_loss",
+      "c4_total_loss"
+    ],
+    "total_loss_definition": "0.5*(real_vector_loss+real_goal_loss+predicted_vector_loss+predicted_goal_loss)"
+  },
+  "source_files": {
+    "metrics_csv": {
+      "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_f29f779_20260906/seed_3072/metrics/version_1/metrics.csv",
+      "sha256": "0bc16785301dd14badd162b535396ce756e22ac506fd3ce050f6be4399d43b5c"
+    },
+    "training_result": {
+      "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_f29f779_20260906/seed_3072/training_result.json",
+      "sha256": "714644d7b6c9c6eea971512f4fb49364d336a182ece90701c5f68a4dd88969c2"
+    },
+    "training_manifest": {
+      "path": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_f29f779_20260906/seed_3072/training_manifest.json",
+      "sha256": "6d7c900650133707462302011c5af2e2de1d2ed45f946f4ffc7e8cf435496b10"
+    }
+  },
+  "run": {
+    "seed": 3072,
+    "protocol_sha256": "f98038a1ca99e93f03cc8b8997f8ce869b1017d05e061c9393b0bf4d878171d5",
+    "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_f29f779_20260906/seed_3072/checkpoints/actor_free_td_lewm_v1_c4/c4/epoch_10.pt",
+    "deployment_checkpoint_sha256": "28a59d0b07cb2e0ea66b34c57fdc1eb8dce513ca80b8a8700cc36ad9458ef99b"
+  },
+  "summary": {
+    "train_total_initial": 31125.05078125,
+    "train_total_final": 41290.06640625,
+    "validation_total_initial": 19830.404296875,
+    "validation_total_final": 17941.4453125,
+    "best_validation_epoch": 9,
+    "best_validation_total": 17932.287109375
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "optimizer_updates": 12796,
+      "metrics_step_zero_based": 12795,
+      "train_real_vector_loss": 2051.620849609375,
+      "train_real_goal_loss": 28998.732421875,
+      "train_predicted_vector_loss": 2075.25,
+      "train_predicted_goal_loss": 29124.439453125,
+      "train_c4_total_loss": 31125.05078125,
+      "validation_real_vector_loss": 2375.67919921875,
+      "validation_real_goal_loss": 17359.109375,
+      "validation_predicted_vector_loss": 2411.95751953125,
+      "validation_predicted_goal_loss": 17514.068359375,
+      "validation_c4_total_loss": 19830.404296875
+    },
+    {
+      "epoch": 2,
+      "optimizer_updates": 25592,
+      "metrics_step_zero_based": 25591,
+      "train_real_vector_loss": 2462.0771484375,
+      "train_real_goal_loss": 46252.609375,
+      "train_predicted_vector_loss": 2496.738037109375,
+      "train_predicted_goal_loss": 46399.31640625,
+      "train_c4_total_loss": 48805.33984375,
+      "validation_real_vector_loss": 1927.7080078125,
+      "validation_real_goal_loss": 17039.08203125,
+      "validation_predicted_vector_loss": 1956.9237060546875,
+      "validation_predicted_goal_loss": 17159.052734375,
+      "validation_c4_total_loss": 19041.357421875
+    },
+    {
+      "epoch": 3,
+      "optimizer_updates": 38388,
+      "metrics_step_zero_based": 38387,
+      "train_real_vector_loss": 2130.455810546875,
+      "train_real_goal_loss": 43770.45703125,
+      "train_predicted_vector_loss": 2159.652587890625,
+      "train_predicted_goal_loss": 43883.48828125,
+      "train_c4_total_loss": 45972.08203125,
+      "validation_real_vector_loss": 1799.957275390625,
+      "validation_real_goal_loss": 17440.173828125,
+      "validation_predicted_vector_loss": 1827.5999755859375,
+      "validation_predicted_goal_loss": 17530.62890625,
+      "validation_c4_total_loss": 19299.232421875
+    },
+    {
+      "epoch": 4,
+      "optimizer_updates": 51184,
+      "metrics_step_zero_based": 51183,
+      "train_real_vector_loss": 1987.4683837890625,
+      "train_real_goal_loss": 42639.00390625,
+      "train_predicted_vector_loss": 2014.6778564453125,
+      "train_predicted_goal_loss": 42731.234375,
+      "train_c4_total_loss": 44686.03515625,
+      "validation_real_vector_loss": 1693.976806640625,
+      "validation_real_goal_loss": 17487.876953125,
+      "validation_predicted_vector_loss": 1720.4019775390625,
+      "validation_predicted_goal_loss": 17543.890625,
+      "validation_c4_total_loss": 19223.083984375
+    },
+    {
+      "epoch": 5,
+      "optimizer_updates": 63980,
+      "metrics_step_zero_based": 63979,
+      "train_real_vector_loss": 1905.4324951171875,
+      "train_real_goal_loss": 41627.94921875,
+      "train_predicted_vector_loss": 1932.2725830078125,
+      "train_predicted_goal_loss": 41695.640625,
+      "train_c4_total_loss": 43580.5,
+      "validation_real_vector_loss": 1638.9840087890625,
+      "validation_real_goal_loss": 17149.09375,
+      "validation_predicted_vector_loss": 1666.4598388671875,
+      "validation_predicted_goal_loss": 17246.986328125,
+      "validation_c4_total_loss": 18850.751953125
+    },
+    {
+      "epoch": 6,
+      "optimizer_updates": 76776,
+      "metrics_step_zero_based": 76775,
+      "train_real_vector_loss": 1852.0179443359375,
+      "train_real_goal_loss": 41046.56640625,
+      "train_predicted_vector_loss": 1877.58349609375,
+      "train_predicted_goal_loss": 41096.62890625,
+      "train_c4_total_loss": 42936.25390625,
+      "validation_real_vector_loss": 1615.7103271484375,
+      "validation_real_goal_loss": 17131.474609375,
+      "validation_predicted_vector_loss": 1642.4449462890625,
+      "validation_predicted_goal_loss": 17198.7734375,
+      "validation_c4_total_loss": 18794.18359375
+    },
+    {
+      "epoch": 7,
+      "optimizer_updates": 89572,
+      "metrics_step_zero_based": 89571,
+      "train_real_vector_loss": 1818.975830078125,
+      "train_real_goal_loss": 40580.4921875,
+      "train_predicted_vector_loss": 1844.6456298828125,
+      "train_predicted_goal_loss": 40628.3515625,
+      "train_c4_total_loss": 42436.06640625,
+      "validation_real_vector_loss": 1585.061279296875,
+      "validation_real_goal_loss": 16514.27734375,
+      "validation_predicted_vector_loss": 1611.5093994140625,
+      "validation_predicted_goal_loss": 16579.076171875,
+      "validation_c4_total_loss": 18144.96875
+    },
+    {
+      "epoch": 8,
+      "optimizer_updates": 102368,
+      "metrics_step_zero_based": 102367,
+      "train_real_vector_loss": 1794.21533203125,
+      "train_real_goal_loss": 39862.6953125,
+      "train_predicted_vector_loss": 1819.4412841796875,
+      "train_predicted_goal_loss": 39890.8515625,
+      "train_c4_total_loss": 41683.58203125,
+      "validation_real_vector_loss": 1572.708251953125,
+      "validation_real_goal_loss": 16334.763671875,
+      "validation_predicted_vector_loss": 1597.9735107421875,
+      "validation_predicted_goal_loss": 16392.693359375,
+      "validation_c4_total_loss": 17949.083984375
+    },
+    {
+      "epoch": 9,
+      "optimizer_updates": 115164,
+      "metrics_step_zero_based": 115163,
+      "train_real_vector_loss": 1776.0379638671875,
+      "train_real_goal_loss": 39589.33203125,
+      "train_predicted_vector_loss": 1800.8671875,
+      "train_predicted_goal_loss": 39611.2890625,
+      "train_c4_total_loss": 41388.78515625,
+      "validation_real_vector_loss": 1560.6361083984375,
+      "validation_real_goal_loss": 16333.91796875,
+      "validation_predicted_vector_loss": 1585.9573974609375,
+      "validation_predicted_goal_loss": 16384.037109375,
+      "validation_c4_total_loss": 17932.287109375
+    },
+    {
+      "epoch": 10,
+      "optimizer_updates": 127960,
+      "metrics_step_zero_based": 127959,
+      "train_real_vector_loss": 1773.8148193359375,
+      "train_real_goal_loss": 39493.4140625,
+      "train_predicted_vector_loss": 1798.7298583984375,
+      "train_predicted_goal_loss": 39514.13671875,
+      "train_c4_total_loss": 41290.06640625,
+      "validation_real_vector_loss": 1557.861083984375,
+      "validation_real_goal_loss": 16346.4228515625,
+      "validation_predicted_vector_loss": 1583.205322265625,
+      "validation_predicted_goal_loss": 16395.384765625,
+      "validation_c4_total_loss": 17941.4453125
+    }
+  ]
+}

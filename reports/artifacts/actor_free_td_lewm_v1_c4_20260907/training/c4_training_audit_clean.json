@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_f29f779_20260906/seed_3072",
+  "protocol_sha256": "f98038a1ca99e93f03cc8b8997f8ce869b1017d05e061c9393b0bf4d878171d5",
+  "metrics_files": [
+    "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_f29f779_20260906/seed_3072/metrics/version_1/metrics.csv"
+  ],
+  "deployment_checkpoint_sha256": "28a59d0b07cb2e0ea66b34c57fdc1eb8dce513ca80b8a8700cc36ad9458ef99b",
+  "world_model_state_sha256": "0ef286ac11ae41fbda29b97b781c0bf81332a5ceed1924d0d21d5756566bbe25",
+  "online_g_state_sha256": "20ccaba4ffebd4e346b78fbeea31699a53ddd5bbf32cb61b144ef0d768d4a885",
+  "target_g_state_sha256": "4d671cdfee01d19c0771d0a1cb2cd2a7a0c58ac42548449e78d6004faf5dfdc8",
+  "train_total_epoch_1": 31125.05078125,
+  "train_total_epoch_10": 41290.06640625,
+  "validation_total_epoch_1": 19830.404296875,
+  "validation_total_epoch_10": 17941.4453125,
+  "best_validation_epoch": 9,
+  "errors": [],
+  "warnings": []
+}
