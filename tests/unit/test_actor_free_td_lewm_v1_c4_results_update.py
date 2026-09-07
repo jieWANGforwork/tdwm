@@ -180,6 +180,32 @@ def _summary(checkpoint_sha: str = "c" * 64) -> dict:
     }
 
 
+def _summary_with_v1_c_f_only_backend_drift(protocol: str = "o50") -> dict:
+    summary = _summary()
+    c4_outcomes = list(
+        summary["protocols"][protocol]["methods"]["c4"]["scores"]["f_only"][
+            "episode_successes"
+        ]
+    )
+    v1_c_outcomes = list(c4_outcomes)
+    c4_success = next(index for index, success in enumerate(c4_outcomes) if success)
+    c4_failure = next(index for index, success in enumerate(c4_outcomes) if not success)
+    v1_c_outcomes[c4_success] = False
+    v1_c_outcomes[c4_failure] = True
+
+    score = summary["protocols"][protocol]["methods"]["v1_c"]["scores"]["f_only"]
+    score["episode_successes"] = v1_c_outcomes
+    score["success_count"] = sum(v1_c_outcomes)
+    score["success_rate_percent"] = 2.0 * sum(v1_c_outcomes)
+    summary["protocols"][protocol]["comparisons"][
+        "c4_vs_v1_c_same_score_mode"
+    ]["f_only"] = _paired(v1_c_outcomes, c4_outcomes, f_plus=False)
+    for row in summary["episode_matrix"]:
+        if row["protocol"] == protocol:
+            row["v1_c"]["f_only"] = v1_c_outcomes[row["episode_position"] - 1]
+    return summary
+
+
 def _historical_v0_summary() -> dict:
     summary = _summary(HISTORICAL_V0_CHECKPOINT_SHA256)
     del summary["study"]["objective_version"]
@@ -302,6 +328,23 @@ def test_validate_summary_rejects_missing_cell_and_paired_drift() -> None:
         validate_summary(drifted)
 
 
+def test_validate_summary_accepts_backend_f_only_drift_but_revalidates_pairing() -> None:
+    summary = _summary_with_v1_c_f_only_backend_drift()
+    validated = validate_summary(summary)
+    paired = validated["protocols"]["o50"]["comparisons"][
+        "c4_vs_v1_c_same_score_mode"
+    ]["f_only"]
+    assert paired["new"] == 1
+    assert paired["lost"] == 1
+
+    drifted = deepcopy(summary)
+    drifted["protocols"]["o50"]["comparisons"][
+        "c4_vs_v1_c_same_score_mode"
+    ]["f_only"]["new"] += 1
+    with pytest.raises(C4ResultsUpdateError, match="must be recomputed"):
+        validate_summary(drifted)
+
+
 def test_validate_historical_v0_summary_requires_exact_legacy_identity_and_matrix() -> None:
     summary = _historical_v0_summary()
     before = deepcopy(summary)
@@ -410,18 +453,38 @@ def test_load_report_evidence_binds_checkpoint_and_optional_png(tmp_path: Path) 
 
 def test_markdown_update_keeps_one_master_table_and_adds_paired_c4_matrices() -> None:
     report = _PRE_C4_FIXTURE_DIR / "results_td_before_c4.md"
-    evidence = _evidence(_summary())
+    summary = _summary_with_v1_c_f_only_backend_drift()
+    evidence = _evidence(summary)
     updated = update_markdown_text(report.read_text(encoding="utf-8"), evidence)
     assert "## 27 个训练方法 × 7 种评分" in updated
     assert updated.count("| V1 | C4 |") == 1
     assert "| V1-C4 objective-v1 formal O50 | 1 | E10 |" in updated
     assert "| **TOTAL** | — | — | same locked O50 selection | **511** |" in updated
     assert updated.count("### Protocol by score matrix") == 1
+    assert updated.count("### F-only reproducibility/backend audit") == 1
     assert updated.count("### Paired outcomes relative to same-protocol F-only") == 1
-    assert updated.count("### Paired outcomes relative to V1-C under the same score") == 1
+    assert updated.count(
+        "### Paired outcomes relative to historical V1-C under the same score (descriptive)"
+    ) == 1
     section = updated.split("<!-- RESULTS_TD_V1_C4_FORMAL_START -->", 1)[1]
     paired_lines = [line for line in section.splitlines() if line.startswith(("| O25 |", "| O50 |", "| O100 |"))]
-    assert len(paired_lines) == 33  # 3 score rows + two 15-row paired tables
+    assert len(paired_lines) == 36  # 3 score rows + 3 audit rows + two 15-row tables
+    backend_pair = summary["protocols"]["o50"]["comparisons"][
+        "c4_vs_v1_c_same_score_mode"
+    ]["f_only"]
+    expected_audit_row = (
+        f"| O50 | {backend_pair['reference_successes']}/50 "
+        f"({2 * backend_pair['reference_successes']}%) | "
+        f"{backend_pair['candidate_successes']}/50 "
+        f"({2 * backend_pair['candidate_successes']}%) | "
+        f"{backend_pair['new']} | {backend_pair['lost']} | "
+        f"{backend_pair['delta_successes']:+d} | No |"
+    )
+    assert expected_audit_row in section
+    assert "current C4 evaluation used EGL" in section
+    assert "historical V1-C reference used OSMesa" in section
+    assert "Within-C4 comparisons" in section
+    assert "descriptive rather than pure C4 method effects" in section
     paired_section = section.split(
         "### Paired outcomes relative to same-protocol F-only", 1
     )[1].split("### Training loss and evidence", 1)[0]
@@ -505,11 +568,26 @@ def test_historical_v0_results_do_not_enter_main_ledger_or_winners() -> None:
 
 
 def test_analysis_is_dynamic_evidence_driven_and_predeclares_next_steps() -> None:
-    analysis = "\n".join(_analysis_lines(_evidence(_summary())))
+    summary = _summary_with_v1_c_f_only_backend_drift()
+    analysis = "\n".join(_analysis_lines(_evidence(summary)))
 
     for protocol in PROTOCOLS:
         assert f"{protocol.upper()} scorer pattern for state-only/action-through-F C4" in analysis
         assert f"{protocol.upper()} complementarity:" in analysis
+    paired = summary["protocols"]["o50"]["comparisons"][
+        "c4_vs_v1_c_same_score_mode"
+    ]["f_only"]
+    assert (
+        f"O50 {paired['reference_successes']}/50 "
+        f"({2 * paired['reference_successes']}%) -> "
+        f"{paired['candidate_successes']}/50 "
+        f"({2 * paired['candidate_successes']}%) "
+        f"(New {paired['new']}, Lost {paired['lost']}, "
+        f"delta {paired['delta_successes']:+d}/50)"
+    ) in analysis
+    assert "historical V1-C/OSMesa -> current C4/EGL" in analysis
+    assert "Within-C4 comparisons" in analysis
+    assert "cross rendering backends" in analysis
     assert "cannot isolate a causal effect" in analysis
     assert "F+New preserves F successes only by oracle construction" in analysis
     assert "train goal/vector 11/10 (1.10x)" in analysis
@@ -563,8 +641,9 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
     repository = Path(__file__).resolve().parents[2]
     source = _PRE_C4_FIXTURE_DIR / "results_td_before_c4.docx"
     document = docx.Document(source)
+    summary = _summary_with_v1_c_f_only_backend_drift()
 
-    update_docx_document(document, _evidence(_summary()), repository)
+    update_docx_document(document, _evidence(summary), repository)
 
     assert len(document.tables[18].rows) == 29
     assert sum(row.cells[1].text == "C4" for row in document.tables[18].rows) == 1
@@ -588,7 +667,7 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
         paragraph.text == HISTORICAL_V0_DOCX_END_MARKER
         for paragraph in document.paragraphs
     ) == 1
-    assert len(document.tables) == 51
+    assert len(document.tables) == 52
     historical_table = document.tables[46]
     assert len(historical_table.rows) == 4
     historical_summary = _historical_v0_summary()
@@ -601,10 +680,19 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
             assert historical_table.rows[protocol_index].cells[mode_index].text == (
                 f"{count}/50 ({2 * count}%)"
             )
-    assert len(document.tables[48].rows) == 16
-    assert all(row.cells[1].text != "F-only" for row in document.tables[48].rows[1:])
+    audit_table = document.tables[48]
+    assert len(audit_table.rows) == 4
+    assert audit_table.rows[0].cells[1].text == "V1-C / OSMesa"
+    backend_pair = summary["protocols"]["o50"]["comparisons"][
+        "c4_vs_v1_c_same_score_mode"
+    ]["f_only"]
+    assert audit_table.rows[2].cells[3].text == str(backend_pair["new"])
+    assert audit_table.rows[2].cells[4].text == str(backend_pair["lost"])
+    assert audit_table.rows[2].cells[6].text == "No"
     assert len(document.tables[49].rows) == 16
-    assert document.tables[49].rows[0].cells[2].text == "V1-C"
+    assert all(row.cells[1].text != "F-only" for row in document.tables[49].rows[1:])
+    assert len(document.tables[50].rows) == 16
+    assert document.tables[50].rows[0].cells[2].text == "V1-C"
     assert len(document.sections) == 12
     historical_section = document.sections[-4]
     for header in (
@@ -637,7 +725,7 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
         ):
             assert footer.is_linked_to_previous is False
             assert "Validated V1-C4 objective v1 paired outcomes" in footer.paragraphs[0].text
-    repeat = document.tables[50].rows[0]._tr.get_or_add_trPr().find(qn("w:tblHeader"))
+    repeat = document.tables[51].rows[0]._tr.get_or_add_trPr().find(qn("w:tblHeader"))
     assert repeat is not None
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "w(g)=sqrt(192) z_g/||z_g||_2" in text
@@ -646,6 +734,11 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
     assert "single state-only online branch" in text
     assert "x_i = stop-gradient F(z_i^real,a_i)" in text
     assert "L_vector + L_goal" in text
+    assert "F-only reproducibility/backend audit" in text
+    assert "current C4 evaluation used EGL" in text
+    assert "historical V1-C reference used OSMesa" in text
+    assert "primary controlled comparisons" in text
+    assert "descriptive rather than pure C4 method effects" in text
     assert "objective v0 historical record superseded" in text
     assert "excluded from the current 511-cell O50 ledger" in text
     assert "equal real and stopped-F-predicted" not in text

@@ -412,10 +412,8 @@ def validate_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
         if set(versus_f) != set(SCORE_MODES) or set(versus_c) != set(SCORE_MODES):
             raise C4ResultsUpdateError(f"{protocol} paired tables must cover all six modes")
         f_reference = nested[(protocol, "c4", "f_only")]
-        if f_reference != nested[(protocol, "v1_c", "f_only")]:
-            raise C4ResultsUpdateError(
-                f"{protocol} C4 and V1-C F-only outcomes must be identical"
-            )
+        # Historical V1-C may use a different rendering backend.  Permit its
+        # F-only outcome vector to differ, while validating the exact pairing below.
         for mode in SCORE_MODES:
             _validate_comparison(
                 _mapping(versus_f[mode], f"{protocol}.versus_f.{mode}"),
@@ -757,7 +755,8 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
         delta = best - baseline
         lines.append(
             f"{protocol.upper()}: best C4 score is {'/'.join(modes)} at {_rate(best)}, "
-            f"{delta:+d}/50 ({delta * 2:+d} pp) versus its unchanged F-only baseline."
+            f"{delta:+d}/50 ({delta * 2:+d} pp) versus its same-backend C4 "
+            "F-only control."
         )
 
     improved = tied = harmed = 0
@@ -773,7 +772,38 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
             harmed += delta < 0
     lines.append(
         f"Across the 15 non-baseline protocol-score cells, C4 improves {improved}, "
-        f"ties {tied}, and harms {harmed} relative to the same-protocol F-only outcome."
+        f"ties {tied}, and harms {harmed} relative to the same-protocol, same-backend "
+        "C4 F-only outcome."
+    )
+
+    backend_audit = []
+    for protocol in PROTOCOLS:
+        paired = _comparison(
+            evidence,
+            protocol,
+            "f_only",
+            "c4_vs_v1_c_same_score_mode",
+        )
+        backend_audit.append(
+            f"{protocol.upper()} {_rate(int(paired['reference_successes']))} -> "
+            f"{_rate(int(paired['candidate_successes']))} "
+            f"(New {int(paired['new'])}, Lost {int(paired['lost'])}, "
+            f"delta {int(paired['delta_successes']):+d}/50)"
+        )
+    lines.append(
+        "F-only reproducibility/backend audit (historical V1-C/OSMesa -> current "
+        "C4/EGL): "
+        + "; ".join(backend_audit)
+        + ". The audited checkpoints have tensor-identical frozen LeWM state "
+        "dictionaries and equal world-model configurations, but live rendered pixels "
+        "feed later replanning steps, so changing the rendering backend can change "
+        "latent inputs, CEM choices, and episode outcomes."
+    )
+    lines.append(
+        "Within-C4 comparisons against the current EGL F-only control are therefore "
+        "primary. C4-versus-historical-V1-C comparisons retain ordered start-goal "
+        "pairs and score formulas but cross rendering backends, so they are descriptive "
+        "rather than pure estimates of the C4 method effect."
     )
 
     for protocol in PROTOCOLS:
@@ -790,8 +820,9 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
         best = "/".join(SCORE_LABELS[m] for m, value in deltas.items() if value == maximum)
         worst = "/".join(SCORE_LABELS[m] for m, value in deltas.items() if value == minimum)
         lines.append(
-            f"Against V1-C under identical {protocol.upper()} scorers, C4's largest "
-            f"change is {best} {maximum:+d}/50 and its smallest is {worst} {minimum:+d}/50."
+            f"Against historical V1-C under the same {protocol.upper()} score formulas "
+            f"(cross-backend, descriptive), C4's largest change is {best} {maximum:+d}/50 "
+            f"and its smallest is {worst} {minimum:+d}/50."
         )
 
         higher = sum(value > 0 for value in deltas.values())
@@ -813,8 +844,9 @@ def _analysis_lines(evidence: C4ReportEvidence) -> list[str]:
         )
 
     lines.append(
-        "C4 simultaneously changes the action route and successor time semantics, and "
-        "replaces the action-conditioned G interface with a state-only G interface. "
+        "C4 simultaneously changes the action route and successor time semantics, "
+        "replaces the action-conditioned G interface with a state-only G interface, and "
+        "is compared here with a historical V1-C run from a different rendering backend. "
         "Therefore the C4-versus-V1-C scorer pattern is descriptive and cannot isolate "
         "a causal effect of routing action through frozen F or of removing action from G "
         "by itself."
@@ -1056,6 +1088,48 @@ def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
                 "z1^F...z5^F. The two first-action weights were fixed at alpha=0.25 before evaluation."
             ),
             "",
+            "### F-only reproducibility/backend audit",
+            "",
+            (
+                "The audited C4 and V1-C checkpoints have tensor-identical frozen LeWM "
+                "state dictionaries and equal world-model configurations. However, "
+                "current C4 evaluation used EGL while the historical V1-C reference "
+                "used OSMesa. Live rendered pixels are re-encoded after each environment "
+                "step, so the backend can alter later latent inputs, CEM choices, and "
+                "Boolean outcomes even with identical frozen F tensors."
+            ),
+            "",
+            (
+                "| Protocol | Historical V1-C / OSMesa | Current C4 F-only / EGL | "
+                "New | Lost | Delta | Exact outcome vector |"
+            ),
+            "|---|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for protocol in PROTOCOLS:
+        paired = _comparison(
+            evidence,
+            protocol,
+            "f_only",
+            "c4_vs_v1_c_same_score_mode",
+        )
+        exact_match = "Yes" if int(paired["new"]) == int(paired["lost"]) == 0 else "No"
+        lines.append(
+            f"| {protocol.upper()} | {_rate(int(paired['reference_successes']))} | "
+            f"{_rate(int(paired['candidate_successes']))} | {paired['new']} | "
+            f"{paired['lost']} | {int(paired['delta_successes']):+d} | "
+            f"{exact_match} |"
+        )
+    lines.extend(
+        [
+            "",
+            (
+                "Within-C4 comparisons against current C4/EGL F-only are the primary "
+                "controlled comparisons. C4-versus-historical-V1-C comparisons retain "
+                "the ordered start-goal pairs and score formulas but cross rendering "
+                "backends, so they are descriptive rather than pure C4 method effects."
+            ),
+            "",
             "### Paired outcomes relative to same-protocol F-only",
             "",
             "| Protocol | Score | C4 result | New | Lost | F+New | Delta |",
@@ -1076,7 +1150,7 @@ def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
     lines.extend(
         [
             "",
-            "### Paired outcomes relative to V1-C under the same score",
+            "### Paired outcomes relative to historical V1-C under the same score (descriptive)",
             "",
             "| Protocol | Score | V1-C | C4 | New | Lost | Delta |",
             "|---|---|---:|---:|---:|---:|---:|",
@@ -1998,6 +2072,48 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
         document,
         "C4-only first sends the candidate action through F and reads G_C4 at z1^F. F+C4 tail sends the fifth action through F and reads G_C4 at z5^F; no action bypass exists. First-Q and First-Q2 read z1^F, and Mean-Q averages the aligned state-only readout over z1^F through z5^F. First-Q and First-Q2 use the preregistered alpha = 0.25.",
     )
+    _add_docx_heading(document, "F-only reproducibility/backend audit", 2)
+    _add_docx_body(
+        document,
+        "The audited C4 and V1-C checkpoints have tensor-identical frozen LeWM state dictionaries and equal world-model configurations. However, current C4 evaluation used EGL while the historical V1-C reference used OSMesa. Live rendered pixels are re-encoded after each environment step, so the backend can alter later latent inputs, CEM choices, and Boolean outcomes even with identical frozen F tensors.",
+    )
+    audit_table = document.add_table(rows=1, cols=7)
+    audit_headers = (
+        "Protocol",
+        "V1-C / OSMesa",
+        "C4 F-only / EGL",
+        "New",
+        "Lost",
+        "Delta",
+        "Exact outcome vector",
+    )
+    for cell, value in zip(audit_table.rows[0].cells, audit_headers):
+        _set_cell_text(cell, value, bold=True, center=True)
+    for protocol in PROTOCOLS:
+        paired = _comparison(
+            evidence,
+            protocol,
+            "f_only",
+            "c4_vs_v1_c_same_score_mode",
+        )
+        row = audit_table.add_row()
+        values = (
+            protocol.upper(),
+            _rate(int(paired["reference_successes"])),
+            _rate(int(paired["candidate_successes"])),
+            str(paired["new"]),
+            str(paired["lost"]),
+            f"{int(paired['delta_successes']):+d}",
+            "Yes" if int(paired["new"]) == int(paired["lost"]) == 0 else "No",
+        )
+        for cell, value in zip(row.cells, values):
+            _set_cell_text(cell, value, center=True)
+    _style_new_table(audit_table)
+    _add_docx_body(
+        document,
+        "Within-C4 comparisons against current C4/EGL F-only are the primary controlled comparisons. C4-versus-historical-V1-C comparisons retain the ordered start-goal pairs and score formulas but cross rendering backends, so they are descriptive rather than pure C4 method effects.",
+        bold=True,
+    )
     _add_docx_heading(document, "Paired outcomes relative to same protocol F only", 2)
     paired_table = document.add_table(rows=1, cols=7)
     paired_headers = ("Protocol", "Score", "C4 result", "New", "Lost", "F+New", "Delta")
@@ -2024,7 +2140,7 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
     _start_c4_docx_section(document)
     _add_docx_heading(
         document,
-        "Paired outcomes relative to V1 C under the same score",
+        "Paired outcomes relative to historical V1 C under the same score descriptive",
         2,
     )
     v1_c_table = document.add_table(rows=1, cols=7)
