@@ -1,6 +1,6 @@
 # Results TD — 全部 Actor-Free TD-LeWM 实验总账（Cube seed 3072）
 
-本报告在同一份总账中保留 **477 个已核验 O50 基础单元、8 个 V1-C2/C3 严格 endpoint 单元，以及 20 个 First-Q 权重扫描单元，以及 6 个 V1-C4 objective-v1 O50 单元，共 511 格、25,550 个逐-pair outcome**。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。
+本报告在同一份总账中保留 **477 个已核验 O50 基础单元、8 个 V1-C2/C3 严格 endpoint 单元，以及 20 个 First-Q 权重扫描单元，以及 6 个 V1-C4 objective-v1 O50 单元，共 511 格、25,550 个逐-pair outcome**。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。另有 O25 和 O100 两张独立当前正式总表，各覆盖 13 个未被 supersede 的 C 系列单元；它们不并入 O50 排名。
 
 ## 一句话结论
 
@@ -208,6 +208,36 @@ $$J_{V1C}=\lVert F^5(z_0,A_{1:5})-z_g\rVert_2^2-\alpha Q_G(z_0,A_1,g),$$
 - **alpha 是在同一组 O50 上挑出的，62% 属于探索性调参结果。** 它不能无偏替代预先固定的正式 endpoint。下一步应在独立 dev pairs 上选 alpha，再在未见过的 test pairs 和多个 planning seeds 上确认；若保留 C3，还应改善 State-V 与 First-Q 的校准以降低这种尖峰敏感性。
 - 历史 C3 Z-score alpha=0.25 为 27/50，本轮复跑为 26/50；两次有 3 个 pair 的结果翻转，净差 1 个成功。后续结论不应过度解释 1-2 个 episode 的差异，并应固定确定性设置或报告 planning 重复试验。
 
+<!-- RESULTS_TD_O25_O100_CURRENT_MASTER_START -->
+## O25 和 O100 当前正式结果独立总表
+
+下面两张表各自使用固定的 50 个 start-goal pairs。每张表包含当前未被 supersede 的 13 个 C 系列正式单元：V1-C 六种评分、V1-C3 一个 State-V+First-Q2 评分、V1-C4 objective-v1 六种评分。C3 没有独立的 F-only 单元，因此写 `—`；同 EGL 的 V1-C F-only 后端审计重跑也不重复计数。
+
+`◆` 表示该评分列的最高观察值，粗体表示该方法行的最高观察值。C4 objective-v0 已被新目标取代，只保留在历史表，不进入这里的赢家计算。
+
+### O25 当前正式结果总表
+
+| 方法 / checkpoint / runtime | 训练 loss | F-only | G/C4-only | F+G/F+C4 tail | First-Q alpha=.25 | Mean-Q | First-Q2 alpha=.25 | C3 State-V+First-Q2 alpha=.10 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| V1-C E10 / OSMesa* | `L_C` | ◆ **37/50 (74%)** | 29/50 (58%) | 35/50 (70%) | ◆ 36/50 (72%) | 30/50 (60%) | ◆ 35/50 (70%) | — |
+| V1-C3 E12 / OSMesa* | `L_C3` | — | — | — | — | — | — | ◆ **38/50 (76%)** |
+| V1-C4 objective-v1 E10 / EGL | `L_C4=L_vector+L_goal` | ◆ 37/50 (74%) | ◆ 32/50 (64%) | ◆ **38/50 (76%)** | 32/50 (64%) | ◆ 31/50 (62%) | 34/50 (68%) | — |
+
+O25 的最高观察值为 38/50 (76%)：V1-C3 State-V+First-Q2 与 V1-C4 F+C4 tail 并列。C4 tail 在其同 EGL F-only 基线上 New=5、Lost=4，净增 1 个成功。
+
+### O100 当前正式结果总表
+
+| 方法 / checkpoint / runtime | 训练 loss | F-only | G/C4-only | F+G/F+C4 tail | First-Q alpha=.25 | Mean-Q | First-Q2 alpha=.25 | C3 State-V+First-Q2 alpha=.10 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| V1-C E10 / OSMesa | `L_C` | ◆ 25/50 (50%) | 24/50 (48%) | 22/50 (44%) | ◆ **32/50 (64%)** | 25/50 (50%) | 26/50 (52%) | — |
+| V1-C3 E12 / OSMesa | `L_C3` | — | — | — | — | — | — | ◆ **25/50 (50%)** |
+| V1-C4 objective-v1 E10 / EGL | `L_C4=L_vector+L_goal` | ◆ 25/50 (50%) | ◆ 25/50 (50%) | ◆ 24/50 (48%) | 27/50 (54%) | ◆ **28/50 (56%)** | ◆ **28/50 (56%)** | — |
+
+O100 的最高观察值是 V1-C First-Q 的 32/50 (64%)。V1-C4 的最高值为 Mean-Q 与 First-Q2 的 28/50 (56%)；二者相对同 EGL F-only 均净增 3 个成功。
+
+运行口径：O100 的 V1-C/V1-C3 日志明确记录 OSMesa，C4 objective-v1 记录 EGL。O25 的 V1-C 历史运行由独立审计确认为 OSMesa 系列，但归档的 C3 O25 结果文件本身没有 renderer 字段，表中用 `OSMesa*` 标记这一限制。因此跨运行后端的横向差异只作描述；每个方法内部相对其 F-only 的配对结论才是主结论。
+<!-- RESULTS_TD_O25_O100_CURRENT_MASTER_END -->
+
 ## 训练 / validation loss 证据
 
 训练总 loss 含不同辅助项，绝对数值不能直接给 C–G3 排名，只用于判断各自是否收敛。Legacy 与 V1 曲线保留在历史来源文档；V0、V2、V2-EMA 的逐 epoch 数值和全部 E3–E10 O50 轨迹继续保留在总账 artifacts 中，但不再塞进主结果表。
@@ -301,7 +331,7 @@ V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G ta
 - 只有一个 training seed；所有跨版本结果都是描述性结构消融，不声称多 seed 总体最优或统计显著。
 
 <!-- RESULTS_TD_O25_V1_C_C3_START -->
-## O25 配对补测 V1 C 与 C3
+## O25 V1 C 与 C3 配对明细
 
 同一组 50 个 O25 start-goal pair 上，单方法最高为 **C3 State-V + First-Q2 alpha=.10：38/50 (76%)**；V1-C F-only 为 **37/50 (74%)**。前六行是先前补测的 V1-C E10 六种评分；最后一行是把此前 O50 得到 31/50 (62%) 的同一个 C3 scorer 原样移到 O25，未重新训练。C3 相对 F-only 新救回 6 个 pair，同时丢失 5 个原 F 成功 pair。若事后使用成功标签做 oracle 选择，F-only 与 C3 的并集为 **43/50 (86%)**；把全部六种替代评分也纳入，oracle 上限为 **44/50 (88%)**。这些 oracle 数字不是可部署结果。
 

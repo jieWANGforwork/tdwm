@@ -4,3 +4,4 @@ reports/artifacts/actor_free_td_lewm_v1_c4_20260907/formal/summary/*.csv binary
 reports/artifacts/actor_free_td_lewm_v1_c4_objective1_20260907/training/*.csv binary
 reports/artifacts/actor_free_td_lewm_v1_c4_objective1_20260907/formal/summary/*.csv binary
 reports/artifacts/actor_free_td_lewm_v1_c4_objective1_20260907/**/*.log binary
+reports/artifacts/actor_free_td_lewm_v1_c_c3_o100_20260906/**/*.log binary
