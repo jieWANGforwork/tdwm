@@ -1,6 +1,6 @@
 # Results TD — 全部 Actor-Free TD-LeWM 实验总账（Cube seed 3072）
 
-本报告在同一份总账中保留 **477 个已核验 O50 基础单元、8 个 V1-C2/C3 严格 endpoint 单元，以及 20 个 First-Q 权重扫描单元，以及 6 个 V1-C4 O50 单元，共 511 格、25,550 个逐-pair outcome**。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。
+本报告在同一份总账中保留 **477 个已核验 O50 基础单元、8 个 V1-C2/C3 严格 endpoint 单元，以及 20 个 First-Q 权重扫描单元，以及 6 个 V1-C4 objective-v1 O50 单元，共 511 格、25,550 个逐-pair outcome**。基础方法固定 E10，C2 固定最终 E10，C3 固定最终 E12。每格均为同一组 50 个 start-goal pair；训练 seed=3072，planning seed=42。模型均不训练 Actor。
 
 ## 一句话结论
 
@@ -34,7 +34,7 @@
 | V2-EMA-SG | 6 | E3-E10 | all five scores | 240 |
 | V1-C2/C3 endpoint extension | 2 | C2 E10 / C3 E12 | First-Q2 + State-V integrated into seven-column matrix | 8 |
 | First-Q alpha sweep | V1-C / V1-C3 | C E10 / C3 E12 | 5 original First-Q + 5 C3 Raw First-Q + 10 C3 Z-score First-Q2 | 20 |
-| V1-C4 formal O50 | 1 | E10 | six predeclared state-only C4 scores | 6 |
+| V1-C4 objective-v1 formal O50 | 1 | E10 | six predeclared state-only C4 scores | 6 |
 | **TOTAL** | — | — | same locked O50 selection | **511** |
 
 ## 方法、网络和训练 loss
@@ -61,7 +61,7 @@ $$L_{total}=L_{pred}+0.09L_{SIGReg}+\rho(u)(L_{method}^{real}+L_{method}^{pred})
 | G3 | A_i = sg[(1/4) sum_{j=1}^4(q_i,j+1-q_ij)] | L_G3^b = mean_i[w_i(A) l_i^b] | Five prefixes; mean adjacent marginal score gain. |
 | C2 (V1 only) | Frozen-F terminal goal-cost ranking over 16 candidate action sequences | L_C2=L_C+CE(p_F,p_Q); p_F=softmax(-z_cand(J_F)), p_Q=softmax(z_cand(Q_G(z0,A1,g))) | Initialize every parameter from V1-C E10, freeze LeWM/Action Encoder, and fine-tune only G so First-Q follows the planner ranking |
 | C3 (V1 only) | Same-episode temporal distance in primitive-step units with an EMA State-V bootstrap | L_C3=E[omega_tau(r)Huber_1(r)], r=V_psi(z,g)-sg(y), tau=0.03; y=delta inside n_eff, otherwise c_gamma(n_eff)+gamma^n_eff V_bar(z_succ,g) | Freeze the complete V1-C parent, including both G copies; train only a nonnegative MRN State-V critic (gamma=0.98, n<=50 primitives) |
-| C4 (V1 only) | state-only G on aligned real z_i and stopped F-predicted z_i | L_C4=0.5[(L_vec^real+L_goal^real)+(L_vec^pred+L_goal^pred)], lambda_C=1 | Freeze encoder, Action Encoder and F; action affects G_C4 only through the F-produced state |
+| C4 objective v1 (V1 only) | state-only G on stopped F(z_i,a_i) post-action ghost states | L_C4=L_vector+L_goal, lambda_C=1 | Freeze encoder, Action Encoder and F; action affects G_C4 only through the F-produced state |
 
 ## 七种测试方法怎么测
 
@@ -116,15 +116,15 @@ Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`
 | V0 | G1 | L_G1=mean_i w_i(A_neighbor)l_i | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 20/50 (40%) | 20/50 (40%) | — | — |
 | V0 | G2 | L_G2=mean_i w_i(A_prefix-mean)l_i | ◆ 23/50 (46%) | 16/50 (32%) | ◆ **25/50 (50%)** | 23/50 (46%) | 23/50 (46%) | — | — |
 | V0 | G3 | L_G3=mean_i w_i(A_prefix-gain)l_i | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **24/50 (48%)** | **24/50 (48%)** | — | — |
-| V1 | C | L_C=mean(l)+mean_goal(q-qY)^2 | ◆ 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | α=.10 24/50 (48%)<br>◆ **α=.25 28/50 (56%)**<br>α=.50 27/50 (54%)<br>◆ **α=1 28/50 (56%)**<br>α=2 25/50 (50%) | 21/50 (42%) | ◆ 26/50 (52%) | — |
-| V1 | C2 | L_C2=L_C+CE(p_F,p_Qfirst) | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **26/50 (52%)** | 22/50 (44%) | ◆ **26/50 (52%)** | — |
+| V1 | C | L_C=mean(l)+mean_goal(q-qY)^2 | 23/50 (46%) | 18/50 (36%) | 22/50 (44%) | α=.10 24/50 (48%)<br>◆ **α=.25 28/50 (56%)**<br>α=.50 27/50 (54%)<br>◆ **α=1 28/50 (56%)**<br>α=2 25/50 (50%) | 21/50 (42%) | ◆ 26/50 (52%) | — |
+| V1 | C2 | L_C2=L_C+CE(p_F,p_Qfirst) | 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **26/50 (52%)** | 22/50 (44%) | ◆ **26/50 (52%)** | — |
 | V1 | C3 | L_C3=mean_i omega_tau(r_i)Huber_1(r_i) | — | — | — | Raw: α=.10 26/50 (52%)<br>α=.25 22/50 (44%)<br>α=.50 21/50 (42%)<br>α=1 21/50 (42%)<br>α=2 22/50 (44%) | — | Z: α=.025 25/50 (50%)<br>α=.05 28/50 (56%)<br>α=.075 27/50 (54%)<br>◆ **α=.10 31/50 (62%)**<br>α=.15 23/50 (46%)<br>α=.20 28/50 (56%)<br>α=.25 26/50 (52%)<br>α=.50 24/50 (48%)<br>α=1 24/50 (48%)<br>α=2 25/50 (50%) | ◆ 26/50 (52%) |
-| V1 | C4 | L_C4=0.5[(L_vec^r+L_goal^r)+(L_vec^p+L_goal^p)] | ◆ 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | **25/50 (50%)** | 21/50 (42%) | 24/50 (48%) | — |
-| V1 | D | L_D=mean_i w_i[sg(qY)]l_i | ◆ 23/50 (46%) | 22/50 (44%) | 21/50 (42%) | 25/50 (50%) | **26/50 (52%)** | — | — |
-| V1 | F | L_F=mean_i w_i(A_goal)l_i | ◆ 23/50 (46%) | ◆ 23/50 (46%) | 24/50 (48%) | **26/50 (52%)** | **26/50 (52%)** | — | — |
-| V1 | G1 | L_G1=mean_i w_i(A_neighbor)l_i | ◆ 23/50 (46%) | 21/50 (42%) | 24/50 (48%) | **26/50 (52%)** | 25/50 (50%) | — | — |
-| V1 | G2 | L_G2=mean_i w_i(A_prefix-mean)l_i | ◆ 23/50 (46%) | 21/50 (42%) | **25/50 (50%)** | **25/50 (50%)** | 24/50 (48%) | — | — |
-| V1 | G3 | L_G3=mean_i w_i(A_prefix-gain)l_i | ◆ 23/50 (46%) | 19/50 (38%) | ◆ **27/50 (54%)** | 26/50 (52%) | ◆ **27/50 (54%)** | — | — |
+| V1 | C4 | L_C4=L_vector+L_goal | ◆ **26/50 (52%)** | 19/50 (38%) | 24/50 (48%) | 22/50 (44%) | 23/50 (46%) | 25/50 (50%) | — |
+| V1 | D | L_D=mean_i w_i[sg(qY)]l_i | 23/50 (46%) | 22/50 (44%) | 21/50 (42%) | 25/50 (50%) | **26/50 (52%)** | — | — |
+| V1 | F | L_F=mean_i w_i(A_goal)l_i | 23/50 (46%) | ◆ 23/50 (46%) | 24/50 (48%) | **26/50 (52%)** | **26/50 (52%)** | — | — |
+| V1 | G1 | L_G1=mean_i w_i(A_neighbor)l_i | 23/50 (46%) | 21/50 (42%) | 24/50 (48%) | **26/50 (52%)** | 25/50 (50%) | — | — |
+| V1 | G2 | L_G2=mean_i w_i(A_prefix-mean)l_i | 23/50 (46%) | 21/50 (42%) | **25/50 (50%)** | **25/50 (50%)** | 24/50 (48%) | — | — |
+| V1 | G3 | L_G3=mean_i w_i(A_prefix-gain)l_i | 23/50 (46%) | 19/50 (38%) | ◆ **27/50 (54%)** | 26/50 (52%) | ◆ **27/50 (54%)** | — | — |
 | V2 | C | L_C=mean(l)+mean_goal(q-qY)^2 | 13/50 (26%) | ◆ **20/50 (40%)** | ◆ 16/50 (32%) | 19/50 (38%) | 10/50 (20%) | — | — |
 | V2 | D | L_D=mean_i w_i[sg(qY)]l_i | ◆ 16/50 (32%) | 18/50 (36%) | ◆ 16/50 (32%) | ◆ 21/50 (42%) | ◆ **24/50 (48%)** | — | — |
 | V2 | F | L_F=mean_i w_i(A_goal)l_i | 15/50 (30%) | 19/50 (38%) | 13/50 (26%) | ◆ 21/50 (42%) | **22/50 (44%)** | — | — |
@@ -143,7 +143,7 @@ Loss 列采用紧凑记号：`l_i` 是逐样本 successor TD 残差，`qY=Y^T m`
 | 版本 | F-only | G-only | F+G tail | First-Q | Mean-Q | First-Q2 | State-V |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | V0 | C/D/F/G1/G2/G3 23/50 | D 20/50 | G1/G2 25/50 | C 26/50 | D 26/50 | — | — |
-| V1 fixed | C/C2/D/F/G1/G2/G3/C4 23/50 | F 23/50 | G3 27/50 | C 28/50 | G3 27/50 | C/C2 26/50 | C3 26/50 |
+| V1 fixed | C4 26/50 | F 23/50 | G3 27/50 | C 28/50 | G3 27/50 | C/C2 26/50 | C3 26/50 |
 | V1 alpha sweep | — | — | — | C α=.25/1 28/50 | — | C3 Z-score α=.10 31/50 | C3 α=0 anchor 26/50 |
 | V2 | D 16/50 | C 20/50 | C/D 16/50 | D/F 21/50 | D 24/50 | — | — |
 | V2-EMA | D/F/G1 15/50 | G2 20/50 | F 17/50 | D/F 22/50 | F 23/50 | — | — |
@@ -329,14 +329,12 @@ V2-EMA E10 六个训练方法的均值为：F-only 27.0%、G-only 36.0%、F+G ta
 
 <!-- RESULTS_TD_O25_V1_C_C3_END -->
 
-<!-- RESULTS_TD_V1_C4_FORMAL_START -->
-## V1-C4 formal O25 O50 O100 paired evaluation
+<!-- RESULTS_TD_V1_C4_OBJECTIVE_V0_HISTORY_START -->
+## V1-C4 objective v0 historical record - superseded
 
-C4 keeps the V1 LeWM observation encoder, Action Encoder and world-model predictor F frozen, stops every F output, and trains only a new online state-only G_C4 with a frozen EMA target. G_C4 has interface `G_C4(z_i,m)->Psi_i in R^192`; raw action and action embedding never enter G_C4.
+This is the exact pre-versioned C4 run, retrospectively labelled objective v0. It used two aligned online branches, `x_real=z_i` and `x_pred=sg[F(z_(i-1),a_(i-1))]`, with the shared target `Y_i=sg[z_i+gamma(1-d_i)Gbar_C4(z_(i+1),m)]`. Its loss was `L_C4=0.5*((L_vector^real+L_goal^real)+(L_vector^pred+L_goal^pred))`, with lambda_C=1.
 
-The aligned online inputs are `x_real=z_i` and `x_pred=sg[F(z_{i-1},a_{i-1})]`. They share `Y_i=sg[z_i+gamma(1-d_i)Gbar_C4(z_{i+1},m)]`; when z_i is terminal, `Y_i=z_i`. Each branch uses full 192-D vector TD plus the goal projection residual on goal-derived samples only, and `L_C4=0.5*(L_real_vector+L_real_goal+L_pred_vector+L_pred_goal)` with lambda_C=1.
-
-### Protocol by score matrix
+Objective v0 is preserved only as historical evidence. It is superseded by the objective-v1 post-action-ghost formulation below and is excluded from the current 511-cell O50 ledger, 25,550-outcome total, master-table row, winner markers, and objective-v1 conclusions.
 
 | Protocol | F-only | C4-only | F+C4 tail | First-Q | Mean-Q | First-Q2 |
 |---|---:|---:|---:|---:|---:|---:|
@@ -344,93 +342,125 @@ The aligned online inputs are `x_real=z_i` and `x_pred=sg[F(z_{i-1},a_{i-1})]`. 
 | O50 | 23/50 (46%) | 18/50 (36%) | 23/50 (46%) | 25/50 (50%) | 21/50 (42%) | 24/50 (48%) |
 | O100 | 25/50 (50%) | 25/50 (50%) | 24/50 (48%) | 29/50 (58%) | 28/50 (56%) | 31/50 (62%) |
 
+- Historical summary SHA-256: `351c8700a07484755510ed02580f50d049e299d0f700b0df519b262a02412db6`
+- Historical objective-v0 C4 checkpoint SHA-256: `28a59d0b07cb2e0ea66b34c57fdc1eb8dce513ca80b8a8700cc36ad9458ef99b`
+- Historical evidence: `/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v1_c4_20260907/formal/summary/actor_free_td_lewm_v1_c4_formal_summary.json`
+- Historical coverage retained: 18 cells and 900 Boolean outcomes.
+
+<!-- RESULTS_TD_V1_C4_OBJECTIVE_V0_HISTORY_END -->
+
+<!-- RESULTS_TD_V1_C4_FORMAL_START -->
+## V1-C4 objective v1 formal O25 O50 O100 paired evaluation
+
+C4 keeps the V1 LeWM observation encoder, Action Encoder and world-model predictor F frozen, stops every F output, and trains only a new online state-only G_C4 with a frozen EMA target. G_C4 has interface `G_C4(z_ghost,m)->Psi_i in R^192`; raw action and action embedding never enter G_C4.
+
+The single online input is `x_i=sg[F(z_i^real,a_i)]`. Its target is `Y_i=sg[z_(i+1)^real+gamma(1-d_i)Gbar_C4(sg[F(z_(i+1)^real,a_(i+1))],m)]`; when the transition after a_i terminates, `Y_i=z_(i+1)^real`. The loss is `L_C4=L_vector+L_goal`, where the full 192-D vector TD term uses every transition and the goal projection residual uses goal-derived samples only with lambda_C=1.
+
+### Protocol by score matrix
+
+| Protocol | F-only | C4-only | F+C4 tail | First-Q | Mean-Q | First-Q2 |
+|---|---:|---:|---:|---:|---:|---:|
+| O25 | 37/50 (74%) | 32/50 (64%) | 38/50 (76%) | 32/50 (64%) | 31/50 (62%) | 34/50 (68%) |
+| O50 | 26/50 (52%) | 19/50 (38%) | 24/50 (48%) | 22/50 (44%) | 23/50 (46%) | 25/50 (50%) |
+| O100 | 25/50 (50%) | 25/50 (50%) | 24/50 (48%) | 27/50 (54%) | 28/50 (56%) | 28/50 (56%) |
+
 C4-only first rolls the candidate action through F and evaluates `-G_C4(z1^F,m)^T m`. F+C4 tail rolls all five actions through F, then evaluates G_C4 at z5^F; the last action cannot bypass F. First-Q and First-Q2 read z1^F, while Mean-Q averages aligned state-only Q over z1^F...z5^F. The two first-action weights were fixed at alpha=0.25 before evaluation.
+
+### F-only reproducibility/backend audit
+
+The audited C4 and V1-C checkpoints have tensor-identical frozen LeWM state dictionaries and equal world-model configurations. However, current C4 evaluation used EGL while the historical V1-C reference used OSMesa. Live rendered pixels are re-encoded after each environment step, so the backend can alter later latent inputs, CEM choices, and Boolean outcomes even with identical frozen F tensors. Independent same-EGL V1-C F-only rechecks reproduced the current C4 F-only outcome vector exactly for O25, O50, and O100; the observed drift is therefore not an effect of the C4 G head.
+
+| Protocol | Historical V1-C / OSMesa | Current C4 F-only / EGL | New | Lost | Delta | Exact outcome vector |
+|---|---:|---:|---:|---:|---:|---|
+| O25 | 37/50 (74%) | 37/50 (74%) | 0 | 0 | +0 | Yes |
+| O50 | 23/50 (46%) | 26/50 (52%) | 4 | 1 | +3 | No |
+| O100 | 25/50 (50%) | 25/50 (50%) | 2 | 2 | +0 | No |
+
+Within-C4 comparisons against current C4/EGL F-only are the primary controlled comparisons. C4-versus-historical-V1-C comparisons retain the ordered start-goal pairs and score formulas but cross rendering backends, so they are descriptive rather than pure C4 method effects.
 
 ### Paired outcomes relative to same-protocol F-only
 
 | Protocol | Score | C4 result | New | Lost | F+New | Delta |
 |---|---|---:|---:|---:|---:|---:|
-| O25 | C4-only | 33/50 (66%) | 3 | 7 | 40 | -4 |
-| O25 | F+C4 tail | 36/50 (72%) | 4 | 5 | 41 | -1 |
-| O25 | First-Q | 33/50 (66%) | 3 | 7 | 40 | -4 |
-| O25 | Mean-Q | 34/50 (68%) | 6 | 9 | 43 | -3 |
-| O25 | First-Q2 | 32/50 (64%) | 3 | 8 | 40 | -5 |
-| O50 | C4-only | 18/50 (36%) | 4 | 9 | 27 | -5 |
-| O50 | F+C4 tail | 23/50 (46%) | 6 | 6 | 29 | +0 |
-| O50 | First-Q | 25/50 (50%) | 6 | 4 | 29 | +2 |
-| O50 | Mean-Q | 21/50 (42%) | 3 | 5 | 26 | -2 |
-| O50 | First-Q2 | 24/50 (48%) | 4 | 3 | 27 | +1 |
-| O100 | C4-only | 25/50 (50%) | 5 | 5 | 30 | +0 |
-| O100 | F+C4 tail | 24/50 (48%) | 3 | 4 | 28 | -1 |
-| O100 | First-Q | 29/50 (58%) | 6 | 2 | 31 | +4 |
-| O100 | Mean-Q | 28/50 (56%) | 7 | 4 | 32 | +3 |
-| O100 | First-Q2 | 31/50 (62%) | 9 | 3 | 34 | +6 |
+| O25 | C4-only | 32/50 (64%) | 3 | 8 | 40 | -5 |
+| O25 | F+C4 tail | 38/50 (76%) | 5 | 4 | 42 | +1 |
+| O25 | First-Q | 32/50 (64%) | 3 | 8 | 40 | -5 |
+| O25 | Mean-Q | 31/50 (62%) | 3 | 9 | 40 | -6 |
+| O25 | First-Q2 | 34/50 (68%) | 2 | 5 | 39 | -3 |
+| O50 | C4-only | 19/50 (38%) | 3 | 10 | 29 | -7 |
+| O50 | F+C4 tail | 24/50 (48%) | 3 | 5 | 29 | -2 |
+| O50 | First-Q | 22/50 (44%) | 2 | 6 | 28 | -4 |
+| O50 | Mean-Q | 23/50 (46%) | 3 | 6 | 29 | -3 |
+| O50 | First-Q2 | 25/50 (50%) | 3 | 4 | 29 | -1 |
+| O100 | C4-only | 25/50 (50%) | 7 | 7 | 32 | +0 |
+| O100 | F+C4 tail | 24/50 (48%) | 5 | 6 | 30 | -1 |
+| O100 | First-Q | 27/50 (54%) | 6 | 4 | 31 | +2 |
+| O100 | Mean-Q | 28/50 (56%) | 6 | 3 | 31 | +3 |
+| O100 | First-Q2 | 28/50 (56%) | 8 | 5 | 33 | +3 |
 
-### Paired outcomes relative to V1-C under the same score
+### Paired outcomes relative to historical V1-C under the same score (descriptive)
 
 | Protocol | Score | V1-C | C4 | New | Lost | Delta |
 |---|---|---:|---:|---:|---:|---:|
-| O25 | C4-only | 29/50 (58%) | 33/50 (66%) | 10 | 6 | +4 |
-| O25 | F+C4 tail | 35/50 (70%) | 36/50 (72%) | 5 | 4 | +1 |
-| O25 | First-Q | 36/50 (72%) | 33/50 (66%) | 3 | 6 | -3 |
-| O25 | Mean-Q | 30/50 (60%) | 34/50 (68%) | 8 | 4 | +4 |
-| O25 | First-Q2 | 35/50 (70%) | 32/50 (64%) | 3 | 6 | -3 |
-| O50 | C4-only | 18/50 (36%) | 18/50 (36%) | 6 | 6 | +0 |
-| O50 | F+C4 tail | 22/50 (44%) | 23/50 (46%) | 5 | 4 | +1 |
-| O50 | First-Q | 28/50 (56%) | 25/50 (50%) | 3 | 6 | -3 |
-| O50 | Mean-Q | 21/50 (42%) | 21/50 (42%) | 6 | 6 | +0 |
-| O50 | First-Q2 | 26/50 (52%) | 24/50 (48%) | 2 | 4 | -2 |
-| O100 | C4-only | 24/50 (48%) | 25/50 (50%) | 6 | 5 | +1 |
-| O100 | F+C4 tail | 22/50 (44%) | 24/50 (48%) | 6 | 4 | +2 |
-| O100 | First-Q | 32/50 (64%) | 29/50 (58%) | 2 | 5 | -3 |
+| O25 | C4-only | 29/50 (58%) | 32/50 (64%) | 12 | 9 | +3 |
+| O25 | F+C4 tail | 35/50 (70%) | 38/50 (76%) | 6 | 3 | +3 |
+| O25 | First-Q | 36/50 (72%) | 32/50 (64%) | 2 | 6 | -4 |
+| O25 | Mean-Q | 30/50 (60%) | 31/50 (62%) | 7 | 6 | +1 |
+| O25 | First-Q2 | 35/50 (70%) | 34/50 (68%) | 3 | 4 | -1 |
+| O50 | C4-only | 18/50 (36%) | 19/50 (38%) | 6 | 5 | +1 |
+| O50 | F+C4 tail | 22/50 (44%) | 24/50 (48%) | 5 | 3 | +2 |
+| O50 | First-Q | 28/50 (56%) | 22/50 (44%) | 1 | 7 | -6 |
+| O50 | Mean-Q | 21/50 (42%) | 23/50 (46%) | 8 | 6 | +2 |
+| O50 | First-Q2 | 26/50 (52%) | 25/50 (50%) | 3 | 4 | -1 |
+| O100 | C4-only | 24/50 (48%) | 25/50 (50%) | 7 | 6 | +1 |
+| O100 | F+C4 tail | 22/50 (44%) | 24/50 (48%) | 5 | 3 | +2 |
+| O100 | First-Q | 32/50 (64%) | 27/50 (54%) | 3 | 8 | -5 |
 | O100 | Mean-Q | 25/50 (50%) | 28/50 (56%) | 7 | 4 | +3 |
-| O100 | First-Q2 | 26/50 (52%) | 31/50 (62%) | 8 | 3 | +5 |
+| O100 | First-Q2 | 26/50 (52%) | 28/50 (56%) | 6 | 4 | +2 |
 
 ### Training loss and evidence
 
 | Stage | Component | E1 | E10 | Change |
 |---|---|---:|---:|---:|
-| Train | Real vector | 2051.62 | 1773.81 | -13.5% |
-| Train | Real goal | 28998.7 | 39493.4 | +36.2% |
-| Train | Predicted vector | 2075.25 | 1798.73 | -13.3% |
-| Train | Predicted goal | 29124.4 | 39514.1 | +35.7% |
-| Train | C4 total | 31125.1 | 41290.1 | +32.7% |
-| Validation | Real vector | 2375.68 | 1557.86 | -34.4% |
-| Validation | Real goal | 17359.1 | 16346.4 | -5.8% |
-| Validation | Predicted vector | 2411.96 | 1583.21 | -34.4% |
-| Validation | Predicted goal | 17514.1 | 16395.4 | -6.4% |
-| Validation | C4 total | 19830.4 | 17941.4 | -9.5% |
+| Train | Vector TD | 2043.06 | 1804.82 | -11.7% |
+| Train | Goal projection | 28938.7 | 38950.5 | +34.6% |
+| Train | C4 total | 30981.7 | 40755.4 | +31.5% |
+| Validation | Vector TD | 2370.07 | 1590.51 | -32.9% |
+| Validation | Goal projection | 17268.7 | 16062.4 | -7.0% |
+| Validation | C4 total | 19638.8 | 17652.9 | -10.1% |
 
-The ten-epoch formal run completed 127,960 optimizer updates. Train C4 total changed from 31125.1 to 41290.1; validation C4 total changed from 19830.4 to 17941.4. Final train components are real/vector 1773.81, real/goal 39493.4, predicted/vector 1798.73, and predicted/goal 39514.1.
+The ten-epoch formal run completed 127,960 optimizer updates. Train C4 total changed from 30981.7 to 40755.4; validation C4 total changed from 19638.8 to 17652.9. Final train components are vector TD 1804.82 and goal projection 38950.5.
 
-train ends goal-projection-dominated (22.12x); validation ends goal-projection-dominated (10.42x). Absolute train/validation loss levels diagnose C4 optimization only; they are not directly comparable to the differently scaled C, C2, or C3 objectives.
+train ends goal-projection-dominated (21.58x); validation ends goal-projection-dominated (10.10x). Absolute train/validation loss levels diagnose C4 optimization only; they are not directly comparable to the differently scaled C, C2, or C3 objectives.
 
-- Formal summary SHA-256: `351c8700a07484755510ed02580f50d049e299d0f700b0df519b262a02412db6`
-- Training manifest SHA-256: `6d7c900650133707462302011c5af2e2de1d2ed45f946f4ffc7e8cf435496b10`
-- Metrics CSV SHA-256: `0bc16785301dd14badd162b535396ce756e22ac506fd3ce050f6be4399d43b5c`
-- C4 E10 deployment checkpoint SHA-256: `28a59d0b07cb2e0ea66b34c57fdc1eb8dce513ca80b8a8700cc36ad9458ef99b`
-- Checkpoint: `/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/c4-final-artifacts-20260907/epoch_10.pt`
+- Formal summary SHA-256: `79ff270f5316816e33fbf10f795fb5eef93f57dd2794ccf41773e42efcbc0730`
+- Training manifest SHA-256: `692b6b8497a71d069639a2d90e47833c6be160acab3a979078301a1c47f88219`
+- Metrics CSV SHA-256: `494a6390ddc41229dd7b7ee351fa724949e6f831d4bcb4da794a5e096bd457bb`
+- C4 E10 deployment checkpoint SHA-256: `ae4112aa8ca9810040bb23ad9ee314445ea003c264985cd9ce3070f61c3f2c7d`
+- Checkpoint: `/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/c4-objective1-final-20260907/server-artifacts/extracted/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/actor_free_td_lewm_v1_c4/c4/epoch_10.pt`
 - Evidence coverage: 18 C4 cells and 900 C4 Boolean outcomes; no smoke or pilot cell is included.
-- Loss plot: `/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v1_c4_20260907/training/actor_free_td_lewm_v1_c4_loss_curves.png` (SHA-256 `afdcf899892054c183d58f1e02fa311d9d693a8106146e1ff278de1ab3295cc5`)
+- Loss plot: `/Users/wangjie/.codex/.chatgpt-projects/g-p-6a705f86be8c81919015a3f08810936a/tmp/v1-action-encoder-b47bd53/reports/artifacts/actor_free_td_lewm_v1_c4_objective1_20260907/training/actor_free_td_lewm_v1_c4_loss_curves.png` (SHA-256 `69d30d2463d37b3ef1fdab772e6133d606698707350d6b181f8fdffa99f545be`)
 
 ### Result analysis
 
-- O25: best C4 score is F-only at 37/50 (74%), +0/50 (+0 pp) versus its unchanged F-only baseline.
-- O50: best C4 score is First-Q at 25/50 (50%), +2/50 (+4 pp) versus its unchanged F-only baseline.
-- O100: best C4 score is First-Q2 at 31/50 (62%), +6/50 (+12 pp) versus its unchanged F-only baseline.
-- Across the 15 non-baseline protocol-score cells, C4 improves 5, ties 2, and harms 8 relative to the same-protocol F-only outcome.
-- Against V1-C under identical O25 scorers, C4's largest change is C4-only/Mean-Q +4/50 and its smallest is First-Q/First-Q2 -3/50.
-- O25 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 3/5, tied 0/5, lower 2/5; state-focused readouts [C4-only +4, Mean-Q +4], mixed F+C4 readouts [F+C4 tail +1, First-Q -3, First-Q2 -3] (all deltas are successes out of 50).
-- Against V1-C under identical O50 scorers, C4's largest change is F+C4 tail +1/50 and its smallest is First-Q -3/50.
-- O50 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 1/5, tied 2/5, lower 2/5; state-focused readouts [C4-only +0, Mean-Q +0], mixed F+C4 readouts [F+C4 tail +1, First-Q -3, First-Q2 -2] (all deltas are successes out of 50).
-- Against V1-C under identical O100 scorers, C4's largest change is First-Q2 +5/50 and its smallest is First-Q -3/50.
-- O100 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 4/5, tied 0/5, lower 1/5; state-focused readouts [C4-only +1, Mean-Q +3], mixed F+C4 readouts [F+C4 tail +2, First-Q -3, First-Q2 +5] (all deltas are successes out of 50).
-- C4 changes the action route, successor time semantics, and real/predicted dual-branch training objective together. Therefore the C4-versus-V1-C scorer pattern is descriptive and cannot isolate a causal effect of routing action through frozen F or of removing action from G by itself.
-- O25 complementarity: the largest F+New oracle union is 43/50, from Mean-Q 34/50 (68%), New 6, Lost 9, delta -3. The largest deployed delta is F+C4 tail -1/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
-- O50 complementarity: the largest F+New oracle union is 29/50, from F+C4 tail 23/50 (46%), New 6, Lost 6, delta +0; First-Q 25/50 (50%), New 6, Lost 4, delta +2. The largest deployed delta is First-Q +2/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
-- O100 complementarity: the largest F+New oracle union is 34/50, from First-Q2 31/50 (62%), New 9, Lost 3, delta +6. The largest deployed delta is First-Q2 +6/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
-- At E10 with lambda_C=1, train goal/vector 79007.6/3572.54 (22.12x); validation goal/vector 32741.8/3141.07 (10.42x). This raw-loss dominance measures optimization scale, not usefulness of the goal signal; it means representation conclusions are confounded by unequal component magnitudes until the loss scales are balanced.
-- First-Q2 minus First-Q is O25 -1/50, O50 -1/50, O100 +2/50. This quantifies sensitivity to F/Q scaling; it does not authorize choosing a scorer after seeing these formal cells.
+- O25: best C4 score is F+C4 tail at 38/50 (76%), +1/50 (+2 pp) versus its same-backend C4 F-only control.
+- O50: best C4 score is F-only at 26/50 (52%), +0/50 (+0 pp) versus its same-backend C4 F-only control.
+- O100: best C4 score is Mean-Q/First-Q2 at 28/50 (56%), +3/50 (+6 pp) versus its same-backend C4 F-only control.
+- Across the 15 non-baseline protocol-score cells, C4 improves 4, ties 1, and harms 10 relative to the same-protocol, same-backend C4 F-only outcome.
+- F-only reproducibility/backend audit (historical V1-C/OSMesa -> current C4/EGL): O25 37/50 (74%) -> 37/50 (74%) (New 0, Lost 0, delta +0/50); O50 23/50 (46%) -> 26/50 (52%) (New 4, Lost 1, delta +3/50); O100 25/50 (50%) -> 25/50 (50%) (New 2, Lost 2, delta +0/50). The audited checkpoints have tensor-identical frozen LeWM state dictionaries and equal world-model configurations, but live rendered pixels feed later replanning steps, so changing the rendering backend can change latent inputs, CEM choices, and episode outcomes.
+- Within-C4 comparisons against the current EGL F-only control are therefore primary. C4-versus-historical-V1-C comparisons retain ordered start-goal pairs and score formulas but cross rendering backends, so they are descriptive rather than pure estimates of the C4 method effect.
+- Against historical V1-C under the same O25 score formulas (cross-backend, descriptive), C4's largest change is C4-only/F+C4 tail +3/50 and its smallest is First-Q -4/50.
+- O25 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 3/5, tied 0/5, lower 2/5; state-focused readouts [C4-only +3, Mean-Q +1], mixed F+C4 readouts [F+C4 tail +3, First-Q -4, First-Q2 -1] (all deltas are successes out of 50).
+- Against historical V1-C under the same O50 score formulas (cross-backend, descriptive), C4's largest change is F+C4 tail/Mean-Q +2/50 and its smallest is First-Q -6/50.
+- O50 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 3/5, tied 0/5, lower 2/5; state-focused readouts [C4-only +1, Mean-Q +2], mixed F+C4 readouts [F+C4 tail +2, First-Q -6, First-Q2 -1] (all deltas are successes out of 50).
+- Against historical V1-C under the same O100 score formulas (cross-backend, descriptive), C4's largest change is Mean-Q +3/50 and its smallest is First-Q -5/50.
+- O100 scorer pattern for state-only/action-through-F C4 versus V1-C: higher 4/5, tied 0/5, lower 1/5; state-focused readouts [C4-only +1, Mean-Q +3], mixed F+C4 readouts [F+C4 tail +2, First-Q -5, First-Q2 +2] (all deltas are successes out of 50).
+- C4 simultaneously changes the action route and successor time semantics, replaces the action-conditioned G interface with a state-only G interface, and is compared here with a historical V1-C run from a different rendering backend. Therefore the C4-versus-V1-C scorer pattern is descriptive and cannot isolate a causal effect of routing action through frozen F or of removing action from G by itself.
+- O25 complementarity: the largest F+New oracle union is 42/50, from F+C4 tail 38/50 (76%), New 5, Lost 4, delta +1. The largest deployed delta is F+C4 tail +1/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
+- O50 complementarity: the largest F+New oracle union is 29/50, from C4-only 19/50 (38%), New 3, Lost 10, delta -7; F+C4 tail 24/50 (48%), New 3, Lost 5, delta -2; Mean-Q 23/50 (46%), New 3, Lost 6, delta -3; First-Q2 25/50 (50%), New 3, Lost 4, delta -1. The largest deployed delta is First-Q2 -1/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
+- O100 complementarity: the largest F+New oracle union is 33/50, from First-Q2 28/50 (56%), New 8, Lost 5, delta +3. The largest deployed delta is Mean-Q/First-Q2 +3/50. F+New preserves F successes only by oracle construction; the deployable score still incurs every Lost case.
+- At E10 with lambda_C=1, train goal/vector 38950.5/1804.82 (21.58x); validation goal/vector 16062.4/1590.51 (10.10x). This raw-loss dominance measures optimization scale, not usefulness of the goal signal; it means representation conclusions are confounded by unequal component magnitudes until the loss scales are balanced.
+- First-Q2 minus First-Q is O25 +2/50, O50 +3/50, O100 +1/50. This quantifies sensitivity to F/Q scaling; it does not authorize choosing a scorer after seeing these formal cells.
 - Next predeclared experiment 1: keep C4 architecture, checkpoints, protocols, and six scorer definitions fixed; compare lambda_C or running-scale-normalized vector/goal losses chosen only on a disjoint development split, then run the locked choice once on each formal protocol.
 - Next predeclared experiment 2: fit F/Q calibration or an F-versus-C4 gate only on separate development pairs, freeze its rule and threshold before formal evaluation, and report its deployed result alongside New, Lost, and the non-deployable F+New oracle ceiling.
 - Confirmation target: repeat every locked comparison with multiple training seeds and planning seeds, reporting paired uncertainty separately for O25, O50, and O100 before making any overall superiority claim.

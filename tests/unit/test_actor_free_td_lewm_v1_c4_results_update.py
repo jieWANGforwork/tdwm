@@ -483,6 +483,8 @@ def test_markdown_update_keeps_one_master_table_and_adds_paired_c4_matrices() ->
     assert expected_audit_row in section
     assert "current C4 evaluation used EGL" in section
     assert "historical V1-C reference used OSMesa" in section
+    assert "same-EGL V1-C F-only rechecks" in section
+    assert "not an effect of the C4 G head" in section
     assert "Within-C4 comparisons" in section
     assert "descriptive rather than pure C4 method effects" in section
     paired_section = section.split(
@@ -737,6 +739,8 @@ def test_docx_update_in_memory_has_one_c4_row_and_preserves_old_audit_hashes() -
     assert "F-only reproducibility/backend audit" in text
     assert "current C4 evaluation used EGL" in text
     assert "historical V1-C reference used OSMesa" in text
+    assert "same-EGL V1-C F-only rechecks" in text
+    assert "not an effect of the C4 G head" in text
     assert "primary controlled comparisons" in text
     assert "descriptive rather than pure C4 method effects" in text
     assert "objective v0 historical record superseded" in text

@@ -1096,7 +1096,10 @@ def _formal_markdown_section(evidence: C4ReportEvidence) -> str:
                 "current C4 evaluation used EGL while the historical V1-C reference "
                 "used OSMesa. Live rendered pixels are re-encoded after each environment "
                 "step, so the backend can alter later latent inputs, CEM choices, and "
-                "Boolean outcomes even with identical frozen F tensors."
+                "Boolean outcomes even with identical frozen F tensors. Independent "
+                "same-EGL V1-C F-only rechecks reproduced the current C4 F-only outcome "
+                "vector exactly for O25, O50, and O100; the observed drift is therefore "
+                "not an effect of the C4 G head."
             ),
             "",
             (
@@ -2075,7 +2078,7 @@ def _append_formal_docx(document: Any, evidence: C4ReportEvidence) -> None:
     _add_docx_heading(document, "F-only reproducibility/backend audit", 2)
     _add_docx_body(
         document,
-        "The audited C4 and V1-C checkpoints have tensor-identical frozen LeWM state dictionaries and equal world-model configurations. However, current C4 evaluation used EGL while the historical V1-C reference used OSMesa. Live rendered pixels are re-encoded after each environment step, so the backend can alter later latent inputs, CEM choices, and Boolean outcomes even with identical frozen F tensors.",
+        "The audited C4 and V1-C checkpoints have tensor-identical frozen LeWM state dictionaries and equal world-model configurations. However, current C4 evaluation used EGL while the historical V1-C reference used OSMesa. Live rendered pixels are re-encoded after each environment step, so the backend can alter later latent inputs, CEM choices, and Boolean outcomes even with identical frozen F tensors. Independent same-EGL V1-C F-only rechecks reproduced the current C4 F-only outcome vector exactly for O25, O50, and O100; the observed drift is therefore not an effect of the C4 G head.",
     )
     audit_table = document.add_table(rows=1, cols=7)
     audit_headers = (

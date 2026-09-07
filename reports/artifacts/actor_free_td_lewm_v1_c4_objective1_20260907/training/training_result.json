@@ -1,0 +1,20 @@
+{
+  "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/actor_free_td_lewm_v1_c4/c4/epoch_10.pt",
+  "deployment_checkpoint_sha256": "ae4112aa8ca9810040bb23ad9ee314445ea003c264985cd9ce3070f61c3f2c7d",
+  "deployment_checkpoint_version": 1,
+  "final_epoch": 10,
+  "frozen_latent_store_manifest_sha256": "fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e",
+  "frozen_world_model_verified": true,
+  "global_step": 127960,
+  "implementation_version": "v1",
+  "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt",
+  "method": "actor_free_td_lewm_v1_c4",
+  "method_family": "actor_free_td_lewm_v1",
+  "objective_version": 1,
+  "peak_cuda_memory_bytes": 112084480,
+  "pretrained_world_model_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+  "protocol_sha256": "c1cc3059658fc789e593434f1654696fe45fc944827e7591a8025e6f9ced88ef",
+  "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072",
+  "seed": 3072,
+  "variant": "c4"
+}

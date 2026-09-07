@@ -1,0 +1,112 @@
+Seed set to 3072
+2026-09-07 03:08:27.263 | INFO     | stable_worldmodel.wm.utils:_resolve_folder:137 - Loading checkpoint from folder /root/autodl-tmp/tdwm/outputs/pretrained_f_lewm_baseline_eac18ce_20260829/seed_3072/checkpoints/exports/checkpoints/epoch_10...
+03:08:29 | INFO  | __init__.py | JAX version 0.11.1 available.
+03:08:30 | INFO  | atomic_chec~| [atomic_save] installed crash-safe checkpoint plugin (write to sibling .tmp + fsync + atomic rename)
+03:08:30 | INFO  | utils.py    | Created ViT-tiny from scratch with config: {'hidden_size': 192, 'num_hidden_layers': 12, 'num_attention_heads': 3, 'intermediate_size': 768, 'image_size': 224, 'patch_size': 14}
+Using bfloat16 Automatic Mixed Precision (AMP)
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+`Trainer(limit_val_batches=1.0)` was configured so 100% of the batches will be used..
+You are using a CUDA device ('NVIDIA GeForce RTX 4080 SUPER') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/root/autodl-tmp/envs/tdwm/lib/python3.12/site-packages/lightning/pytorch/utilities/model_summary/model_summary.py:242: Precision bf16-mixed is not supported by the model summary.  Estimated model size in MB will not be accurate. Using 32 bits instead.
+┏━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃   ┃ Name     ┃ Type                         ┃ Params ┃ Mode  ┃ FLOPs ┃
+┡━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ 0 │ model    │ LeWM                         │ 18.0 M │ eval  │     0 │
+│ 1 │ online_g │ ActorFreeTDJEPAPredictorV1C4 │  329 K │ train │     0 │
+│ 2 │ target_g │ ActorFreeTDJEPAPredictorV1C4 │  329 K │ eval  │     0 │
+└───┴──────────┴──────────────────────────────┴────────┴───────┴───────┘
+Trainable params: 329 K                                                         
+Non-trainable params: 18.4 M                                                    
+Total params: 18.7 M                                                            
+Total estimated model params size (MB): 74.778                                  
+Modules in train mode: 17                                                       
+Modules in eval mode: 333                                                       
+Total FLOPs: 0                                                                  
+/root/autodl-tmp/envs/tdwm/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:538: Found 333 module(s) in eval mode at the start of training. This may lead to unexpected behavior during training. If this is intentional, you can ignore this warning.
+03:21:32 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=00.ckpt
+03:21:33 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=00.ckpt saved (74.0 MiB, serialise=0.14s write=0.09s rename=0.0ms)
+03:21:33 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+03:21:33 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.14s write=0.09s rename=0.0ms)
+03:34:01 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=01.ckpt
+03:34:01 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=01.ckpt saved (74.0 MiB, serialise=0.12s write=0.09s rename=0.0ms)
+03:34:01 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+03:34:01 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.11s write=0.09s rename=8.0ms)
+03:46:08 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=02.ckpt
+03:46:08 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=02.ckpt saved (74.0 MiB, serialise=0.14s write=0.10s rename=0.0ms)
+03:46:08 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+03:46:09 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.13s write=0.11s rename=10.1ms)
+03:58:27 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=03.ckpt
+03:58:27 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=03.ckpt saved (74.0 MiB, serialise=0.11s write=0.10s rename=0.1ms)
+03:58:27 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+03:58:28 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.10s write=0.11s rename=7.0ms)
+04:10:33 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=04.ckpt
+04:10:33 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=04.ckpt saved (74.0 MiB, serialise=0.11s write=0.08s rename=0.1ms)
+04:10:33 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+04:10:33 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.11s write=0.09s rename=8.6ms)
+04:22:28 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=05.ckpt
+04:22:28 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=05.ckpt saved (74.0 MiB, serialise=0.14s write=0.10s rename=0.1ms)
+04:22:28 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+04:22:28 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.14s write=0.09s rename=10.0ms)
+04:34:27 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=06.ckpt
+04:34:27 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=06.ckpt saved (74.0 MiB, serialise=0.11s write=0.07s rename=0.0ms)
+04:34:27 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+04:34:28 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.10s write=0.08s rename=7.5ms)
+04:46:20 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=07.ckpt
+04:46:21 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=07.ckpt saved (74.0 MiB, serialise=0.11s write=0.09s rename=0.1ms)
+04:46:21 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+04:46:21 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.10s write=0.10s rename=7.4ms)
+04:58:15 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=08.ckpt
+04:58:16 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=08.ckpt saved (74.0 MiB, serialise=0.11s write=0.09s rename=0.1ms)
+04:58:16 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+04:58:16 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.10s write=0.09s rename=7.0ms)
+05:09:56 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/epoch-epoch=09.ckpt
+05:09:57 | INFO  | atomic_chec~| [atomic_save] ✓ epoch-epoch=09.ckpt saved (74.0 MiB, serialise=0.14s write=0.09s rename=0.0ms)
+05:09:57 | INFO  | atomic_chec~| [atomic_save] → /root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt
+05:09:57 | INFO  | atomic_chec~| [atomic_save] ✓ last.ckpt saved (74.0 MiB, serialise=0.13s write=0.09s rename=10.1ms)
+`Trainer.fit` stopped: `max_epochs=10` reached.
+Epoch 9/9  ━━━━━━━━━━━━━━━ 12796/12796 0:09:11 •       21.38it/s v_num: 0.000   
+                                       0:00:00                   validation/los…
+                                                                 17652.912      
+                                                                 validation/vec…
+                                                                 1590.507       
+                                                                 validation/goa…
+                                                                 16062.432      
+                                                                 validation/c4_…
+                                                                 17652.912      
+                                                                 validation/goa…
+                                                                 0.500          
+                                                                 validation/ran…
+                                                                 0.500          
+                                                                 validation/ter…
+                                                                 0.001          
+                                                                 validation/td_…
+                                                                 255.984        
+                                                                 validation/pre…
+                                                                 0.612          
+                                                                 validation/td_…
+                                                                 0.594          
+                                                                 validation/f_o…
+                                                                 0.005          
+{
+  "deployment_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/actor_free_td_lewm_v1_c4/c4/epoch_10.pt",
+  "deployment_checkpoint_sha256": "ae4112aa8ca9810040bb23ad9ee314445ea003c264985cd9ce3070f61c3f2c7d",
+  "deployment_checkpoint_version": 1,
+  "final_epoch": 10,
+  "frozen_latent_store_manifest_sha256": "fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e",
+  "frozen_world_model_verified": true,
+  "global_step": 127960,
+  "implementation_version": "v1",
+  "last_checkpoint": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072/checkpoints/lightning/last.ckpt",
+  "method": "actor_free_td_lewm_v1_c4",
+  "method_family": "actor_free_td_lewm_v1",
+  "objective_version": 1,
+  "peak_cuda_memory_bytes": 112084480,
+  "pretrained_world_model_sha256": "198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257",
+  "protocol_sha256": "c1cc3059658fc789e593434f1654696fe45fc944827e7591a8025e6f9ced88ef",
+  "run_dir": "/root/autodl-tmp/tdwm/outputs/actor_free_td_lewm_v1_c4_ea1f64b_obj1_20260907/seed_3072",
+  "seed": 3072,
+  "variant": "c4"
+}
