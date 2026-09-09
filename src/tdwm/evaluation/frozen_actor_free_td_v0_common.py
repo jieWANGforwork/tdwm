@@ -35,6 +35,7 @@ from tdwm.adapters.frozen_actor_free_td_v0_common import (
     FrozenActorFreeTDV0MethodSpec,
     require_exact_values,
 )
+from tdwm.adapters.g_weighted_cem import GWeightedCEMConfig, attach_g_weighted_cem
 from tdwm.adapters.runtime import prepare_cloud_runtime
 from tdwm.evaluation.frozen_actor_free_td_common import (
     _resolve_frozen_dataset_source,
@@ -45,6 +46,10 @@ from tdwm.evaluation.full_plan_revalidation import (
     configure_full_plan_revalidation,
     full_plan_revalidation_metadata,
     require_new_revalidation_output,
+)
+from tdwm.evaluation.g_weighted_cem import (
+    configure_g_weighted_cem,
+    g_weighted_cem_metadata,
 )
 from tdwm.evaluation.lewm_checkpoint import (
     REQUIRED_PLANNING_KEYS,
@@ -749,6 +754,7 @@ def evaluate_frozen_actor_free_td_v0(
     score_mode: str | None = None,
     g_first_weight: float | None = None,
     full_plan_revalidation: bool = False,
+    g_weighted_cem: GWeightedCEMConfig | None = None,
 ) -> dict[str, Any]:
     """Run the audited Stable World Model Cube evaluation for one V0 method."""
 
@@ -765,6 +771,9 @@ def evaluate_frozen_actor_free_td_v0(
     )
     if full_plan_revalidation:
         protocol = configure_full_plan_revalidation(protocol)
+        require_new_revalidation_output(output_dir)
+    if g_weighted_cem is not None:
+        protocol = configure_g_weighted_cem(protocol, g_weighted_cem)
         require_new_revalidation_output(output_dir)
     dataset_path = Path(dataset_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
@@ -861,7 +870,10 @@ def evaluate_frozen_actor_free_td_v0(
         "process": {"action": action_processor},
         "transform": {"pixels": image_transform, "goal": image_transform},
         "device": device,
-        "score_mode": protocol["inference_objective"]["score_mode"],
+        "score_mode": (
+            "f_only" if g_weighted_cem is not None
+            else protocol["inference_objective"]["score_mode"]
+        ),
     }
     if protocol["inference_objective"]["score_mode"] == FIRST_ACTION_SCORE_MODE:
         policy_kwargs["g_first_weight"] = protocol["inference_objective"][
@@ -870,6 +882,8 @@ def evaluate_frozen_actor_free_td_v0(
     policy = policy_factory(
         **policy_kwargs,
     )
+    if g_weighted_cem is not None:
+        attach_g_weighted_cem(policy, g_weighted_cem)
 
     runtime = {
         "stable_worldmodel": package_version,
@@ -916,6 +930,7 @@ def evaluate_frozen_actor_free_td_v0(
     manifest.update(_first_action_output_metadata(protocol, planning))
     manifest.update(_rollout_mean_output_metadata(protocol, planning))
     manifest.update(full_plan_revalidation_metadata(protocol))
+    manifest.update(g_weighted_cem_metadata(protocol))
     _write_json(output_dir / "protocol_manifest.json", manifest)
 
     world_cfg = protocol["world"]
@@ -979,6 +994,7 @@ def evaluate_frozen_actor_free_td_v0(
     result.update(_first_action_output_metadata(protocol, planning))
     result.update(_rollout_mean_output_metadata(protocol, planning))
     result.update(full_plan_revalidation_metadata(protocol))
+    result.update(g_weighted_cem_metadata(protocol))
     _write_json(output_dir / "results.json", result)
     return _jsonable(result)
 

@@ -39,6 +39,7 @@ from tdwm.adapters.frozen_actor_free_td_v1_common import (
     FrozenActorFreeTDV1MethodSpec,
     require_exact_values,
 )
+from tdwm.adapters.g_weighted_cem import GWeightedCEMConfig, attach_g_weighted_cem
 from tdwm.adapters.runtime import prepare_cloud_runtime
 from tdwm.evaluation.frozen_actor_free_td_common import (
     _resolve_frozen_dataset_source,
@@ -49,6 +50,10 @@ from tdwm.evaluation.full_plan_revalidation import (
     configure_full_plan_revalidation,
     full_plan_revalidation_metadata,
     require_new_revalidation_output,
+)
+from tdwm.evaluation.g_weighted_cem import (
+    configure_g_weighted_cem,
+    g_weighted_cem_metadata,
 )
 from tdwm.evaluation.lewm_checkpoint import (
     REQUIRED_PLANNING_KEYS,
@@ -979,6 +984,7 @@ def evaluate_actor_free_td_predictor_runtime(
     g_first_weight: float | None = None,
     checkpoint_epoch: int | None = None,
     full_plan_revalidation: bool = False,
+    g_weighted_cem: GWeightedCEMConfig | None = None,
 ) -> dict[str, Any]:
     """Run the shared online-world/online-G Cube evaluation runtime."""
 
@@ -996,6 +1002,9 @@ def evaluate_actor_free_td_predictor_runtime(
     )
     if full_plan_revalidation:
         protocol = configure_full_plan_revalidation(protocol)
+        require_new_revalidation_output(output_dir)
+    if g_weighted_cem is not None:
+        protocol = configure_g_weighted_cem(protocol, g_weighted_cem)
         require_new_revalidation_output(output_dir)
     dataset_path = Path(dataset_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
@@ -1113,13 +1122,18 @@ def evaluate_actor_free_td_predictor_runtime(
         "process": {"action": action_processor},
         "transform": {"pixels": image_transform, "goal": image_transform},
         "device": device,
-        "score_mode": protocol["inference_objective"]["score_mode"],
+        "score_mode": (
+            "f_only" if g_weighted_cem is not None
+            else protocol["inference_objective"]["score_mode"]
+        ),
     }
     if protocol["inference_objective"]["score_mode"] in FIRST_ACTION_SCORE_MODES:
         policy_kwargs["g_first_weight"] = protocol["inference_objective"][
             "g_first_weight"
         ]
     policy = policy_factory(**policy_kwargs)
+    if g_weighted_cem is not None:
+        attach_g_weighted_cem(policy, g_weighted_cem)
 
     runtime = {
         "stable_worldmodel": package_version,
@@ -1179,6 +1193,7 @@ def evaluate_actor_free_td_predictor_runtime(
     manifest.update(_rollout_mean_output_metadata(protocol, planning))
     manifest.update(_execution_metadata(planning))
     manifest.update(full_plan_revalidation_metadata(protocol))
+    manifest.update(g_weighted_cem_metadata(protocol))
     _write_json(output_dir / "protocol_manifest.json", manifest)
 
     world_cfg = protocol["world"]
@@ -1247,6 +1262,7 @@ def evaluate_actor_free_td_predictor_runtime(
     result.update(_rollout_mean_output_metadata(protocol, planning))
     result.update(_execution_metadata(planning))
     result.update(full_plan_revalidation_metadata(protocol))
+    result.update(g_weighted_cem_metadata(protocol))
     if checkpoint_epoch is not None:
         result["checkpoint_epoch"] = payload["epoch"]
         result["checkpoint_role"] = f"intermediate_epoch_{protocol_label}"
@@ -1269,6 +1285,7 @@ def evaluate_frozen_actor_free_td_v1(
     pilot: bool = False,
     score_mode: str | None = None,
     g_first_weight: float | None = None,
+    g_weighted_cem: GWeightedCEMConfig | None = None,
     checkpoint_validator: Callable[..., None] = (
         validate_frozen_actor_free_td_v1_checkpoint_protocol
     ),
@@ -1293,6 +1310,7 @@ def evaluate_frozen_actor_free_td_v1(
         pilot=pilot,
         score_mode=score_mode,
         g_first_weight=g_first_weight,
+        g_weighted_cem=g_weighted_cem,
     )
 
 

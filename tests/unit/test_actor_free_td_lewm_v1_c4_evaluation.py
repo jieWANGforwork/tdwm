@@ -553,14 +553,20 @@ def test_evaluation_manifest_uses_g_config_not_old_predictor_config(
 
 
 @pytest.mark.parametrize(
-    ("score_mode", "g_first_weight"),
-    (("f_only", None), ("f_plus_g_first_q2", 0.25)),
+    ("score_mode", "g_first_weight", "g_weight_mode"),
+    (
+        ("f_only", None, None),
+        ("f_plus_g_first_q2", 0.25, None),
+        ("f_only", None, "path"),
+        ("f_only", None, "action"),
+    ),
 )
 def test_c4_wrapper_persists_score_definition_after_real_common_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     score_mode: str,
     g_first_weight: float | None,
+    g_weight_mode: str | None,
 ) -> None:
     """Exercise common runtime plus the C4 metadata-persistence wrapper."""
 
@@ -671,6 +677,7 @@ def test_c4_wrapper_persists_score_definition_after_real_common_runtime(
 
     def make_policy(**kwargs):
         captured["policy_gamma"] = kwargs["gamma"]
+        captured["policy_score_mode"] = kwargs["score_mode"]
         return object()
 
     monkeypatch.setattr(
@@ -683,6 +690,17 @@ def test_c4_wrapper_persists_score_definition_after_real_common_runtime(
         "make_actor_free_td_lewm_v1_c4_policy",
         make_policy,
     )
+    weighted_kwargs = {}
+    if g_weight_mode is not None:
+        from tdwm.adapters.g_weighted_cem import GWeightedCEMConfig
+
+        weighted_kwargs["g_weighted_cem"] = GWeightedCEMConfig(g_weight_mode)
+
+        def attach_weighting(policy, config):
+            captured["weight_config"] = config
+            return policy
+
+        monkeypatch.setattr(v1_runtime, "attach_g_weighted_cem", attach_weighting)
     result = evaluate_actor_free_td_lewm_v1_c4(
         protocol_path=CONFIGS["o50"],
         dataset_path=dataset,
@@ -691,6 +709,7 @@ def test_c4_wrapper_persists_score_definition_after_real_common_runtime(
         smoke=True,
         score_mode=score_mode,
         g_first_weight=g_first_weight,
+        **weighted_kwargs,
     )
 
     manifest = json.loads((output / "protocol_manifest.json").read_text())
@@ -701,7 +720,14 @@ def test_c4_wrapper_persists_score_definition_after_real_common_runtime(
     assert captured["policy_gamma"] == formal["g"]["gamma"] == 0.95
     assert captured["closed"] is True
     assert result["method"] == formal["method"]
-    assert stored_result["score_mode"] == score_mode
+    expected_mode = (
+        f"g_{g_weight_mode}_weighted_cem" if g_weight_mode is not None else score_mode
+    )
+    assert stored_result["score_mode"] == expected_mode
+    assert manifest["score_mode"] == expected_mode
+    if g_weight_mode is not None:
+        assert captured["policy_score_mode"] == "f_only"
+        assert captured["weight_config"].mode == g_weight_mode
     assert manifest["protocol"]["g"]["gamma"] == 0.95
     assert "predictor" not in manifest["protocol"]
     assert stored_result["score_definition"] == expected_definition
