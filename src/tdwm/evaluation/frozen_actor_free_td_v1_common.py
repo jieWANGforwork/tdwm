@@ -45,6 +45,11 @@ from tdwm.evaluation.frozen_actor_free_td_common import (
     _resolve_joint_checkpoint,
     _validate_dataset_protocol,
 )
+from tdwm.evaluation.full_plan_revalidation import (
+    configure_full_plan_revalidation,
+    full_plan_revalidation_metadata,
+    require_new_revalidation_output,
+)
 from tdwm.evaluation.lewm_checkpoint import (
     REQUIRED_PLANNING_KEYS,
     _git_revision,
@@ -973,6 +978,7 @@ def evaluate_actor_free_td_predictor_runtime(
     score_mode: str | None = None,
     g_first_weight: float | None = None,
     checkpoint_epoch: int | None = None,
+    full_plan_revalidation: bool = False,
 ) -> dict[str, Any]:
     """Run the shared online-world/online-G Cube evaluation runtime."""
 
@@ -988,6 +994,9 @@ def evaluate_actor_free_td_predictor_runtime(
         score_mode=score_mode,
         g_first_weight=g_first_weight,
     )
+    if full_plan_revalidation:
+        protocol = configure_full_plan_revalidation(protocol)
+        require_new_revalidation_output(output_dir)
     dataset_path = Path(dataset_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1169,6 +1178,7 @@ def evaluate_actor_free_td_predictor_runtime(
     manifest.update(_first_action_output_metadata(protocol, planning))
     manifest.update(_rollout_mean_output_metadata(protocol, planning))
     manifest.update(_execution_metadata(planning))
+    manifest.update(full_plan_revalidation_metadata(protocol))
     _write_json(output_dir / "protocol_manifest.json", manifest)
 
     world_cfg = protocol["world"]
@@ -1236,6 +1246,7 @@ def evaluate_actor_free_td_predictor_runtime(
     result.update(_first_action_output_metadata(protocol, planning))
     result.update(_rollout_mean_output_metadata(protocol, planning))
     result.update(_execution_metadata(planning))
+    result.update(full_plan_revalidation_metadata(protocol))
     if checkpoint_epoch is not None:
         result["checkpoint_epoch"] = payload["epoch"]
         result["checkpoint_role"] = f"intermediate_epoch_{protocol_label}"

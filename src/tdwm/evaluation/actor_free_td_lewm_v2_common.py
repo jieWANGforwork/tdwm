@@ -35,6 +35,7 @@ from tdwm.evaluation.frozen_actor_free_td_v1_common import (
     evaluate_actor_free_td_predictor_runtime,
     validate_v1_raw_action_compatibility,
 )
+from tdwm.evaluation.full_plan_revalidation import full_plan_revalidation_metadata
 from tdwm.evaluation.lewm_checkpoint import REQUIRED_PLANNING_KEYS, _write_json
 from tdwm.methods.actor_free_td_lewm_v2 import (
     V2_ACTION_DIM,
@@ -249,6 +250,7 @@ def _rollout_mean_output_metadata(
         "executed_action_block": "first_block_only",
         "replanning": "every_action_block",
         "score_definition": copy.deepcopy(inference["score_definition"]),
+        **full_plan_revalidation_metadata(protocol),
     }
 
 
