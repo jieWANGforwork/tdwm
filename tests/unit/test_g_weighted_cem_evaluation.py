@@ -51,7 +51,7 @@ def test_existing_versions_preserve_checkpoints_pairs_planning_and_budget(
 
 
 @pytest.mark.parametrize("offset", (25, 50, 100))
-@pytest.mark.parametrize("variant", ("c", "c4"))
+@pytest.mark.parametrize("variant", (*VARIANTS, "c4"))
 def test_o25_o50_o100_use_existing_feedback_and_correct_g_state_source(offset, variant):
     original = baseline_protocol("v1", variant, offset)
     changed = configure_g_weighted_cem(original, GWeightedCEMConfig("action"))
@@ -62,6 +62,20 @@ def test_o25_o50_o100_use_existing_feedback_and_correct_g_state_source(offset, v
     assert definition["g_state_source"] == (
         "f_post_action_state" if variant == "c4" else "f_pre_action_state_and_action"
     )
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("offset", (25, 50, 100))
+def test_all_v1_methods_share_the_c_planning_protocol_without_changing_training(
+    variant, offset
+):
+    actual = baseline_protocol("v1", variant, offset)
+    c_reference = baseline_protocol("v1", "c", offset)
+    o50 = baseline_protocol("v1", variant, 50)
+    for key in ("planning", "world", "dataset", "image_preprocessing", "evaluation"):
+        assert actual[key] == c_reference[key]
+    for key in ("predictor", "joint_objective", "pretrained_world_model", "checkpoint"):
+        assert actual[key] == o50[key]
 
 
 def test_c2_uses_the_same_new_inference_entrypoint():

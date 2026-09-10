@@ -1,0 +1,13 @@
+extends: actor_free_td_lewm_v1_g3_cube_checkpoint_o50.yaml
+id: actor_free_td_lewm_v1_g3_cube_checkpoint_o100
+
+evaluation:
+  goal_offset: 100
+  selection_sha256: 8a87815e8e1816ccb5021af81a5e2307a5b342d094eec3edf221a0e24851d10c
+
+planning:
+  episode_budget: 200
+
+provenance:
+  status: audited_o100_evaluation_ready
+  note: Paired with V1-C O100; unchanged method/checkpoint, 50 fixed seed-42 pairs, H5/RH1 and 200-step budget.

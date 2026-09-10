@@ -723,6 +723,34 @@ def require_identical_selections(
     return reference
 
 
+def summarize_job_selections(evidence, jobs, group_key=None):
+    """Share one worker pool while checking pairs within each goal-offset group."""
+    groups = {"all": evidence}
+    if group_key is not None:
+        groups = {}
+        for job in jobs:
+            groups.setdefault(group_key(job), {})[job.job_id] = evidence[job.job_id]
+    summaries = {}
+    for key, values in groups.items():
+        ranks = require_identical_selections(values)
+        hashes = {item["selection_file_sha256"] for item in values.values()}
+        if group_key is not None and len(hashes) != 1:
+            raise ValueError(f"Selection files differ within group {key}.")
+        summaries[key] = {
+            "valid_row_ranks": list(ranks),
+            "sha256": canonical_json_sha256(list(ranks)),
+            "valid_row_ranks_sha256": canonical_json_sha256(list(ranks)),
+            "selection_file_sha256": next(iter(values.values()))[
+                "selection_file_sha256"
+            ],
+            "selection_file_identical_across_all_jobs": len(hashes) == 1,
+            "identical_across_all_jobs": True,
+        }
+    if group_key is None:
+        return {"selection": summaries["all"]}
+    return {"selection_groups": summaries}
+
+
 def verify_formal_disjointness(
     development_ranks: Sequence[int],
     formal_selection: str | Path | None,
@@ -836,6 +864,7 @@ def run_jobs(
     expected_selection_file_sha256: str | None = None,
     poll_seconds: float,
     job_output_validator: Callable[..., dict[str, Any]] = validate_job_output,
+    selection_group_key: Callable[[Job], str] | None = None,
     launcher_metadata: Mapping[str, Any] | None = None,
     popen: Callable[..., Any] = subprocess.Popen,
     sleeper: Callable[[float], None] = time.sleep,
@@ -862,6 +891,8 @@ def run_jobs(
         raise ValueError("poll_seconds must be non-negative.")
     if formal_selection is not None and plan.stage != "development":
         raise ValueError("--formal-selection is only valid for development.")
+    if selection_group_key is not None and plan.stage != "formal":
+        raise ValueError("Grouped pair validation is supported for formal jobs only.")
     expected_selection_sha = validate_optional_sha256(
         expected_selection_file_sha256,
         label="expected_selection_file_sha256",
@@ -1014,24 +1045,11 @@ def run_jobs(
 
         if not failed:
             try:
-                ranks = require_identical_selections(evidence)
-                payload["selection"] = {
-                    "valid_row_ranks": list(ranks),
-                    "sha256": canonical_json_sha256(list(ranks)),
-                    "valid_row_ranks_sha256": canonical_json_sha256(list(ranks)),
-                    "selection_file_sha256": (
-                        next(iter(evidence.values()))["selection_file_sha256"]
-                    ),
-                    "selection_file_identical_across_all_jobs": len(
-                        {
-                            values["selection_file_sha256"]
-                            for values in evidence.values()
-                        }
-                    )
-                    == 1,
-                    "identical_across_all_jobs": True,
-                }
+                payload.update(
+                    summarize_job_selections(evidence, jobs, selection_group_key)
+                )
                 if plan.stage == "development":
+                    ranks = payload["selection"]["valid_row_ranks"]
                     payload.update(verify_formal_disjointness(ranks, formal_selection))
             except Exception as error:
                 failed = True

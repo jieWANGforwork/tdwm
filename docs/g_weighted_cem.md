@@ -93,3 +93,35 @@ outcomes. No test is launched by --dry-run.
 
 The runtime integration tests use synthetic models/environments and the
 actual installed solver; they are not formal Cube success-rate results.
+
+## Complete the V1 C--G3 matrix without repeating C
+
+`run_actor_free_td_lewm_v1_g_weighted_completion.py` requires the completed
+six-cell C output root. It verifies those results and schedules exactly
+D/F/G1/G2/G3 x O25/O50/O100 x path/action = 30 new formal cells. It never
+schedules training or F-only repeats. The new D--G3 O25/O100 configs inherit
+their respective O50 method/checkpoint contracts and match C's goal-offset,
+pair-selection, feedback and budget settings.
+
+    python scripts/run_actor_free_td_lewm_v1_g_weighted_completion.py \
+      --checkpoint-root <historical-v1-cg3-training-root> \
+      --dataset <cube.lance> \
+      --reuse-c-root <completed-six-cell-C-root> \
+      --output-root <new-output-root> \
+      --gpus 0 1 2 3 --max-jobs-per-gpu 3 --max-concurrency 12
+
+Pass `--preflight-only` in CPU mode to check all checkpoint hashes, dataset
+manifest and six reused C results without starting evaluations. Supply the
+existing runtime's `STABLEWM_HOME`, `LD_PRELOAD` and `LD_LIBRARY_PATH` as
+environment variables; the launcher retains OSMesa to match the completed C
+cells and records those settings. Temperature stays fixed at 1, without
+z-score or additional score changes.
+
+All offsets share one worker pool. Longest-budget jobs are queued first;
+any freed GPU slot admits the next job. Three workers per GPU is an initial
+configurable capacity, not a GPU hardware limit. Pair equality is checked
+within each offset, never incorrectly between different goal offsets. A
+failed child/output check stops new dispatches, while already-running jobs
+finish and retain their outputs. Reusing a nonempty output root is rejected.
+Power control is not part of this launcher: the authorized operator must
+verify completion, preserve results and shut down the AutoDL instance.
