@@ -1,0 +1,111 @@
+# Proposed first experiment. The user has not yet confirmed the open choices.
+# Formal execution is disabled until protocol_status is user_locked.
+schema_version: 1
+method_family: eff_action
+protocol_status: provisional
+runtime:
+  stable_worldmodel_version: 0.1.1
+pretrained_world_model:
+  source_method: lewm
+  source_seed: 3072
+  source_epoch: 10
+  checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
+  frozen: true
+frozen_data:
+  manifest_sha256: fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e
+  dataset_source_sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  column_normalization_sha256: 7fd14e6a72841a36abd8f1d4aedf4f17f4f71ca508cacefe331e989664954818
+  total_rows: 2010000
+  episodes: 10000
+  extraction_precision: bfloat16
+image_preprocessing:
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+sampling:
+  gv: &sampling
+    episode_start: 0
+    episode_stop: 8000
+    action_block_steps: 5
+    grid_phase: 0
+    min_goal_chunks: 1
+    max_goal_chunks: 40
+    goal_source: same_episode_future
+    offset_distribution: uniform_offset_then_uniform_valid_start
+    efficiency_threshold: 0.9
+    efficiency_epsilon: 0.000001
+    direct_max_chunks: null
+    zero_distance_policy: exclude
+    zero_distance_tolerance: 0.00000001
+  planner:
+    <<: *sampling
+    max_goal_chunks: 10
+loader:
+  batch_size: 256
+validation:
+  episode_start: 8000
+  episode_stop: 10000
+  seed: 50
+  batches: 16
+  checkpoint_selection: fixed_budget_no_test_selection
+training:
+  seed: 3072
+  precision: bfloat16
+  g:
+    hidden_dim: 256
+    hidden_layers: 1
+    embedding_layers: 2
+  v:
+    hidden_dim: 256
+    hidden_layers: 2
+    output_activation: softplus
+  planner:
+    raw_action_dim: 25
+    hidden_dim: 512
+    hidden_layers: 2
+    iterations: 8
+    epsilon: 0.000001
+    initialization:
+      distribution: zeros
+    lower_bound: -1.6
+    upper_bound: 1.6
+    lambda_traj: 1.0
+    lambda_eff: 0.1
+  gv:
+    steps: 127960
+    g_optimizer: &optimizer
+      lr: 0.0001
+      weight_decay: 0.001
+      betas: [0.9, 0.999]
+      eps: 0.00000001
+    v_optimizer:
+      <<: *optimizer
+    warmup_steps: 1280
+    min_lr_ratio: 0.0
+    gradient_clip_norm: 1.0
+    ema_decay: 0.995
+  stage1:
+    steps: 6000
+    optimizer:
+      <<: *optimizer
+    warmup_steps: 60
+    min_lr_ratio: 0.0
+    gradient_clip_norm: 1.0
+  stage2:
+    steps: 6000
+    optimizer:
+      <<: *optimizer
+    optimizer_transition: carry
+    warmup_steps: 60
+    min_lr_ratio: 0.0
+    gradient_clip_norm: 1.0
+logging:
+  metrics_every_steps: 50
+  checkpoint_every_steps: 12796
+open_decisions:
+  - Single five-step block versus a newly defined twenty-five-step plan.
+  - Whether cross-episode goals need a separately defined objective.
+  - Efficiency threshold, V/P architecture, K, epsilon and stage-two weights.
+  - G/V and both planner-stage budgets and training seeds.
+  - Reference action initialization and normalized action bounds.
+  - GPU scheduling relative to the other method currently in preparation.

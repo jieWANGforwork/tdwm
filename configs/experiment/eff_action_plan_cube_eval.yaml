@@ -1,0 +1,43 @@
+# Proposed evaluation; requires confirmed method and training checkpoint.
+method: EffActionPlan
+schema_version: 1
+protocol_status: provisional
+runtime:
+  stable_worldmodel_version: 0.1.1
+  precision: fp32
+  renderer: egl
+dataset:
+  format: lance
+  manifest_sha256: 9de531030c6bca21a7b3215d7abea3aaf277e68a1e4cec03c8c6e22ad0d20dcd
+  source_sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+image_preprocessing:
+  size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+world:
+  env_name: swm/OGBCube-v0
+  env_type: single
+  ob_type: states
+  image_size: 224
+  multiview: false
+  visualize_info: false
+  terminate_at_goal: true
+selection:
+  protocol: rp1_heldout
+  goal_offset: 25
+  episodes: 50
+  seed: 42
+epsilon: 0.000001
+planning:
+  horizon: 1
+  receding_horizon: 1
+  action_block: 5
+  history_len: 1
+  warm_start: false
+  planning_seed: 42
+  episode_budget: 50
+  iterations: 8
+  initialization: zeros
+  initial_std: 0.0
+  lower_bound: -1.6
+  upper_bound: 1.6

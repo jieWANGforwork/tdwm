@@ -196,3 +196,7 @@ docker build --build-arg BASE_IMAGE=your-existing-gpu-image:tag -t tdwm:runtime 
 ```
 
 数据集、缓存和 checkpoint 应通过外部只读/持久化挂载提供，不进入镜像。
+
+EffAction / EffActionPlan 的方法、实现状态与训练评测入口见
+[方法说明](docs/eff_action.md)。配置中的 provisional 项尚待确认，不能视为正式实验结果。
+各次运行保存配置、checkpoint 和逐 episode 结果，以便核查并汇入结果文档。
