@@ -1,7 +1,7 @@
-# Proposed evaluation; requires confirmed method and training checkpoint.
+# Confirmed evaluation protocol; still requires a formally trained checkpoint.
 method: EffAction
 schema_version: 1
-protocol_status: provisional
+protocol_status: user_locked
 runtime:
   stable_worldmodel_version: 0.1.1
   precision: fp32

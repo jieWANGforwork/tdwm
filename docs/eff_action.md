@@ -2,7 +2,7 @@
 
 EffAction 用动作条件下的累计特征网络 G 与路径代价网络 V 评价候选动作，再用 CEM 搜索动作。EffActionPlan 使用同一套 G/V 评价，通过学习到的 P 多次修正候选动作。两者共享 G/V 的定义，差别在动作如何产生。
 
-本文对应《Results TD》中“方案二 基于 G 和 V 的动作规划”。数学模块、训练运行器、两个 CLI 与三个 draft YAML 已存在，正在由主实现任务综合核对。**本文不是实验完成报告。标为 provisional 的内容仅是待用户确认的提议，不能作为正式实验决定或已得到的结果。**
+本文对应《Results TD》中“方案二 基于 G 和 V 的动作规划”。数学模块、训练运行器、两个 CLI 与三个 YAML 已存在并通过 CPU smoke。2026-09-12 用户已裁定此前全部待定项，三个配置均为 `protocol_status: user_locked`，取值见下表的“已锁定”。**本文仍不是实验完成报告：尚未执行任何 GPU 训练或真实 Cube 评测，文中没有任何成功率或性能结论。**
 
 ## 当前状态与待确认事项
 
@@ -14,15 +14,32 @@ EffAction 用动作条件下的累计特征网络 G 与路径代价网络 V 评�
 | V 的梯度 | 训练 V 时不更新 G；训练 P 时保留输入动作梯度 | 已确定 |
 | P | 六项输入、残差动作修正、真实动作重建后再加效率训练 | 已确定 |
 | episode 留出 | 学习使用 0–7999；评测 pair 使用 8000–9999，参照 RP1 已披露划分 | 用户已要求按 RP1 采样；仍须在运行 manifest 验证 |
-| 动作跨度 | 当前接口支持一个 25 维动作块，即 5 primitive steps；是否改为一次计划/执行 25 primitive steps | **provisional，待答复** |
-| cross-episode goals | 是否在同轨迹 future goals 之外加入跨轨迹目标 | **provisional，待答复**；当前数据 API 仅支持同轨迹 |
-| 效率分支阈值 | η≥0.9 时选择直接监督 | **provisional，待答复** |
-| V 架构 | 两层 256 隐藏单元，非负输出 softplus | **provisional，待答复** |
-| P 架构与迭代 | 两层 512 隐藏单元；K=8 | **provisional，待答复** |
-| stage 2 系数 | λ_traj=1，λ_eff=0.1；ε=1e-6 | **provisional，待答复** |
-| 训练预算 | G/V 阶段 127,960 updates；P stage 1=6,000，stage 2=6,000；seed=3072 | **provisional，待答复**；G/V 更新对应关系须由最终配置明确 |
-| 初始化与动作范围 | normalized zero 初始化；normalized bounds=[−1.6,1.6] | **provisional，待答复**；还需核对物理动作域映射 |
-| GPU 启动时机 | 等待另一方法达到何种使用/完成状态后启动 | **待答复**；不得把等待条件解释成已授权抢占或终止其任务 |
+| 动作跨度 | 一个 25 维动作块，即 5 primitive steps，执行后重规划 | **已锁定**（首版不实现 25 步整计划） |
+| cross-episode goals | 首版只使用同轨迹 future goals | **已锁定**（不加跨轨迹目标） |
+| 效率分支阈值 | G/V 采样 η≥0.3；Planner 采样 η≥0.8 | **已锁定**，依据见下方只读校准 |
+| V 架构 | 两层 256 隐藏单元，非负输出 softplus | **已锁定** |
+| P 架构与迭代 | 两层 512 隐藏单元；K=8 | **已锁定** |
+| stage 2 系数 | λ_traj=1，λ_eff=0.1；ε=1e-6 | **已锁定** |
+| 训练预算 | G/V 阶段 127,960 updates；P stage 1=6,000，stage 2=6,000；seed=3072 | **已锁定** |
+| 初始化与动作范围 | normalized zero 初始化；normalized bounds=[−3.5,3.5] | **已锁定**，依据见下方只读审计 |
+| GPU 启动 | 当前容器为无卡模式，需切回 GPU 实例后启动 | **待用户操作**；另一方法当前无进程在跑 |
+
+### 2026-09-12 只读校准（未训练）
+
+对冻结缓存中 episodes 0–7999 的全部动作块（1,608,000 行）与 4096 个采样片段做了只读统计，结论直接写入配置：
+
+| 量 | 实测 | 采用 |
+|---|---|---|
+| 有限动作 \|a\| 全局最大 | 3.4928（p99=2.548，p99.9=3.418） | 标量 bound 3.5，截断 0% |
+| 逐坐标 max | [3.4928, 2.5479, 1.5590, 2.5469, 3.1814] 在 5 个 primitive step 上重复 | 统一标量 3.5（接口只支持标量） |
+| bound=1.6 截断率 | 坐标 8.77%，动作块 49.24% | 弃用；它使 P 阶段一重建目标不可达 |
+| η≥0.9（G/V 采样）直接分支比例 | 3.9% | 弃用 |
+| η≥0.3（G/V 采样）直接分支比例 | 17.7% | **采用** |
+| η≥0.9（Planner 采样）直接分支比例 | 15.6% | 弃用 |
+| η≥0.8（Planner 采样）直接分支比例 | 22.9% | **采用** |
+| 非有限动作行 | 40,000 / 1,608,000（2.5%），全部来自 episode 尾部 padding | 采样器校验并排除，不得进入 loss 或评测 |
+
+两个采样器的 goal offset 范围不同（1–40 与 1–10 个块），长程片段的 latent 几何效率天然更低，因此阈值分别校准，不共用同一个数值。
 
 旧 C–G3 的 10 epochs×12,796 updates=127,960 updates 是历史预算。新的 episode sampler 改变了样本总体，因此只写“10 epochs”不能证明等预算。新配置必须显式记录 optimizer updates、batch、采样分布与各阶段边界。
 
@@ -76,7 +93,7 @@ G 的输出为 192 维；V 的输入只有 Ψ 与 m，若拼接则为 384 维。
 
 b_t∈{0,1} 由真实完整片段决定。高效率片段进入直接分支，其余有效片段进入 TD；若设置额外长度上限，也必须进入同一套显式采样配置。**G 与 V 使用同一个 b_t、同一个目标 T。**
 
-η 阈值取 0.9 当前只是 provisional。不能用候选动作的预测效率选真实监督分支，也不能把 RP1 的 n-step 窗口判定当成这里的 η 判定。
+η 阈值已锁定：G/V 采样 η≥0.3，Planner 采样 η≥0.8，依据见前文只读校准。不能用候选动作的预测效率选真实监督分支，也不能把 RP1 的 n-step 窗口判定当成这里的 η 判定。
 
 G 的 target 为：
 
@@ -170,7 +187,7 @@ a^{(r+1)}=\Pi_{\mathcal A}\left(a^{(r)}+\Delta a^{(r)}\right).
 
 同一个 P 在全部 K 轮共享参数。投影作用于更新后的动作，不是只限制增量。每轮更新后重新计算 J 与动作梯度。最终执行 a^(K)，内部修正不推进环境时间。
 
-单块时 P 的输入维度为 192+25+25+192+1+25=460，输出 25。a_ref 是不依赖正确标签的初始化；真实数据动作只用于监督，不能放入 a_ref 或 P 的其他输入泄漏答案。零初始化与 normalized [−1.6,1.6] 范围仍是 provisional。normalized zero 通常对应数据动作均值，不等于物理零动作；测 no-op 基线时不能混用二者。对 a_phys=μ+σ·a_norm，物理合法区间对应逐维 normalized bounds=(a_phys_bounds−μ)/σ；最终配置应核对所选限制和这个合法域的关系。
+单块时 P 的输入维度为 192+25+25+192+1+25=460，输出 25。a_ref 是不依赖正确标签的初始化；真实数据动作只用于监督，不能放入 a_ref 或 P 的其他输入泄漏答案。零初始化与 normalized [−3.5,3.5] 范围已锁定。normalized zero 通常对应数据动作均值，不等于物理零动作；测 no-op 基线时不能混用二者。对 a_phys=μ+σ·a_norm，物理合法区间对应逐维 normalized bounds=(a_phys_bounds−μ)/σ；逐坐标实测 max 为 [3.4928, 2.5479, 1.5590, 2.5469, 3.1814] 重复五次，统一标量 3.5 保证零截断，但对部分坐标偏松，正式报告须记录实际触边比例。
 
 ### 第一阶段 动作重建
 
@@ -193,7 +210,7 @@ L_P=\lambda_{\mathrm{traj}}L_{\mathrm{traj}}+
 \lambda_{\mathrm{eff}}L_{\mathrm{eff}}.
 \]
 
-λ_traj=1、λ_eff=.1、ε=1e-6 均待用户确认。loss 的坐标 reduction 与系数共同决定梯度尺度；不能在改成逐坐标均值后还声称维持同样权重。
+λ_traj=1、λ_eff=.1、ε=1e-6 已锁定。loss 的坐标 reduction 与系数共同决定梯度尺度；不能在改成逐坐标均值后还声称维持同样权重。
 
 两个阶段都只更新 P，E/e/G/V 参数固定。但梯度必须沿
 
@@ -281,11 +298,11 @@ RP1 Cube 的 hard 指标是 `max(0, (s−f)/(100−f)×100)`，s 为原始 succe
 | `src/tdwm/evaluation/eff_action.py` | `select_eff_action_episodes`、`evaluate_eff_action`；pair、数据来源和控制评测结果记录 |
 | `scripts/train_eff_action.py` | 三阶段训练 CLI，可在 G/V 或 P 的阶段边界停止 |
 | `scripts/evaluate_eff_action.py` | EffAction / EffActionPlan 评测 CLI |
-| `configs/experiment/eff_action_cube_train.yaml` | G/V 与 P 两阶段的共同训练 draft，`protocol_status: provisional` |
-| `configs/experiment/eff_action_cube_eval.yaml` | EffAction CEM 评测 draft，`protocol_status: provisional` |
-| `configs/experiment/eff_action_plan_cube_eval.yaml` | EffActionPlan 评测 draft，`protocol_status: provisional` |
+| `configs/experiment/eff_action_cube_train.yaml` | G/V 与 P 两阶段的共同训练配置，`protocol_status: user_locked` |
+| `configs/experiment/eff_action_cube_eval.yaml` | EffAction CEM 评测配置，`protocol_status: user_locked` |
+| `configs/experiment/eff_action_plan_cube_eval.yaml` | EffActionPlan 评测配置，`protocol_status: user_locked` |
 
-架构宽度、非负输出方式、ε、K、bounds 等由配置显式提供。当前接口只支持冻结 LeWM 的单个 25D block，不能通过改一个维度参数就启用未经定义的完整计划。三个 draft 保留前文待用户确认的提议，不能仅因文件已经存在就启动正式实验。
+架构宽度、非负输出方式、ε、K、bounds 等由配置显式提供。当前接口只支持冻结 LeWM 的单个 25D block，不能通过改一个维度参数就启用未经定义的完整计划。三份配置已按用户裁定锁定；即便如此，正式实验仍要求真实 GPU、足量磁盘和正式训练产生的 checkpoint，不能仅因配置已锁定就声称结果。
 
 主实现任务已综合运行并通过 86 项方法、数据、训练、评测与 runner CPU 检查，Ruff 检查通过。本地真实 Cube 环境因缺少 MuJoCo 未完成验证；本次服务器会话中 OSMesa GL 不可用，也没有可用 GPU。真实环境评测与 GPU 训练尚未执行，本文没有已验证的成功率或性能提升。
 
@@ -313,7 +330,7 @@ PYTHONPATH=src python scripts/train_eff_action.py \
   --device cpu --smoke --stop-after stage2
 ```
 
-将示例中的 `EXPORT_NAME` 替换为真实导出名称后再执行。`--stop-after` 支持 `gv`、`stage1`、`stage2`：EffAction 只需完成 `gv`；EffActionPlan 默认依次完成三个阶段，stage 2 延续 stage 1 的 P。正式训练须先由用户确认未定项，使用 `protocol_status: user_locked` 的确认配置，移除 `--smoke`，并满足 GPU 等待条件后选择 `--device cuda`；修改状态字段本身不等于获得科学方案确认。
+将示例中的 `EXPORT_NAME` 替换为真实导出名称后再执行。`--stop-after` 支持 `gv`、`stage1`、`stage2`：EffAction 只需完成 `gv`；EffActionPlan 默认依次完成三个阶段，stage 2 延续 stage 1 的 P。正式训练使用 `protocol_status: user_locked` 的确认配置，移除 `--smoke`，并在可用的 GPU 实例上选择 `--device cuda`。
 
 恢复时保留相同配置、输入文件、运行模式与输出目录，在相同命令中加 `--resume /path/to/run_dir/latest.pt`。smoke 的恢复仍需 `--smoke`。运行器核对配置与来源，恢复阶段计数、优化器和随机状态；恢复日志保留备份并退回 checkpoint 对应边界。`--stop-after` 不能早于恢复 checkpoint 所在阶段。正常阶段完成文件为 `gv_complete.pt`、`stage1_complete.pt`、`stage2_complete.pt`。
 
@@ -347,6 +364,6 @@ EffActionPlan 改用 `configs/experiment/eff_action_plan_cube_eval.yaml`，并�
 - V 非负、ε 显式；近零位移、无效路径、浮点异常与动作触边必须可观测，不能吞掉后继续汇总成功率。
 - action width、horizon、feedback interval、goal offset 分别断言；只执行被已定义目标完整评价过的动作对象。
 - CEM 的 G/V cost 必须在每轮候选筛选前生效，不能先按旧 cost 搜完，再给选中结果追加一个数值当作新方法。
-- 不混用旧/新 pair、renderer 或 loss 尺度；所有结果链接回实际配置与 checkpoint。文档中的 provisional 提议不能转换成“已确认”“已完成训练”或“优于 baseline”的陈述。
+- 不混用旧/新 pair、renderer 或 loss 尺度；所有结果链接回实际配置与 checkpoint。已锁定的配置不能转换成“已完成训练”或“优于 baseline”的陈述。
 
-正式训练应在用户待答复项得到结论、运行接口与测试协议核对完成、且满足 GPU 等待条件后开始。之后由真实日志、checkpoint、逐 episode 输出与配对比较填入结果；本文不预先给出实验结论。
+正式训练应在可用的 GPU 实例与足量磁盘上开始，运行接口与测试协议已在此前核对完成。之后由真实日志、checkpoint、逐 episode 输出与配对比较填入结果；本文不预先给出实验结论。

@@ -1,8 +1,9 @@
-# Proposed first experiment. The user has not yet confirmed the open choices.
-# Formal execution is disabled until protocol_status is user_locked.
+# First experiment. The previously open choices are settled by the user on
+# 2026-09-12 and are recorded under locked_decisions below.
+# Formal execution is enabled because protocol_status is user_locked.
 schema_version: 1
 method_family: eff_action
-protocol_status: provisional
+protocol_status: user_locked
 runtime:
   stable_worldmodel_version: 0.1.1
 pretrained_world_model:
@@ -32,7 +33,9 @@ sampling:
     max_goal_chunks: 40
     goal_source: same_episode_future
     offset_distribution: uniform_offset_then_uniform_valid_start
-    efficiency_threshold: 0.9
+    # Calibrated on 4096 read-only samples from training episodes 0-7999:
+    # eta >= 0.3 keeps 17.7% of samples on the direct branch (0.9 kept 3.9%).
+    efficiency_threshold: 0.3
     efficiency_epsilon: 0.000001
     direct_max_chunks: null
     zero_distance_policy: exclude
@@ -40,6 +43,9 @@ sampling:
   planner:
     <<: *sampling
     max_goal_chunks: 10
+    # Same calibration on the planner sampler (offsets 1-10 chunks):
+    # eta >= 0.8 keeps 22.9% of samples on the direct branch (0.9 kept 15.6%).
+    efficiency_threshold: 0.8
 loader:
   batch_size: 256
 validation:
@@ -67,8 +73,13 @@ training:
     epsilon: 0.000001
     initialization:
       distribution: zeros
-    lower_bound: -1.6
-    upper_bound: 1.6
+    # Read-only audit of all finite training action blocks (episodes 0-7999):
+    # global max |a| = 3.4928, per-coordinate max = [3.4928, 2.5479, 1.5590,
+    # 2.5469, 3.1814] repeated over the five primitive steps. The previous
+    # RP1-derived 1.6 clipped 8.77% of coordinates and 49.2% of blocks, which
+    # made the stage-1 reconstruction target unreachable. 3.5 clips 0%.
+    lower_bound: -3.5
+    upper_bound: 3.5
     lambda_traj: 1.0
     lambda_eff: 0.1
   gv:
@@ -102,10 +113,15 @@ training:
 logging:
   metrics_every_steps: 50
   checkpoint_every_steps: 12796
-open_decisions:
-  - Single five-step block versus a newly defined twenty-five-step plan.
-  - Whether cross-episode goals need a separately defined objective.
-  - Efficiency threshold, V/P architecture, K, epsilon and stage-two weights.
-  - G/V and both planner-stage budgets and training seeds.
-  - Reference action initialization and normalized action bounds.
-  - GPU scheduling relative to the other method currently in preparation.
+locked_decisions:
+  action_object: Single five-step block (25-D), replanned every five primitive steps.
+  cross_episode_goals: Excluded from the first version; sampler only draws same-episode future goals.
+  efficiency_threshold: gv 0.3, planner 0.8; calibrated on read-only samples, see sampling comments.
+  architectures: G = 1x256 (+2 embedding layers), V = 2x256 with softplus, P = 2x512.
+  planner_iterations: K = 8, epsilon = 1e-6, lambda_traj = 1.0, lambda_eff = 0.1.
+  budgets: G/V 127960 updates, planner stage1 6000, stage2 6000, training seed 3072.
+  initialization: zeros reference action, normalized bounds [-3.5, 3.5]; see planner comments.
+  data_note: >-
+    The frozen cache pads the tail of every episode with non-finite action
+    blocks (40000 of 1608000 training rows, 2.5%). The sampler validates and
+    excludes them; they must never reach a loss or an evaluation.
