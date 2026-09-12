@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -104,3 +107,23 @@ def test_phase_and_requested_phase_must_agree(tmp_path):
             output_dir=tmp_path / "out",
             device="cpu",
         )
+
+
+def test_every_planner_run_key_read_by_the_trainer_is_declared():
+    """The protocol gate rejects ``null`` but cannot see a *missing* key.
+
+    ``run_effplan_training`` indexes ``config["planner_<phase>"]["run"]``
+    directly, so an absent key only surfaces as a KeyError deep inside
+    training -- after the Eff model has already been trained. Scan the
+    trainer source for every ``run["..."]`` lookup and require the locked
+    config to declare all of them.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    source = (repo_root / "src/tdwm/training/effplan_run.py").read_text()
+    referenced = set(re.findall(r'run\["([a-z_]+)"\]', source))
+    assert referenced, "no run[...] lookups found; the scan is broken"
+    config = yaml.safe_load((repo_root / REPO_CONFIG).read_text())
+    for stage in ("planner_generation", "planner_refinement"):
+        declared = set(config[stage]["run"])
+        missing = sorted(referenced - declared)
+        assert not missing, f"{stage}.run is missing {missing}"

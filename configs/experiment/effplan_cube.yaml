@@ -59,6 +59,11 @@ planner_generation:
     # Changing this changes the planner identity, so P must be retrained --
     # it must never be retuned after formal evaluation has started.
     planner_hidden_dim: 512
+    # Same draw/validation bookkeeping as eff_training.settings.
+    batch_size: 256
+    validation_batches: 16
+    validation_seed: 50
+    checkpoint_every_updates: 1000
   settings:
     phase: generation
     seed: 3072
@@ -89,6 +94,11 @@ planner_refinement:
     # Changing this changes the planner identity, so P must be retrained --
     # it must never be retuned after formal evaluation has started.
     planner_hidden_dim: 512
+    # Same draw/validation bookkeeping as eff_training.settings.
+    batch_size: 256
+    validation_batches: 16
+    validation_seed: 50
+    checkpoint_every_updates: 1000
   settings:
     phase: refinement
     seed: 3072
