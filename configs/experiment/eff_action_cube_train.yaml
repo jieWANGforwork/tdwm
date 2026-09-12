@@ -25,15 +25,27 @@ image_preprocessing:
   std: [0.229, 0.224, 0.225]
 sampling:
   gv: &sampling
+    # User decision 2026-09-12: drop the RP1 0-7999 / 8000-9999 episode holdout
+    # and train on the complete dataset, matching the project's own convention
+    # (lewm_cube_train.yaml split.unit=sequence_clip: the released trainer's
+    # clip-level 90/10 split leaves every one of the 10000 episodes partly in
+    # train, so LeWM F and the C--G3 critic have both seen all 10000 episodes).
+    # EffAction therefore trains on all episodes too, which removes the 80%
+    # vs 100% exposure gap measured against C--G3 on the aligned pair lists.
+    # Residual difference, disclosed: this sampler is episode-granular, so it
+    # uses 100% of rows, whereas the inherited split uses 90% of clips.
     episode_start: 0
-    episode_stop: 8000
+    episode_stop: 10000
     action_block_steps: 5
     grid_phase: 0
     min_goal_chunks: 1
     max_goal_chunks: 40
     goal_source: same_episode_future
     offset_distribution: uniform_offset_then_uniform_valid_start
-    # Calibrated on 4096 read-only samples from training episodes 0-7999:
+    # Calibrated on 4096 read-only samples from episodes 0-7999, which was the
+    # training range at calibration time. Episodes 8000-9999 are expert
+    # trajectories from the same dataset, so the eta distribution is expected
+    # to match; it has NOT been re-measured on the full 0-9999 range.
     # eta >= 0.3 keeps 17.7% of samples on the direct branch (0.9 kept 3.9%).
     efficiency_threshold: 0.3
     efficiency_epsilon: 0.000001
@@ -49,6 +61,10 @@ sampling:
 loader:
   batch_size: 256
 validation:
+  # Monitoring subset only. checkpoint_selection is fixed_budget_no_test_-
+  # selection, so this range never picks a checkpoint. After the move to
+  # full-dataset training it is no longer a held-out set; it is retained so
+  # the validation curves stay comparable with the earlier smoke runs.
   episode_start: 8000
   episode_stop: 10000
   seed: 50

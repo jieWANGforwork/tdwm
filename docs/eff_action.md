@@ -13,7 +13,7 @@ EffAction 用动作条件下的累计特征网络 G 与路径代价网络 V 评�
 | G/V target | 共用分支 b；直接监督与 TD 并存；无折扣 | 已确定 |
 | V 的梯度 | 训练 V 时不更新 G；训练 P 时保留输入动作梯度 | 已确定 |
 | P | 六项输入、残差动作修正、真实动作重建后再加效率训练 | 已确定 |
-| episode 留出 | 训练 G/V/P 使用 0–7999；评测 pair 已改为与 C–G3 完全相同的固定清单（`historical_cg3`，seed 42、50 对，三档 offset 各一份 sha256 锁定） | 已对齐：2026-09-12 用户决定两方法必须做同一批题 |
+| episode 划分 | **不再使用 RP1 的 0–7999 / 8000–9999 留出**。G/V/P 在全部 10,000 episodes 上训练，与 `lewm_cube_train.yaml`（`split.unit: sequence_clip`，released trainer 的 clip 级 90/10）惯例一致；评测 pair 用 C–G3 固定清单（`historical_cg3`，seed 42、50 对，三档 offset 各一份 sha256 锁定） | 已对齐：2026-09-12 用户决定「跟现有实验配置一致，不管 RP1」 |
 | 动作跨度 | 一个 25 维动作块，即 5 primitive steps，执行后重规划 | **已锁定**（首版不实现 25 步整计划） |
 | cross-episode goals | 首版只使用同轨迹 future goals | **已锁定**（不加跨轨迹目标） |
 | 效率分支阈值 | G/V 采样 η≥0.3；Planner 采样 η≥0.8 | **已锁定**，依据见下方只读校准 |
@@ -228,9 +228,11 @@ EffActionPlan 不执行 CEM，也不以 CEM expert 为监督。它没有方案�
 
 ### episode 留出与当前采样实现
 
-按 RP1 已披露的数据划分，学习 G/V/P 使用 episodes [0,8000)，validation/tuning 与最终评测任务从 [8000,10000) 抽取，并使用相互独立、预先保存的 pair draws。该留出指新学习模块的数据使用，不证明历史预训练 LeWM 或其固定归一化统计也未接触这些 episode；必须记录底座原有训练来源。
+**2026-09-12 更新（本段原先按 RP1 的描述已作废）**：不再采用 RP1 的 episodes [0,8000) 训练 / [8000,10000) 评测留出。G/V/P 在**全部 10,000 episodes** 上训练，与 `lewm_cube_train.yaml` 的 `split.unit: sequence_clip`（released trainer 的 clip 级 90/10）惯例一致 —— 该划分让每个 episode 都有部分 clip 落入 train，因此 **LeWM 底座 F 与 C–G3 critic 实际上都见过全部 10,000 条 episode**。RP1 的 episode 留出与本项目历史协议不一致，用户已决定弃用。
 
-**2026-09-12 更新**：正式评测不再从 [8000,10000) 自抽，改用 `historical_cg3` 复现 C–G3 的固定 pair 清单，使两个方法做同一批题。理由与代价见「2026-09-12 评测 pair 对齐决定」一节。训练数据的 0–7999 划分不变。
+仍须记录的两点：(a) 冻结底座 F 自身的训练来源要单独说明；(b) EffAction 采样器是 episode 粒度的（用到 100% 行），继承的 clip 级划分只用 90% clip，二者仍差约 10%，已在配置注释中披露。η 阈值 0.3 / 0.8 是在旧的 0–7999 范围上标定的，尚未在全量范围上复测。
+
+**评测**：正式评测不再从 [8000,10000) 自抽，改用 `historical_cg3` 复现 C–G3 的固定 pair 清单，使两个方法做同一批题。理由与代价见「2026-09-12 评测 pair 对齐决定」一节。
 
 当前 `EffActionSamplingConfig` 接受明确的 episode 范围、goal chunk 上下限、五步网格 phase、η 阈值、ε、近零距离阈值和可选 direct_max_chunks。当前本地约定为：
 
