@@ -54,6 +54,11 @@ planner_generation:
   run:
     epochs: 5
     updates_per_epoch: 2560
+    # Planner width. Not given in the method text; matched to G/V (512).
+    # StatePlanner is a two-layer MLP: 4*192+1 -> 512 -> 512 -> 192.
+    # Changing this changes the planner identity, so P must be retrained --
+    # it must never be retuned after formal evaluation has started.
+    planner_hidden_dim: 512
   settings:
     phase: generation
     seed: 3072
@@ -79,6 +84,11 @@ planner_refinement:
   run:
     epochs: 5
     updates_per_epoch: 2560
+    # Planner width. Not given in the method text; matched to G/V (512).
+    # StatePlanner is a two-layer MLP: 4*192+1 -> 512 -> 512 -> 192.
+    # Changing this changes the planner identity, so P must be retrained --
+    # it must never be retuned after formal evaluation has started.
+    planner_hidden_dim: 512
   settings:
     phase: refinement
     seed: 3072
