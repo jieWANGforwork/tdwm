@@ -13,7 +13,7 @@ EffAction 用动作条件下的累计特征网络 G 与路径代价网络 V 评�
 | G/V target | 共用分支 b；直接监督与 TD 并存；无折扣 | 已确定 |
 | V 的梯度 | 训练 V 时不更新 G；训练 P 时保留输入动作梯度 | 已确定 |
 | P | 六项输入、残差动作修正、真实动作重建后再加效率训练 | 已确定 |
-| episode 留出 | 学习使用 0–7999；评测 pair 使用 8000–9999，参照 RP1 已披露划分 | 用户已要求按 RP1 采样；仍须在运行 manifest 验证 |
+| episode 留出 | 训练 G/V/P 使用 0–7999；评测 pair 已改为与 C–G3 完全相同的固定清单（`historical_cg3`，seed 42、50 对，三档 offset 各一份 sha256 锁定） | 已对齐：2026-09-12 用户决定两方法必须做同一批题 |
 | 动作跨度 | 一个 25 维动作块，即 5 primitive steps，执行后重规划 | **已锁定**（首版不实现 25 步整计划） |
 | cross-episode goals | 首版只使用同轨迹 future goals | **已锁定**（不加跨轨迹目标） |
 | 效率分支阈值 | G/V 采样 η≥0.3；Planner 采样 η≥0.8 | **已锁定**，依据见下方只读校准 |
@@ -230,6 +230,8 @@ EffActionPlan 不执行 CEM，也不以 CEM expert 为监督。它没有方案�
 
 按 RP1 已披露的数据划分，学习 G/V/P 使用 episodes [0,8000)，validation/tuning 与最终评测任务从 [8000,10000) 抽取，并使用相互独立、预先保存的 pair draws。该留出指新学习模块的数据使用，不证明历史预训练 LeWM 或其固定归一化统计也未接触这些 episode；必须记录底座原有训练来源。
 
+**2026-09-12 更新**：正式评测不再从 [8000,10000) 自抽，改用 `historical_cg3` 复现 C–G3 的固定 pair 清单，使两个方法做同一批题。理由与代价见「2026-09-12 评测 pair 对齐决定」一节。训练数据的 0–7999 划分不变。
+
 当前 `EffActionSamplingConfig` 接受明确的 episode 范围、goal chunk 上下限、五步网格 phase、η 阈值、ε、近零距离阈值和可选 direct_max_chunks。当前本地约定为：
 
 1. 在配置的 goal chunk offsets 中均匀抽 offset；
@@ -269,7 +271,25 @@ EffActionPlan 不执行 CEM，也不以 CEM expert 为监督。它没有方案�
 
 ### 与历史 C–G3 结果的关系
 
-历史 C–G3 使用过 90/10 sequence-clip split，部分 baseline 的评测 pair 从全部 10,000 episodes 抽取；这些都与本任务的 RP1 episode 留出不同。新结果需要在相同新 held-out pairs 上重跑比较基线。旧表可以作为历史背景，但不能直接计算新方法相对旧表的配对提升。
+历史 C–G3 使用过 90/10 sequence-clip split，部分 baseline 的评测 pair 从全部 10,000 episodes 抽取；这些都与本任务的 RP1 episode 留出不同。旧表可以作为历史背景，但不能直接跨 pair 集合相减来计算提升。
+
+### 2026-09-12 评测 pair 对齐决定
+
+**问题。** EffAction 原使用 `rp1_heldout`，50 对全部来自 episode 8000–9999；C–G3 使用固定清单，三档 offset 各一份 `selection_sha256`（O25 `56546fe8…`、O50 `e46ea81c…`、O100 `8a87815e…`）。实测 C–G3 O50 seed 42 的 50 对 episode 范围为 638–9755，其中只有 10/50 落在 8000–9999，约 40/50 来自训练区 0–7999。两个方法此前做的是几乎不相交的两批题，成功率不能直接相减。
+
+**决定（用户 2026-09-12）。** EffAction 与 EffActionPlan 的 `selection.protocol` 由 `rp1_heldout` 改为 `historical_cg3`，与 C–G3 使用完全相同的 pair 清单。
+
+**落地。**
+- 两份评测配置改为 `protocol: historical_cg3`，`protocol_status` 仍为 `user_locked`。
+- `historical_cg3` 在实现中锁死 50 对 / seed 42，因此 pair 列表固定；原本的 seed 42/43/44 改为只重置规划器 RNG（评测 CLI 新增 `--planning-seed`），pair 集合不变。
+- 复现性已离线验证：以 10000×201 的 episode 长度生成，O25 / O50 / O100 三档的 pair 集合 sha256 与三个锁定值逐一相符。运行时仍保留 `select_eff_action_episodes` 的精确 hash 校验，不符即抛 `RuntimeError`。
+
+**代价与必须随结果一起报告的 caveat。**
+1. 这批清单从全部 10,000 episodes 抽取，约 40/50 的题来自 G/V/P 的训练区 0–7999，因此**绝对成功率偏乐观**，应视为训练区成绩，不可当作泛化成绩引用。
+2. 只有「同一批 pair 上 EffAction 与 C–G3 的差值」是受控比较；跨 pair 集合的相减仍然无效。
+3. 冻结底座 F（LeWM）自身是否见过这些 episode 需单独记录，本对齐只保证两个方法题目相同。
+
+**搜索深度差异保持不变。** C–G3 `horizon: 5`：一次决策搜索 5 个动作块（125 维），用 F 做 25 步 rollout 评分；EffAction `horizon: 1`：只搜索 1 个块（25 维），由 G/V 直接评分。两者 `receding_horizon` 均为 1，重规划节奏一致，都是每执行 5 个环境步重规划一次，此处不存在 5 倍的重规划频率差。`warm_start` 对 EffAction 无效（`horizon == receding_horizon`，没有剩余 plan 尾巴），对 C–G3 有效；这是搜索深度差异的必然结果，不是可单独修复的配置错误。计算量差异由 EfficiencyMetric 记录。
 
 历史 O50 的部分配置每个 5-step block 重规划，而后续 full-plan 协议执行完整 25 步后才反馈。旧结果也包含 OSMesa 与 EGL，且少量归档缺少 renderer 字段；跨后端差异不能直接归因于方法。正式比较应固定 renderer、设备及执行规则，保留 per-episode 结果；必要时以同运行环境下的新 baseline 作为配对参照。
 

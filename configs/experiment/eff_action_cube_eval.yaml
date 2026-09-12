@@ -23,7 +23,16 @@ world:
   visualize_info: false
   terminate_at_goal: true
 selection:
-  protocol: rp1_heldout
+  # User decision 2026-09-12: evaluate on the same fixed pair lists as the
+  # C--G3 baseline so both methods are scored on identical tasks.
+  # historical_cg3 is locked to 50 pairs / seed 42 and reproduces the C--G3
+  # selection_sha256 per offset (25/50/100) under an exact hash lock; it was
+  # verified to regenerate all three locked digests before this edit.
+  # Caveat: these lists draw from all 10000 episodes, about 40 of 50 pairs
+  # come from the training region 0-7999, so absolute success rates are
+  # optimistic. Only the EffAction-vs-C--G3 delta on identical pairs is a
+  # controlled comparison; treat the absolute numbers as train-region scores.
+  protocol: historical_cg3
   goal_offset: 25
   episodes: 50
   seed: 42

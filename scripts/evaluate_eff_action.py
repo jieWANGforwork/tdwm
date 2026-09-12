@@ -19,6 +19,12 @@ def main():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--goal-offset", type=int, choices=(25, 50, 100))
     parser.add_argument("--seed", type=int, choices=(42, 43, 44))
+    parser.add_argument(
+        "--planning-seed",
+        type=int,
+        choices=(42, 43, 44),
+        help="Override planning.planning_seed only; leaves the pair list untouched.",
+    )
     parser.add_argument("--allow-intermediate-checkpoint", action="store_true")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--video", action="store_true")
@@ -33,10 +39,15 @@ def main():
     if args.seed is not None:
         config["selection"]["seed"] = args.seed
         config["planning"]["planning_seed"] = args.seed
+    if args.planning_seed is not None:
+        config["planning"]["planning_seed"] = args.planning_seed
     if args.smoke:
         config["protocol_status"] = "provisional"
         config["run_mode"] = "smoke"
-        config["selection"]["episodes"] = 1
+        # historical_cg3 reproduces a locked pair list under an exact hash
+        # check, so its 50-pair count cannot be reduced for a smoke run.
+        if config["selection"]["protocol"] != "historical_cg3":
+            config["selection"]["episodes"] = 1
         config["planning"]["episode_budget"] = 5
         if config["method"] == "EffAction":
             config["planning"].update(candidates=4, elites=2, iterations=2)
