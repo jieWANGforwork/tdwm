@@ -1,0 +1,82 @@
+schema_version: 1
+method_family: effplan
+runtime:
+  stable_worldmodel_version: 0.1.1
+
+# Immutable existing artifacts; paths are supplied on the command line.
+source:
+  baseline_reference: actor_free_td_lewm_v1_c3_cube_checkpoint_o50.yaml
+  lewm_checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
+  dataset_source_sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  column_normalization_sha256: 7fd14e6a72841a36abd8f1d4aedf4f17f4f71ca508cacefe331e989664954818
+  frozen_store_manifest_sha256: fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e
+data:
+  episode_split: rp1_cube_8000_2000
+  state_stride: 5
+  efficiency_groups: null
+
+# Draft means formal execution is refused. Null fields await the user's choice;
+# do not infer approval from the existence of this file or fill them from C3.
+eff_training:
+  status: draft
+  settings:
+    seed: 3072
+    epochs: 10
+    updates_per_epoch: 12796
+    batch_size: 256
+    g_hidden_dim: null
+    v_hidden_dim: null
+    learning_rate: 0.0001
+    weight_decay: 0.001
+    gamma_g: null
+    beta: null
+    critic_coefficient: null
+    ema_rate: null
+    gradient_clip: 1.0
+    include_goal_boundary: true
+    backup_primitive_steps: null
+    cross_episode_probability: 0.3
+    epsilon: 0.000001
+    warmup_fraction: 0.01
+    validation_batches: null
+    validation_seed: 50
+    checkpoint_every_updates: 1000
+
+planner_generation:
+  status: draft
+  settings: null
+planner_refinement:
+  status: draft
+  settings: null
+
+evaluation:
+  status: draft
+  planning_seed: 42
+  episodes_per_protocol: 50
+  goal_offsets: [25, 50, 100]
+  episode_budget_multiplier: 2
+  horizon: 5
+  action_block: 5
+  candidates: 300
+  iterations: 30
+  elites: 30
+  cem_batch_size: null
+  receding_horizons: null
+  eff_score: null
+  target_readout: null
+  effplan_search_iterations: null
+  effplan_dynamics_coefficient: null
+  epsilon: 0.000001
+  render_backend: null
+
+pending_decisions:
+  - Eff G and V hidden widths and scalar-loss coefficient
+  - G discount and EMA rate
+  - Efficiency weighting strength and comparable-path grouping
+  - V backup length and validation sample count
+  - P phase budgets and the initialization of the phase-two optimizer
+  - P cross-episode sampling and final versus all-round supervision
+  - CEM budget during P training and during formal state refinement
+  - Eff terminal-only versus prefix-plus-terminal scoring
+  - O50 replan period and the pinned rendering backend
+  - Explicit GPUs allocated to this scheme without interrupting the other scheme
