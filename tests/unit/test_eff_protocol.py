@@ -15,7 +15,23 @@ from tdwm.training import eff_protocol as module
 CONFIG = Path(__file__).resolve().parents[2] / "configs/experiment/effplan_cube.yaml"
 
 
-def test_draft_config_cannot_start_formal_training_or_evaluation():
+def _draft_copy(tmp_path):
+    """The shipped config is locked; gate tests need their own draft copy."""
+    config = module.load_eff_protocol(CONFIG)
+    for stage in (
+        "eff_training",
+        "planner_generation",
+        "planner_refinement",
+        "evaluation",
+    ):
+        config[stage] = {**config[stage], "status": "draft"}
+    path = tmp_path / "draft_protocol.yaml"
+    path.write_text(yaml.safe_dump(config))
+    return path
+
+
+def test_draft_config_cannot_start_formal_training_or_evaluation(tmp_path):
+    path = _draft_copy(tmp_path)
     for stage in (
         "eff_training",
         "planner_generation",
@@ -23,7 +39,19 @@ def test_draft_config_cannot_start_formal_training_or_evaluation():
         "evaluation",
     ):
         with pytest.raises(ValueError, match="not approved"):
-            module.load_eff_protocol(CONFIG, stage=stage)
+            module.load_eff_protocol(path, stage=stage)
+
+
+def test_locked_config_is_accepted_for_every_stage():
+    """The shipped file must stay runnable end to end, not just parse."""
+    for stage in (
+        "eff_training",
+        "planner_generation",
+        "planner_refinement",
+        "evaluation",
+    ):
+        loaded = module.load_eff_protocol(CONFIG, stage=stage)
+        assert loaded, f"{stage} must load once every field is filled"
 
 
 def test_shared_sources_can_be_audited_before_numerical_choices_are_locked():
@@ -37,6 +65,9 @@ def test_shared_sources_can_be_audited_before_numerical_choices_are_locked():
 def test_grouping_cannot_be_silently_omitted_even_after_numeric_fields_filled(tmp_path):
     config = module.load_eff_protocol(CONFIG)
     config["eff_training"] = {"status": "locked", "settings": {"beta": 5}}
+    # Construct the omission explicitly instead of relying on the shipped
+    # config still carrying a null: the real file must be able to set it.
+    config["data"] = {**config["data"], "efficiency_groups": None}
     path = tmp_path / "protocol.yaml"
     path.write_text(yaml.safe_dump(config))
     with pytest.raises(ValueError, match="efficiency_groups"):

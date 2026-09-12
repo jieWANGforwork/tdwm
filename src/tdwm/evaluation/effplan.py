@@ -11,7 +11,13 @@ from pathlib import Path
 
 import numpy as np
 
-from tdwm.adapters.effplan import EffCEMCost, EffPlanSolver, EffPlanTrackingCost
+from tdwm.adapters.effplan import (
+    EFF_CUMULATIVE_SCORE_MODES,
+    EFF_SCORE_MODES,
+    EffCEMCost,
+    EffPlanSolver,
+    EffPlanTrackingCost,
+)
 from tdwm.adapters.runtime import prepare_cloud_runtime
 from tdwm.evaluation.frozen_actor_free_td_common import _resolve_frozen_dataset_source
 from tdwm.evaluation.lewm_checkpoint import _git_revision, _jsonable
@@ -173,12 +179,36 @@ def evaluate_effplan(
     planner_checkpoint: str | Path | None = None,
     planner_manifest: str | Path | None = None,
     video: bool = False,
+    eff_score: str | None = None,
+    cumulative_weight: float | None = None,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
     if method not in {"F-only", "Eff", "EffPlan"}:
         raise ValueError("Unknown predeclared method.")
     ev = config["evaluation"]
+    # A predeclared sweep over Eff scoring modes, not post-hoc tuning: every
+    # override is recorded verbatim in the manifest next to the locked config.
+    defaults = {
+        "eff_score": None,
+        "eff_cumulative_weight": 1.0,
+    }
+    overrides: dict[str, object] = {}
+    for name, value in (
+        ("eff_score", eff_score),
+        ("eff_cumulative_weight", cumulative_weight),
+    ):
+        if value is None:
+            continue
+        if method != "Eff":
+            raise ValueError(f"{name} only applies to the Eff method.")
+        overrides[name] = {"from": ev.get(name, defaults[name]), "to": value}
+        ev[name] = value
+    if eff_score in EFF_CUMULATIVE_SCORE_MODES and ev["eff_cumulative_weight"] == 0:
+        raise ValueError(
+            "A cumulative Eff score with zero weight is just the terminal "
+            "score; run terminal_eff_cost so the manifest stays unambiguous."
+        )
     if (
         ev["horizon"],
         ev["action_block"],
@@ -328,14 +358,21 @@ def evaluate_effplan(
             score = "state_path_tracking"
             extra_rerolls = len(allocation) - 1
         else:
-            if method == "Eff" and ev["eff_score"] != "terminal_eff_cost":
+            if method == "Eff" and ev["eff_score"] not in EFF_SCORE_MODES:
                 raise ValueError(
-                    "The current Eff adapter implements terminal G/V scoring only."
+                    f"Unsupported Eff score {ev['eff_score']!r}; expected one of "
+                    f"{sorted(EFF_SCORE_MODES)}."
                 )
             model = (
                 world_model
                 if method == "F-only"
-                else EffCEMCost(world_model, eff, target=ev["target_readout"])
+                else EffCEMCost(
+                    world_model,
+                    eff,
+                    target=ev["target_readout"],
+                    score_mode=ev["eff_score"],
+                    cumulative_weight=ev.get("eff_cumulative_weight", 1.0),
+                )
             )
             solver = swm.solver.CEMSolver(
                 model=model,
@@ -350,7 +387,7 @@ def evaluate_effplan(
             score = (
                 "terminal_latent_squared_distance"
                 if method == "F-only"
-                else "terminal_eff_cost"
+                else ev["eff_score"]
             )
             extra_rerolls = 0
         plan = swm.PlanConfig(
@@ -373,6 +410,10 @@ def evaluate_effplan(
             "score_mode": score,
             "protocol": f"O{offset}",
             "config": config,
+            "protocol_overrides": overrides,
+            "eff_cumulative": {
+                "weight": ev.get("eff_cumulative_weight", 1.0),
+            },
             "checkpoints": checkpoint_records,
             "dataset": provenance,
             "selection": selection,

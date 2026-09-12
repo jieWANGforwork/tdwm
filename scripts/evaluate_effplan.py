@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from tdwm.adapters.effplan import EFF_SCORE_MODES
 from tdwm.evaluation.effplan import evaluate_effplan, prepare_eff_selections
 
 
@@ -34,6 +35,13 @@ def main():
         "planner-manifest",
     ):
         evaluate.add_argument("--" + name)
+    evaluate.add_argument(
+        "--eff-score",
+        choices=sorted(EFF_SCORE_MODES),
+        help="Override evaluation.eff_score for a predeclared scoring sweep; "
+        "recorded in the manifest as protocol_overrides.",
+    )
+    evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
     args = parser.parse_args()
     if args.command == "prepare-selections":
@@ -56,6 +64,8 @@ def main():
             planner_checkpoint=args.planner_checkpoint,
             planner_manifest=args.planner_manifest,
             video=args.video,
+            eff_score=args.eff_score,
+            cumulative_weight=args.eff_cumulative_weight,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

@@ -9,6 +9,14 @@ import torch
 from torch import nn
 
 from tdwm.adapters.effplan import (
+    EFF_ACCUMULATED_SCORE_MODES,
+    EFF_GOAL_DISTANCE_SCORE_MODE,
+    EFF_LATENT_PATH_SCORE_MODE,
+    EFF_SCORE_MODES,
+    EFF_TERMINAL_SCORE_MODE,
+    EFF_VALUE_PATH_SCORE_MODE,
+    EFF_VALUE_TO_GOAL_MEAN_SCORE_MODE,
+    EFF_VALUE_TO_GOAL_SUM_SCORE_MODE,
     EffCEMCost,
     EffPlanSolver,
     EffPlanTrackingCost,
@@ -136,3 +144,140 @@ def test_effplan_refuses_trainable_world_model():
     world = FrozenWorld().requires_grad_(True)
     with pytest.raises(ValueError, match="frozen LeWM"):
         EffCEMCost(world, _eff(), target=True)
+
+
+def _stepped_actions():
+    """All-zero blocks except the last, whose first dim is 7."""
+    actions = torch.zeros(2, 3, 5, 25)
+    actions[..., -1, 0] = 7
+    return actions
+
+
+def _reference_distances():
+    """Distances implied by _stepped_actions: z1..z4 = 0, z5 = (7, 0, ..., 0)."""
+    goal = torch.ones(192)
+    last = torch.zeros(192)
+    last[0] = 7
+    return (
+        torch.linalg.vector_norm(torch.zeros(192) - goal),
+        torch.linalg.vector_norm(last - goal),
+    )
+
+
+def test_eff_cumulative_modes_charge_the_rollout_on_top_of_terminal_v():
+    world, eff = FrozenWorld(), _eff()
+    info = _expanded(_info(), 3)
+    actions = _stepped_actions()
+    zero_to_goal, last_to_goal = _reference_distances()
+
+    def build(mode, **kwargs):
+        return EffCEMCost(world, eff, target=True, score_mode=mode, **kwargs)
+
+    terminal = build(EFF_TERMINAL_SCORE_MODE).get_cost(info, actions)
+    assert terminal.shape == (2, 3)
+
+    # Latent path: only the z4 -> z5 chord is non-zero, and it has length 7.
+    latent = build(EFF_LATENT_PATH_SCORE_MODE).get_cost(info, actions)
+    torch.testing.assert_close(latent - terminal, torch.full((2, 3), 7.0))
+
+    # Goal distance: the endpoint chord ||z5 - z_g|| only.
+    endpoint = build(EFF_GOAL_DISTANCE_SCORE_MODE).get_cost(info, actions)
+    torch.testing.assert_close(
+        endpoint - terminal, torch.full((2, 3), last_to_goal.item())
+    )
+
+
+
+def test_eff_value_path_mode_scores_every_segment_through_v():
+    world, eff = FrozenWorld(), _eff()
+    cost = EffCEMCost(
+        world, eff, target=True, score_mode=EFF_VALUE_PATH_SCORE_MODE
+    )
+    seen = []
+    handle = eff.target_g.register_forward_pre_hook(
+        lambda _module, inputs: seen.append(inputs[0].detach().clone())
+    )
+    scores = cost.get_cost(_expanded(_info(), 3), _stepped_actions())
+    handle.remove()
+    assert scores.shape == (2, 3)
+    # Two batched G calls: the five traversed segments, then the terminal.
+    assert len(seen) == 2
+    assert seen[0].shape[0] == 2 * 3 * 5, "one V per traversed segment"
+    assert seen[1].shape == (2, 3, 192), "terminal V(G(z5, m_g), m_g)"
+
+
+def test_eff_cumulative_weight_scales_only_the_accumulated_term():
+    world, eff = FrozenWorld(), _eff()
+    info = _expanded(_info(), 3)
+    actions = _stepped_actions()
+    terminal = EffCEMCost(world, eff, target=True).get_cost(info, actions)
+    doubled = EffCEMCost(
+        world,
+        eff,
+        target=True,
+        score_mode=EFF_LATENT_PATH_SCORE_MODE,
+        cumulative_weight=2.0,
+    ).get_cost(info, actions)
+    torch.testing.assert_close(doubled - terminal, torch.full((2, 3), 14.0))
+
+
+def test_eff_cumulative_cost_stays_nonnegative_and_finite():
+    world, eff = FrozenWorld(), _eff()
+    for mode in sorted(EFF_ACCUMULATED_SCORE_MODES):
+        scores = EffCEMCost(world, eff, target=True, score_mode=mode).get_cost(
+            _expanded(_info(), 3), _stepped_actions()
+        )
+        assert torch.isfinite(scores).all()
+        assert (scores >= 0).all()
+
+
+def test_eff_value_to_goal_modes_score_every_action_against_the_real_goal():
+    """After each action block, ask V how far z_k is from the real goal z_g."""
+    world, eff = FrozenWorld(), _eff()
+    info = _expanded(_info(), 3)
+    actions = _stepped_actions()
+
+    def build(mode):
+        return EffCEMCost(world, eff, target=True, score_mode=mode)
+
+    total = build(EFF_VALUE_TO_GOAL_SUM_SCORE_MODE).get_cost(info, actions)
+    mean = build(EFF_VALUE_TO_GOAL_MEAN_SCORE_MODE).get_cost(info, actions)
+    assert total.shape == mean.shape == (2, 3)
+    torch.testing.assert_close(mean, total / 5)
+
+    # Self-contained: the k=H term is the terminal cost, so exactly one G call
+    # covering all five steps, and no second terminal readout.
+    seen = []
+    handle = eff.target_g.register_forward_pre_hook(
+        lambda _module, inputs: seen.append(inputs[0].detach().clone())
+    )
+    build(EFF_VALUE_TO_GOAL_SUM_SCORE_MODE).get_cost(info, actions)
+    handle.remove()
+    assert len(seen) == 1
+    assert seen[0].shape[0] == 2 * 3 * 5
+
+
+def test_eff_value_to_goal_differs_from_value_path_subgoal_chaining():
+    """V(z_k -> z_g) is not V(z_k -> z_{k+1}); the two must not coincide."""
+    world, eff = FrozenWorld(), _eff()
+    info = _expanded(_info(), 3)
+    actions = _stepped_actions()
+    to_goal = EffCEMCost(
+        world, eff, target=True, score_mode=EFF_VALUE_TO_GOAL_SUM_SCORE_MODE
+    ).get_cost(info, actions)
+    per_segment = EffCEMCost(
+        world, eff, target=True, score_mode=EFF_VALUE_PATH_SCORE_MODE
+    ).get_cost(info, actions)
+    assert not torch.allclose(to_goal, per_segment)
+
+
+def test_eff_rejects_unknown_score_mode():
+    world, eff = FrozenWorld(), _eff()
+    with pytest.raises(ValueError, match="Unsupported Eff score mode"):
+        EffCEMCost(world, eff, target=True, score_mode="made_up_mode")
+    with pytest.raises(ValueError, match="cumulative_weight"):
+        EffCEMCost(
+            world, eff, target=True, score_mode=EFF_LATENT_PATH_SCORE_MODE,
+            cumulative_weight=-1.0,
+        )
+    assert "discounted_goal_eff_cost" not in EFF_SCORE_MODES

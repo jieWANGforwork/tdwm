@@ -6,6 +6,7 @@ Eff's G->V readout. No C/G checkpoints or training losses are modified.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
@@ -18,6 +19,101 @@ from tdwm.methods.effplan import (
     generate_state_path,
     refine_state_path,
 )
+
+EFF_TERMINAL_SCORE_MODE = "terminal_eff_cost"
+EFF_LATENT_PATH_SCORE_MODE = "latent_path_eff_cost"
+EFF_VALUE_PATH_SCORE_MODE = "value_path_eff_cost"
+EFF_GOAL_DISTANCE_SCORE_MODE = "goal_distance_eff_cost"
+EFF_VALUE_TO_GOAL_SUM_SCORE_MODE = "value_to_goal_sum_eff_cost"
+EFF_VALUE_TO_GOAL_MEAN_SCORE_MODE = "value_to_goal_mean_eff_cost"
+
+# Added on top of a separate terminal V(G(z_H, m_g), m_g) term.
+EFF_CUMULATIVE_SCORE_MODES = frozenset(
+    {
+        EFF_LATENT_PATH_SCORE_MODE,
+        EFF_VALUE_PATH_SCORE_MODE,
+        EFF_GOAL_DISTANCE_SCORE_MODE,
+    }
+)
+# V(z_k -> z_g) at every post-action state. The k=H term IS the terminal cost,
+# so these modes are self-contained and add no separate terminal term.
+EFF_SELF_CONTAINED_SCORE_MODES = frozenset(
+    {
+        EFF_VALUE_TO_GOAL_SUM_SCORE_MODE,
+        EFF_VALUE_TO_GOAL_MEAN_SCORE_MODE,
+    }
+)
+# Modes that need the pre-rollout anchor z_0.
+EFF_START_ANCHORED_SCORE_MODES = frozenset(
+    {EFF_LATENT_PATH_SCORE_MODE, EFF_VALUE_PATH_SCORE_MODE}
+)
+EFF_ACCUMULATED_SCORE_MODES = (
+    EFF_CUMULATIVE_SCORE_MODES | EFF_SELF_CONTAINED_SCORE_MODES
+)
+EFF_SCORE_MODES = frozenset({EFF_TERMINAL_SCORE_MODE, *EFF_ACCUMULATED_SCORE_MODES})
+
+
+def cumulative_eff_cost(
+    *,
+    future: torch.Tensor,
+    goal: torch.Tensor,
+    eff: EffModel,
+    mode: str,
+    target: bool,
+    start: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Accumulated rollout term for one Eff scoring mode.
+
+    Two families, distinguished by whether a separate terminal term is added:
+
+    Cumulative (a terminal V(G(z_H, m_g), m_g) is added separately):
+      ``latent_path_eff_cost``       sum of geometric chords ||z_{k+1} - z_k||
+      ``value_path_eff_cost``        sum of per-segment G -> V costs, i.e. the
+                                     denominator of ``path_efficiency``
+      ``goal_distance_eff_cost``     the endpoint chord ||z_H - z_g|| only
+
+    Self-contained (the k=H term already is the terminal cost):
+      ``value_to_goal_sum_eff_cost``   sum   of V(z_k -> z_g) over k = 1..H
+      ``value_to_goal_mean_eff_cost``  mean  of V(z_k -> z_g) over k = 1..H
+
+    The first family asks "how much latent change did the rollout burn"; the
+    second asks "how far from the goal was it at every step".
+    """
+    if mode not in EFF_ACCUMULATED_SCORE_MODES:
+        raise ValueError(
+            f"Unsupported Eff cumulative score mode {mode!r}; expected one of "
+            f"{sorted(EFF_ACCUMULATED_SCORE_MODES)}."
+        )
+    if mode in EFF_SELF_CONTAINED_SCORE_MODES:
+        flat = future.reshape(-1, future.shape[-1])
+        flat_goal = (
+            goal.unsqueeze(-2).expand_as(future).reshape(-1, future.shape[-1])
+        )
+        costs = eff.value(flat, flat_goal, target=target)
+        if costs.shape != (flat.shape[0],):
+            raise ValueError("G -> V must return one scalar per action step.")
+        costs = costs.reshape(*future.shape[:2], future.shape[-2])
+        if mode == EFF_VALUE_TO_GOAL_MEAN_SCORE_MODE:
+            return costs.mean(-1)
+        return costs.sum(-1)
+    if mode in EFF_START_ANCHORED_SCORE_MODES and start is None:
+        raise ValueError(f"{mode} requires the pre-rollout anchor state z_0.")
+    if mode == EFF_GOAL_DISTANCE_SCORE_MODE:
+        return torch.linalg.vector_norm(future[..., -1, :] - goal, dim=-1)
+
+    states = torch.cat([start.unsqueeze(-2), future], dim=-2)
+    if mode == EFF_LATENT_PATH_SCORE_MODE:
+        delta = states[..., 1:, :] - states[..., :-1, :]
+        return torch.linalg.vector_norm(delta, dim=-1).sum(-1)
+    segments = states.shape[-2] - 1
+    costs = eff.value(
+        states[..., :-1, :].reshape(-1, states.shape[-1]),
+        states[..., 1:, :].reshape(-1, states.shape[-1]),
+        target=target,
+    )
+    if costs.shape != (start.shape[0] * start.shape[1] * segments,):
+        raise ValueError("G -> V must return one scalar per traversed segment.")
+    return costs.reshape(*future.shape[:2], segments).sum(-1)
 
 
 class EffReadout(nn.Module):
@@ -35,16 +131,91 @@ class EffReadout(nn.Module):
 class EffCEMCost(ActorFreeTDLeWMV1C3):
     """Eff: full five-block F rollout, then terminal G->V, no action in G."""
 
-    def __init__(self, world_model: nn.Module, eff: EffModel, *, target: bool) -> None:
+    def __init__(
+        self,
+        world_model: nn.Module,
+        eff: EffModel,
+        *,
+        target: bool,
+        score_mode: str = EFF_TERMINAL_SCORE_MODE,
+        cumulative_weight: float = 1.0,
+    ) -> None:
         if any(p.requires_grad for p in world_model.parameters()):
             raise ValueError("Eff planning requires a frozen LeWM.")
         if any(p.requires_grad for p in eff.parameters()):
             raise ValueError("Eff planning requires frozen G/V parameters.")
+        if score_mode not in EFF_SCORE_MODES:
+            raise ValueError(
+                f"Unsupported Eff score mode {score_mode!r}; expected one of "
+                f"{sorted(EFF_SCORE_MODES)}."
+            )
+        if not math.isfinite(cumulative_weight) or cumulative_weight < 0:
+            raise ValueError("cumulative_weight must be finite and nonnegative.")
         super().__init__(
             world_model,
             EffReadout(eff, target=target),
             run_constant_shift_sanity=False,
         )
+        # Deliberately not `self.score_mode`: the base class owns that attribute
+        # and branches on it (STATE_V_SCORE_MODE vs first-action modes), so Eff
+        # keeps its own mode under a separate name.
+        self.eff_score_mode = score_mode
+        self.cumulative_weight = float(cumulative_weight)
+
+    @property
+    def eff(self) -> EffModel:
+        """The frozen G/V model, reached through the registered readout."""
+        return self.target_critic.eff
+
+    def get_cost(
+        self, info_dict: dict, action_candidates: torch.Tensor
+    ) -> torch.Tensor:
+        """Terminal G -> V, optionally plus an accumulated rollout term."""
+        if self.eff_score_mode == EFF_TERMINAL_SCORE_MODE:
+            return super().get_cost(info_dict, action_candidates)
+
+        future = self.future_states(info_dict, action_candidates)
+        batch, samples = future.shape[:2]
+        goal = self._goal_for_samples(
+            info_dict, batch=batch, samples=samples, reference=action_candidates
+        )
+        accumulated = cumulative_eff_cost(
+            future=future,
+            goal=goal,
+            eff=self.eff,
+            mode=self.eff_score_mode,
+            target=self.target_critic.target,
+            start=(
+                self._current_state_for_samples(
+                    dict(info_dict),
+                    batch=batch,
+                    samples=samples,
+                    reference=action_candidates,
+                )
+                if self.eff_score_mode in EFF_START_ANCHORED_SCORE_MODES
+                else None
+            ),
+        )
+        if self.eff_score_mode in EFF_SELF_CONTAINED_SCORE_MODES:
+            # V(z_H -> z_g) is already the last term; adding it twice would
+            # silently double-weight the terminal cost.
+            total = accumulated
+        else:
+            terminal = self.target_critic(future[..., -1, :], goal)
+            if terminal.ndim == 3 and terminal.shape[-1] == 1:
+                terminal = terminal.squeeze(-1)
+            if terminal.shape != (batch, samples):
+                raise ValueError(
+                    "Eff terminal G -> V must return one cost per candidate."
+                )
+            total = terminal + self.cumulative_weight * accumulated
+        if total.shape != (batch, samples):
+            raise ValueError("Eff accumulated cost must return one cost per candidate.")
+        if not bool(torch.isfinite(total).all()):
+            raise ValueError("Eff accumulated cost returned NaN or Inf.")
+        if bool((total < 0).any()):
+            raise ValueError("Eff accumulated cost must be nonnegative.")
+        return total
 
     def future_states(self, info: dict, actions: torch.Tensor) -> torch.Tensor:
         """Return aligned z1..z5; every candidate action goes through F."""

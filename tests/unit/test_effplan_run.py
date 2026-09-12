@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
+from tdwm.training import eff_protocol
 from tdwm.training.effplan_run import (
     _planner_settings,
     planner_learning_rate,
@@ -10,6 +12,23 @@ from tdwm.training.effplan_run import (
 from tdwm.training.effplan_runtime import EffPlanTrainSettings
 
 REPO_CONFIG = "configs/experiment/effplan_cube.yaml"
+
+_STAGES = (
+    "eff_training",
+    "planner_generation",
+    "planner_refinement",
+    "evaluation",
+)
+
+
+def draft_copy(tmp_path):
+    """The shipped config is locked; gate tests need their own draft copy."""
+    config = eff_protocol.load_eff_protocol(REPO_CONFIG)
+    for stage in _STAGES:
+        config[stage] = {**config[stage], "status": "draft"}
+    path = tmp_path / "draft_protocol.yaml"
+    path.write_text(yaml.safe_dump(config))
+    return str(path)
 
 
 def generation_stage(**overrides) -> dict:
@@ -60,7 +79,7 @@ def test_learning_rate_starts_at_zero_slope_and_ends_at_zero():
 def test_unlocked_configuration_is_refused_before_any_work(tmp_path):
     with pytest.raises(ValueError, match="not approved for formal execution"):
         run_effplan_training(
-            config_path=REPO_CONFIG,
+            config_path=draft_copy(tmp_path),
             phase="generation",
             latent_store=tmp_path / "store",
             terminal_metadata=tmp_path / "terminal",
@@ -75,7 +94,7 @@ def test_unlocked_configuration_is_refused_before_any_work(tmp_path):
 def test_phase_and_requested_phase_must_agree(tmp_path):
     with pytest.raises(ValueError, match="not approved for formal execution"):
         run_effplan_training(
-            config_path=REPO_CONFIG,
+            config_path=draft_copy(tmp_path),
             phase="refinement",
             latent_store=tmp_path / "store",
             terminal_metadata=tmp_path / "terminal",

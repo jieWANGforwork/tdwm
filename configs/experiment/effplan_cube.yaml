@@ -13,44 +13,93 @@ source:
 data:
   episode_split: rp1_cube_8000_2000
   state_stride: 5
-  efficiency_groups: null
+  # Forced by load_eff_protocol for the eff_training stage.
+  efficiency_groups: time_offset_within_minibatch
 
 # Draft means formal execution is refused. Null fields await the user's choice;
 # do not infer approval from the existence of this file or fill them from C3.
 eff_training:
-  status: draft
+  status: locked
   settings:
     seed: 3072
     epochs: 10
     updates_per_epoch: 12796
     batch_size: 256
-    g_hidden_dim: null
-    v_hidden_dim: null
+    # Locked by the accepted first-round hyperparameter package.
+    g_hidden_dim: 512
+    v_hidden_dim: 512
     learning_rate: 0.0001
     weight_decay: 0.001
-    gamma_g: null
-    beta: null
-    critic_coefficient: null
-    ema_rate: null
+    # User 2026-09-12: 0.98. Note this applies per training transition, and the
+    # Eff training stride is 5 primitive steps, so it is a per-BLOCK discount.
+    # If a per-primitive-step 0.98 was intended, this should be 0.98^5=0.9039.
+    gamma_g: 0.98
+    beta: 5
+    # lambda_V, i.e. the V loss weight relative to G. User: 1 (2026-09-12).
+    critic_coefficient: 1.0
+    ema_rate: 0.005
     gradient_clip: 1.0
     include_goal_boundary: true
-    backup_primitive_steps: null
+    backup_primitive_steps: 50
     cross_episode_probability: 0.3
     epsilon: 0.000001
     warmup_fraction: 0.01
-    validation_batches: null
+    # Matches the sibling eff_action_cube_train.yaml validation.batches.
+    validation_batches: 16
     validation_seed: 50
     checkpoint_every_updates: 1000
 
 planner_generation:
-  status: draft
-  settings: null
+  status: locked
+  run:
+    epochs: 5
+    updates_per_epoch: 2560
+  settings:
+    phase: generation
+    seed: 3072
+    learning_rate: 0.0001
+    weight_decay: 0.001
+    gradient_clip: 1.0
+    epsilon: 0.000001
+    # Must match evaluation.target_readout; the evaluator asserts it.
+    target_readout: true
+    trajectory_coefficient: 1.0
+    # Generation is trajectory-only: EffPlanTrainSettings rejects any CEM,
+    # efficiency or dynamics term in this phase.
+    efficiency_coefficient: 0.0
+    dynamics_coefficient: 0.0
+    search_iterations: []
+    cem_candidates: 300
+    cem_elites: 30
+    cem_batch_size: 1
+    supervision: final
+
 planner_refinement:
-  status: draft
-  settings: null
+  status: locked
+  run:
+    epochs: 5
+    updates_per_epoch: 2560
+  settings:
+    phase: refinement
+    seed: 3072
+    learning_rate: 0.0001
+    weight_decay: 0.001
+    gradient_clip: 1.0
+    epsilon: 0.000001
+    target_readout: true
+    trajectory_coefficient: 1.0
+    efficiency_coefficient: 0.1
+    dynamics_coefficient: 0.1
+    # Training-time CEM budget, deliberately smaller than the formal 30 rounds:
+    # it only exists to produce the F rollout the dynamics term compares against.
+    search_iterations: [2, 2, 2, 2]
+    cem_candidates: 300
+    cem_elites: 30
+    cem_batch_size: 1
+    supervision: final
 
 evaluation:
-  status: draft
+  status: locked
   planning_seed: 42
   episodes_per_protocol: 50
   goal_offsets: [25, 50, 100]
@@ -60,23 +109,38 @@ evaluation:
   candidates: 300
   iterations: 30
   elites: 30
-  cem_batch_size: null
-  receding_horizons: null
-  eff_score: null
-  target_readout: null
-  effplan_search_iterations: null
-  effplan_dynamics_coefficient: null
+  # Baseline-forced: V1-C3 used solver_batch_size 1 and MUJOCO_GL=osmesa.
+  cem_batch_size: 1
+  # Baseline-forced: O25 replans every five blocks (RH5); O50/O100 use RH1.
+  receding_horizons: { "25": 5, "50": 1, "100": 1 }
+  # Eff CEM cost. terminal_eff_cost | latent_path_eff_cost |
+  # value_path_eff_cost | goal_distance_eff_cost |
+  # value_to_goal_sum_eff_cost | value_to_goal_mean_eff_cost.
+  # The first five add the listed term on top of the terminal V(G(z5, m_g), m_g);
+  # the last two are self-contained (their k=5 term IS the terminal).
+  # Sweep them with `evaluate_effplan.py evaluate --eff-score ...`.
+  eff_score: value_path_eff_cost
+  eff_cumulative_weight: 1.0
+  # Baseline-forced: V1-C3 scored with the EMA target critic, not the online one.
+  target_readout: true
+  # Locked: 8 state-improvement searches + 1 final action search share 30
+  # rounds, i.e. distribute_cem_iterations(total_iterations=30, searches=9).
+  effplan_search_iterations: [3, 3, 3, 3, 3, 3, 4, 4, 4]
+  effplan_dynamics_coefficient: 0.1
   epsilon: 0.000001
-  render_backend: null
+  # Baseline-forced: C-G3 formal runs recorded MUJOCO_GL=osmesa.
+  render_backend: osmesa
 
-pending_decisions:
-  - Eff G and V hidden widths and scalar-loss coefficient
-  - G discount and EMA rate
-  - Efficiency weighting strength and comparable-path grouping
-  - V backup length and validation sample count
-  - P phase budgets and the initialization of the phase-two optimizer
-  - P cross-episode sampling and final versus all-round supervision
-  - CEM budget during P training and during formal state refinement
-  - Eff terminal-only versus prefix-plus-terminal scoring
-  - O50 replan period and the pinned rendering backend
-  - Explicit GPUs allocated to this scheme without interrupting the other scheme
+locked_decisions:
+  frozen_f: pretrained LeWM 198c468c... (the older checkpoint), frozen throughout.
+  gamma_g: 0.98 per training transition (stride 5, so this is per block).
+  critic_coefficient: 1.0, i.e. G and V losses are equally weighted.
+  validation_batches: 16, matching the sibling eff_action_cube_train.yaml.
+  planner: trajectory 1.0 / efficiency 0.1 / dynamics 0.1, supervision final,
+    target_readout true, 5 epochs x 2560 updates per phase.
+  effplan_dynamics_coefficient: 0.1.
+  baseline_forced: >-
+    render_backend osmesa, cem_batch_size 1, target_readout true,
+    receding_horizons 25=5 / 50=1 / 100=1 (only O25 replans every five blocks).
+open_item:
+  - Which of the five GPUs is free; must not disturb the other scheme.
