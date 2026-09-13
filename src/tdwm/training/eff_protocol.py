@@ -89,6 +89,18 @@ def load_eff_protocol(path: str | Path, *, stage: str | None = None) -> dict:
                 f"{stage} is not approved for formal execution; unresolved fields: {pending}. "
                 "Do not silently fill these choices from unrelated baselines."
             )
+        if stage == "evaluation":
+            intervals = config[stage].get("receding_horizons")
+            if (
+                not isinstance(intervals, dict)
+                or set(intervals) != {"25", "50", "100"}
+                or any(type(value) is not int or value != 5 for value in intervals.values())
+            ):
+                raise ValueError(
+                    "Eff/EffPlan formal execution requires five action blocks "
+                    "(25 primitive steps) before replanning for O25/O50/O100. "
+                    "Legacy RH1 execution must not be reused as the corrected protocol."
+                )
     return config
 
 

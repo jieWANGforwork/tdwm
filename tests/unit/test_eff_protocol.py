@@ -130,3 +130,33 @@ def test_public_dataset_metadata_audit_does_not_promote_truncations(
             output_dir=tmp_path / "rejected",
         )
     assert not (tmp_path / "rejected").exists()
+
+
+@pytest.mark.parametrize("offset", [25, 50, 100])
+def test_every_formal_offset_executes_the_complete_25_step_plan(offset):
+    evaluation = module.load_eff_protocol(CONFIG, stage="evaluation")["evaluation"]
+    assert evaluation["horizon"] == evaluation["receding_horizons"][str(offset)] == 5
+    assert evaluation["action_block"] == 5
+    assert evaluation["episode_budget_multiplier"] * offset == 2 * offset
+
+
+@pytest.mark.parametrize("offset", [25, 50, 100])
+@pytest.mark.parametrize("interval", [1, 25, True, "5"])
+def test_evaluation_rejects_partial_or_wrongly_typed_execution_intervals(
+    tmp_path, offset, interval
+):
+    config = module.load_eff_protocol(CONFIG)
+    config["evaluation"]["receding_horizons"][str(offset)] = interval
+    path = tmp_path / "wrong_execution.yaml"
+    path.write_text(yaml.safe_dump(config))
+    with pytest.raises(ValueError, match="25 primitive"):
+        module.load_eff_protocol(path, stage="evaluation")
+
+
+def test_evaluation_requires_an_explicit_interval_for_every_offset(tmp_path):
+    config = module.load_eff_protocol(CONFIG)
+    del config["evaluation"]["receding_horizons"]["100"]
+    path = tmp_path / "missing_execution.yaml"
+    path.write_text(yaml.safe_dump(config))
+    with pytest.raises(ValueError, match="25 primitive"):
+        module.load_eff_protocol(path, stage="evaluation")

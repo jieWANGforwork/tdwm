@@ -131,8 +131,11 @@ evaluation:
   elites: 30
   # Baseline-forced: V1-C3 used solver_batch_size 1 and MUJOCO_GL=osmesa.
   cem_batch_size: 1
-  # Baseline-forced: O25 replans every five blocks (RH5); O50/O100 use RH1.
-  receding_horizons: { "25": 5, "50": 1, "100": 1 }
+  # Execute the complete five-block plan before observing/replanning: 25
+  # primitive steps for EVERY offset. The episode budget remains 2 * offset.
+  # LeWM Cube / RP1 C.1 use H5/RH5; O50 extends the same execution rule.
+  # Do not inherit the historical C-family O50/O100 RH1 execution schedule.
+  receding_horizons: { "25": 5, "50": 5, "100": 5 }
   # Eff CEM cost. terminal_eff_cost | latent_path_eff_cost |
   # value_path_eff_cost | goal_distance_eff_cost |
   # value_to_goal_sum_eff_cost | value_to_goal_mean_eff_cost.
@@ -160,7 +163,10 @@ locked_decisions:
     target_readout true, 5 epochs x 2560 updates per phase.
   effplan_dynamics_coefficient: 0.1.
   baseline_forced: >-
-    render_backend osmesa, cem_batch_size 1, target_readout true,
-    receding_horizons 25=5 / 50=1 / 100=1 (only O25 replans every five blocks).
+    render_backend osmesa, cem_batch_size 1, target_readout true.
+  execution_protocol: >-
+    O25/O50/O100 all use H5/RH5 with five-primitive-step action blocks:
+    plan and execute 25 primitive steps, then replan if the episode continues.
+    Total episode budgets stay 50/100/200. This supersedes the old RH1 runs.
 open_item:
   - Which of the five GPUs is free; must not disturb the other scheme.

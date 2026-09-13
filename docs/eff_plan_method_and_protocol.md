@@ -109,13 +109,22 @@ EMA target：`ema_rate: 0.005`。验证：`validation_batches: 16`（对齐方�
 
 ## 4. 测试
 
-### 4.1 协议（与 C→G3 完全一致）
+### 4.1 当前执行协议（2026-09-13 修正）
+
+每轮在 F 中规划五个大动作块，并将五块全部交给 Cube 执行，共 25 个原始动作。
+动作执行队列用完、任务尚未终止时，再由最新真实观测启动下一轮规划；
+不是每执行一个大动作块（五个原始动作）就重规划。成功时可以提前终止。
+
+执行周期依据 [LeWM 作者 Cube 配置](https://github.com/Mengarr/lewm/blob/8a2c595813d0eee85b2dbffa6f58ff0842f9e673/config/eval/cube.yaml)
+和 [RP1 附录 C.1](https://arxiv.org/html/2608.18669v1#A3.SS1)；RP1 Cube 报告 O25/O100，
+O50 沿用同一执行规则作为扩展。本次仅校正执行周期，不宣称其他设置均与 RP1 相同。
 
 | 项 | 值 |
 |---|---|
 | offset | O25 / O50 / O100 |
 | episode 预算 | `2 × offset`（50 / 100 / 200 步） |
-| **receding horizon** | **O25 = 5，O50 = 1，O100 = 1** ← 只有 O25 每 5 块重规划 |
+| **receding horizon（块）** | **O25 = O50 = O100 = 5** |
+| 每轮规划 / 执行（原始步） | 三个 offset 均为 **25 / 25** |
 | 每 offset episode 数 | 50 |
 | planning seed | 42 |
 | CEM | 300 候选 / 30 轮 / 30 精英，`cem_batch_size: 1` |
@@ -123,7 +132,10 @@ EMA target：`ema_rate: 0.005`。验证：`validation_batches: 16`（对齐方�
 | 渲染后端 | `MUJOCO_GL=osmesa`（C–G3 实测产物，不是 egl） |
 | 读出 | `target_readout: true`（EMA target，不是 online） |
 
-**F-only 不重跑**：它是共享基线，直接复用既有数字作为对照行。
+**历史结果不得改写为新协议结果。** 已有 O50/O100 的 RH1 结果应保留原标记，
+不能作为 RH5 的结果复用；修正后的成功率需要重新评测。F-only、Eff 和 EffPlan
+在本入口共享 H5/RH5 执行规则，配对比较必须同时匹配起终点与完整执行协议。
+O25 的执行周期不变。模型、训练 loss、checkpoint 和六种 Eff 评分公式均不因本次修正而改变。
 
 ### 4.2 Eff 的六种评分模式
 

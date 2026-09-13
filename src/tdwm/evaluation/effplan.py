@@ -232,8 +232,11 @@ def evaluate_effplan(
     )
     offset = selection["goal_offset"]
     receding = ev["receding_horizons"][str(offset)]
-    if type(receding) is not int or receding not in (1, 5):
-        raise ValueError("Replanning interval must be explicitly one or five chunks.")
+    if type(receding) is not int or receding != 5:
+        raise ValueError(
+            "Eff/EffPlan must execute all five blocks (25 primitive steps) "
+            "before replanning, independently of the goal offset."
+        )
     if ev["episode_budget_multiplier"] != 2:
         raise ValueError("Formal episode budget must be twice the goal offset.")
     reference = baseline_reference(config, config_path)
