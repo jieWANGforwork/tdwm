@@ -195,8 +195,9 @@ def run_effplan_training(
             existing = json.loads(manifest_path.read_text())
             if existing["identity"] != identity:
                 raise ValueError("Output directory belongs to a different EffPlan run.")
-        if settings.safety is not None:
-            torch.manual_seed(settings.seed)
+        # Seed construction in BOTH phases, independently of P safety. Resume
+        # subsequently restores RNG/weights; init_from still replaces weights.
+        torch.manual_seed(settings.seed)
         planner = StatePlanner(hidden_dim=int(run["planner_hidden_dim"]))
         trainer = EffPlanTrainer(
             planner=planner,

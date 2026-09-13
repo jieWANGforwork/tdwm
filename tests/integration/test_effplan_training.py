@@ -256,8 +256,9 @@ def test_stable_refinement_25_updates_with_public_cem_resume_and_frozen_gvf(tmp_
         legacy.resume(path)
 
 
+@pytest.mark.parametrize("phase", ["generation", "refinement"])
 def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, phase
 ):
     import json
     from pathlib import Path
@@ -269,7 +270,7 @@ def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
     config = yaml.safe_load(
         Path("configs/experiment/effplan_cube_stable_p_v1.yaml").read_text()
     )
-    config["planner_refinement"]["run"].update(
+    config[f"planner_{phase}"]["run"].update(
         epochs=1,
         updates_per_epoch=4,
         planner_hidden_dim=8,
@@ -277,9 +278,10 @@ def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
         validation_batches=1,
         checkpoint_every_updates=1000,
     )
-    config["planner_refinement"]["settings"].update(
-        search_iterations=[1, 1], cem_candidates=4, cem_elites=2, cem_batch_size=2,
-    )
+    if phase == "refinement":
+        config["planner_refinement"]["settings"].update(
+            search_iterations=[1, 1], cem_candidates=4, cem_elites=2, cem_batch_size=2,
+        )
     conf = tmp_path / "protocol.yaml"
     conf.write_text(yaml.safe_dump(config))
     eff_settings = EffRunSettings(**config["eff_training"]["settings"])
@@ -309,7 +311,7 @@ def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
     )
     args = dict(
         config_path=conf,
-        phase="refinement",
+        phase=phase,
         latent_store="fixture",
         terminal_metadata="fixture",
         eff_checkpoint=eff_file,
@@ -326,10 +328,12 @@ def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
         **args, output_dir=tmp_path / "paused", resume=tmp_path / "paused/last.pt"
     )
     assert done["status"] == "complete" and done["completed_updates"] == 4
+    torch.manual_seed(98765)  # An unrelated prior RNG state must not change P.
     direct = run.run_effplan_training(**args, output_dir=tmp_path / "direct")
     a = torch.load(done["last_recoverable_checkpoint"], weights_only=False)
     b = torch.load(direct["last_recoverable_checkpoint"], weights_only=False)
     for key, value in a["planner"].items():
         torch.testing.assert_close(value, b["planner"][key], rtol=0, atol=0)
-    assert a["optimizer"]["param_groups"][0]["lr"] == 0
-    assert a["settings"]["safety"]["geometric_lower_bound"]
+    if phase == "refinement":
+        assert a["optimizer"]["param_groups"][0]["lr"] == 0
+        assert a["settings"]["safety"]["geometric_lower_bound"]
