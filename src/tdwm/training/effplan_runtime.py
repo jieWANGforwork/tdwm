@@ -28,6 +28,11 @@ from tdwm.methods.effplan import (
     planner_loss,
     refine_state_path,
 )
+from tdwm.methods.effplan_safety import (
+    PlannerSafety,
+    PlannerSafetyRuntime,
+    require_finite,
+)
 from tdwm.training.eff_data import EffPlanReplayBatch
 from tdwm.training.eff_runtime import canonical_sha256
 
@@ -51,8 +56,13 @@ class EffPlanTrainSettings:
     cem_elites: int
     cem_batch_size: int
     supervision: str
+    safety: PlannerSafety | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.safety, dict):
+            object.__setattr__(self, "safety", PlannerSafety(**self.safety))
+        if self.safety is not None and not isinstance(self.safety, PlannerSafety):
+            raise ValueError("Invalid P safety settings.")
         if self.phase not in {"generation", "refinement"}:
             raise ValueError("Unknown EffPlan training phase.")
         if self.supervision not in {"final", "mean_rounds"}:
@@ -103,6 +113,14 @@ class EffPlanTrainSettings:
             raise ValueError("CEM needs >=2 elites for a defined sample variance.")
         if self.cem_batch_size < 1:
             raise ValueError("CEM batch size must be positive.")
+
+
+def planner_settings_payload(settings: EffPlanTrainSettings) -> dict:
+    """Old checkpoints retain their exact settings/hash when safety is absent."""
+    payload = dataclasses.asdict(settings)
+    if settings.safety is None:
+        payload.pop("safety")
+    return payload
 
 
 def latent_planning_context(start: torch.Tensor, goal: torch.Tensor) -> dict:
@@ -188,6 +206,11 @@ class EffPlanTrainer:
         from gymnasium.spaces import Box
 
         states = batch.real_states.to(self.device).detach()
+        self.safety_runtime = (
+            None
+            if self.settings.safety is None
+            else PlannerSafetyRuntime(self.settings.safety)
+        )
         valid = batch.trajectory_valid.to(self.device)
         if states.ndim != 3 or states.shape[1:] != (6, 192) or batch.state_stride != 5:
             raise ValueError(
@@ -204,6 +227,7 @@ class EffPlanTrainer:
             self.value,
             horizon=5,
             epsilon=self.settings.epsilon,
+            safety=self.safety_runtime,
         )
         loss_args = dict(
             real_states=states,
@@ -213,6 +237,7 @@ class EffPlanTrainer:
             efficiency_coefficient=self.settings.efficiency_coefficient,
             dynamics_coefficient=self.settings.dynamics_coefficient,
             trajectory_valid=valid,
+            safety=self.safety_runtime,
         )
         losses = []
         if self.solver is None:
@@ -249,6 +274,7 @@ class EffPlanTrainer:
                     predicted_future=future,
                     epsilon=self.settings.epsilon,
                     dynamics_coefficient=self.settings.dynamics_coefficient,
+                    safety=self.safety_runtime,
                 )
                 losses.append(planner_loss(nodes, predicted_future=future, **loss_args))
         selected = losses if self.settings.supervision == "mean_rounds" else losses[-1:]
@@ -261,6 +287,10 @@ class EffPlanTrainer:
         self.optimizer.zero_grad(set_to_none=True)
         loss, selected, valid = self._loss(batch)
         loss.backward()
+        if self.settings.safety is not None:
+            for name, parameter in self.planner.named_parameters():
+                if parameter.grad is not None:
+                    require_finite(parameter.grad, f"P parameter gradient {name}")
         norm = torch.nn.utils.clip_grad_norm_(
             self.planner.parameters(),
             self.settings.gradient_clip,
@@ -269,6 +299,7 @@ class EffPlanTrainer:
         self.optimizer.step()
         self.global_step += 1
         return {
+            **({} if self.safety_runtime is None else self.safety_runtime.metrics()),
             "global_step": self.global_step,
             "phase": self.settings.phase,
             "total_loss": loss.item(),
@@ -296,6 +327,9 @@ class EffPlanTrainer:
         try:
             loss, selected, valid = self._loss(batch)
             return {
+                **(
+                    {} if self.safety_runtime is None else self.safety_runtime.metrics()
+                ),
                 "total_loss": loss.item(),
                 "trajectory_loss": torch.stack([x.trajectory for x in selected])
                 .mean()
@@ -319,7 +353,7 @@ class EffPlanTrainer:
         payload = {
             "format": CHECKPOINT_FORMAT,
             "method": "EffPlan",
-            "settings": dataclasses.asdict(self.settings),
+            "settings": planner_settings_payload(self.settings),
             "identity": self.identity,
             "identity_sha256": canonical_sha256(self.identity),
             "planner_hidden_dim": self.planner.hidden_dim,
@@ -356,7 +390,7 @@ class EffPlanTrainer:
         if (
             payload.get("identity") != self.identity
             or payload.get("identity_sha256") != canonical_sha256(self.identity)
-            or payload.get("settings") != dataclasses.asdict(self.settings)
+            or payload.get("settings") != planner_settings_payload(self.settings)
             or payload.get("planner_hidden_dim") != self.planner.hidden_dim
         ):
             raise ValueError("EffPlan resume identity, phase or settings differ.")

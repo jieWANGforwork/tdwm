@@ -20,12 +20,15 @@ def main():
         "device",
     ):
         parser.add_argument("--" + arg, required=True)
-    parser.add_argument(
-        "--phase", choices=["generation", "refinement"], required=True
-    )
+    parser.add_argument("--phase", choices=["generation", "refinement"], required=True)
     parser.add_argument("--lewm-checkpoint")
     parser.add_argument("--resume")
     parser.add_argument("--init-from")
+    parser.add_argument(
+        "--stop-after-updates",
+        type=int,
+        help="Pause at this absolute update with a resumable checkpoint; keep the full LR budget.",
+    )
     args = parser.parse_args()
     result = run_effplan_training(
         config_path=args.config,
@@ -39,6 +42,7 @@ def main():
         device=args.device,
         resume=args.resume,
         init_from=args.init_from,
+        stop_after_updates=args.stop_after_updates,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

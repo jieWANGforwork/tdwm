@@ -15,6 +15,7 @@ import torch
 from torch import nn
 
 from tdwm.methods.eff import STATE_DIM
+from tdwm.methods.effplan_safety import PlannerSafetyRuntime, require_finite
 
 ValueFunction = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
 
@@ -86,7 +87,11 @@ def binary_midpoint_order(horizon: int) -> list[tuple[int, int, int]]:
 
 
 def path_efficiency(
-    states: torch.Tensor, value: ValueFunction, *, epsilon: float
+    states: torch.Tensor,
+    value: ValueFunction,
+    *,
+    epsilon: float,
+    safety: PlannerSafetyRuntime | None = None,
 ) -> torch.Tensor:
     """Endpoint net distance / sum of segment costs predicted by G -> V."""
     if states.ndim != 3 or states.shape[-1] != STATE_DIM or states.shape[1] < 2:
@@ -96,8 +101,13 @@ def path_efficiency(
     costs = value(states[:, :-1], states[:, 1:])
     if costs.shape != states.shape[:2][0:1] + (states.shape[1] - 1,):
         raise ValueError("G -> V must return one scalar per segment.")
+    if safety is not None:
+        costs = safety.costs(states, costs)
     net = torch.linalg.vector_norm(states[:, -1] - states[:, 0], dim=-1)
-    return net / (costs.sum(-1) + epsilon)
+    efficiency = net / (costs.sum(-1) + epsilon)
+    if safety is not None:
+        safety.efficiency(efficiency)
+    return efficiency
 
 
 def dynamics_consistency(
@@ -116,10 +126,11 @@ def state_objective(
     epsilon: float,
     predicted_future: torch.Tensor | None,
     dynamics_coefficient: float,
+    safety: PlannerSafetyRuntime | None = None,
 ) -> torch.Tensor:
     if not math.isfinite(dynamics_coefficient) or dynamics_coefficient < 0:
         raise ValueError("dynamics_coefficient must be finite and nonnegative.")
-    objective = -path_efficiency(states, value, epsilon=epsilon)
+    objective = -path_efficiency(states, value, epsilon=epsilon, safety=safety)
     if predicted_future is not None:
         objective = objective + dynamics_coefficient * dynamics_consistency(
             states, predicted_future
@@ -136,6 +147,7 @@ def state_feedback(
     epsilon: float,
     predicted_future: torch.Tensor | None = None,
     dynamics_coefficient: float = 0,
+    safety: PlannerSafetyRuntime | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Detach feedback only; never detach the final planner-loss computation.
 
@@ -153,8 +165,13 @@ def state_feedback(
             epsilon=epsilon,
             predicted_future=reference,
             dynamics_coefficient=dynamics_coefficient,
+            safety=safety,
         )
+        if safety is not None:
+            require_finite(objective, "candidate objective")
         gradient = torch.autograd.grad(objective.sum(), candidate)[0]
+        if safety is not None:
+            gradient = safety.gradient(gradient)
     return objective.detach(), gradient.detach()
 
 
@@ -166,6 +183,7 @@ def generate_state_path(
     *,
     horizon: int,
     epsilon: float,
+    safety: PlannerSafetyRuntime | None = None,
 ) -> torch.Tensor:
     """Recursively generate midpoint nodes; never use ground-truth midpoints."""
     if start.ndim != 2 or start.shape != goal.shape or start.shape[-1] != STATE_DIM:
@@ -174,10 +192,11 @@ def generate_state_path(
     for left, middle, right in binary_midpoint_order(horizon):
         candidate = (nodes[left] + nodes[right]) / 2
         local = torch.stack((nodes[left], candidate, nodes[right]), dim=1)
-        objective, gradient = state_feedback(local, value, epsilon=epsilon)
-        nodes[middle] = candidate + planner(
-            nodes[left], candidate, nodes[right], objective, gradient[:, 1]
+        objective, gradient = state_feedback(
+            local, value, epsilon=epsilon, safety=safety
         )
+        delta = planner(nodes[left], candidate, nodes[right], objective, gradient[:, 1])
+        nodes[middle] = candidate + (delta if safety is None else safety.delta(delta))
     return torch.stack([nodes[i] for i in range(horizon + 1)], dim=1)
 
 
@@ -189,6 +208,7 @@ def refine_state_path(
     predicted_future: torch.Tensor,
     epsilon: float,
     dynamics_coefficient: float,
+    safety: PlannerSafetyRuntime | None = None,
 ) -> torch.Tensor:
     """One synchronous improvement of the SAME time-indexed state candidates."""
     objective, gradient = state_feedback(
@@ -197,6 +217,7 @@ def refine_state_path(
         epsilon=epsilon,
         predicted_future=predicted_future,
         dynamics_coefficient=dynamics_coefficient,
+        safety=safety,
     )
     if states.shape[1] == 2:
         return states
@@ -208,6 +229,8 @@ def refine_state_path(
         objective[:, None].expand(interior.shape[:2]),
         gradient[:, 1:-1],
     )
+    if safety is not None:
+        delta = safety.delta(delta)
     return torch.cat((states[:, :1], interior + delta, states[:, -1:]), dim=1)
 
 
@@ -230,6 +253,7 @@ def planner_loss(
     efficiency_coefficient: float,
     dynamics_coefficient: float,
     trajectory_valid: torch.Tensor | None = None,
+    safety: PlannerSafetyRuntime | None = None,
 ) -> PlannerLoss:
     """Phase 1 uses trajectory only; phase 2 adds efficiency and F consistency."""
     if states.shape != real_states.shape or states.shape[1] < 3:
@@ -257,7 +281,7 @@ def planner_loss(
             if bool(trajectory_valid.any())
             else per_path.sum() * 0
         )
-    efficiency = -path_efficiency(states, value, epsilon=epsilon).mean()
+    efficiency = -path_efficiency(states, value, epsilon=epsilon, safety=safety).mean()
     if predicted_future is None:
         if dynamics_coefficient:
             raise ValueError("Dynamics loss requires an F reference.")

@@ -71,6 +71,27 @@ def test_settings_keep_search_budget_ordered_and_hashable():
     assert isinstance(refinement, EffPlanTrainSettings)
 
 
+def test_safety_config_and_deployment_cannot_silently_disagree():
+    from tdwm.evaluation.effplan import validated_planner_safety
+    from tdwm.training.effplan_runtime import planner_settings_payload
+
+    config = eff_protocol.load_eff_protocol(
+        "configs/experiment/effplan_cube_stable_p_v1.yaml"
+    )
+    settings = _planner_settings(config["planner_refinement"])
+    payload = planner_settings_payload(settings)
+    assert validated_planner_safety(payload, config) == settings.safety
+    with pytest.raises(ValueError, match="safety differs"):
+        validated_planner_safety({}, config)
+    legacy = eff_protocol.load_eff_protocol(REPO_CONFIG)
+    with pytest.raises(ValueError, match="safety differs"):
+        validated_planner_safety(payload, legacy)
+    assert validated_planner_safety({}, legacy) is None
+    assert "safety" not in planner_settings_payload(
+        _planner_settings(generation_stage())
+    )
+
+
 def test_learning_rate_starts_at_zero_slope_and_ends_at_zero():
     settings = _planner_settings(generation_stage(learning_rate=1e-3))
     assert planner_learning_rate(settings, 1000, 0) > 0

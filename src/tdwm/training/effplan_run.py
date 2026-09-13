@@ -34,7 +34,11 @@ from tdwm.training.eff_run import (
     write_json_atomic,
 )
 from tdwm.training.eff_runtime import canonical_sha256, load_eff_model
-from tdwm.training.effplan_runtime import EffPlanTrainer, EffPlanTrainSettings
+from tdwm.training.effplan_runtime import (
+    EffPlanTrainer,
+    EffPlanTrainSettings,
+    planner_settings_payload,
+)
 
 MANIFEST_FORMAT = "tdwm-effplan-run-v1"
 PLANNER_CROSS_EPISODE_PROBABILITY = 0.0
@@ -73,9 +77,7 @@ def _planner_settings(stage_config: dict) -> EffPlanTrainSettings:
 
 def load_frozen_world_model(lewm_checkpoint: str | Path, device: str, cache_dir: Path):
     """Load the public pretrained LeWM export used as the frozen F."""
-    from tdwm.training.frozen_actor_free_td import (
-        _resolve_local_pretrained_lewm_export,
-    )
+    from tdwm.training.frozen_actor_free_td import _resolve_local_pretrained_lewm_export
 
     name, checkpoint_file, cache = _resolve_local_pretrained_lewm_export(
         lewm_checkpoint
@@ -104,6 +106,7 @@ def run_effplan_training(
     device: str,
     resume: str | Path | None = None,
     init_from: str | Path | None = None,
+    stop_after_updates: int | None = None,
 ) -> dict:
     """Train one planner phase. ``init_from`` carries phase-one weights over.
 
@@ -122,6 +125,17 @@ def run_effplan_training(
     total_updates = int(run["epochs"]) * int(run["updates_per_epoch"])
     if total_updates < 1:
         raise ValueError("Planner run must declare a positive update budget.")
+    if stop_after_updates is not None and (
+        isinstance(stop_after_updates, bool)
+        or not isinstance(stop_after_updates, int)
+        or not 1 <= stop_after_updates <= total_updates
+    ):
+        raise ValueError(
+            "stop_after_updates must be an absolute update within the full budget."
+        )
+    stop_at = total_updates if stop_after_updates is None else stop_after_updates
+    if resume is not None and init_from is not None:
+        raise ValueError("Choose resume or weights-only initialization, not both.")
 
     eff_payload = json.loads(Path(eff_manifest).read_text())
     if eff_payload.get("status") != "complete":
@@ -151,7 +165,7 @@ def run_effplan_training(
             eff_checkpoint_sha256=sha256_file(eff_checkpoint),
             lewm_checkpoint_sha256=config["source"]["lewm_checkpoint_sha256"],
         ),
-        "settings_sha256": canonical_sha256(dataclasses.asdict(settings)),
+        "settings_sha256": canonical_sha256(planner_settings_payload(settings)),
         "phase": phase,
         "planner_hidden_dim": int(run["planner_hidden_dim"]),
         "training_episodes": train_replay.episodes.tolist(),
@@ -180,6 +194,8 @@ def run_effplan_training(
             existing = json.loads(manifest_path.read_text())
             if existing["identity"] != identity:
                 raise ValueError("Output directory belongs to a different EffPlan run.")
+        if settings.safety is not None:
+            torch.manual_seed(settings.seed)
         planner = StatePlanner(hidden_dim=int(run["planner_hidden_dim"]))
         trainer = EffPlanTrainer(
             planner=planner,
@@ -196,6 +212,8 @@ def run_effplan_training(
             planner.load_state_dict(weights["planner"], strict=True)
         if resume is not None:
             trainer.resume(resume)
+        if trainer.global_step > stop_at:
+            raise ValueError("Requested stop precedes the restored checkpoint.")
         if (
             existing is not None
             and existing["completed_updates"] != trainer.global_step
@@ -211,12 +229,13 @@ def run_effplan_training(
             "status": "running",
             "identity": identity,
             "identity_sha256": canonical_sha256(identity),
-            "settings": dataclasses.asdict(settings),
+            "settings": planner_settings_payload(settings),
             "run": run,
             "total_updates": total_updates,
             "completed_updates": trainer.global_step,
             "init_from": None if init_from is None else str(Path(init_from).resolve()),
             "resume_source": None if resume is None else str(Path(resume).resolve()),
+            "stop_after_updates_this_invocation": stop_after_updates,
             "runtime": {
                 "torch": torch.__version__,
                 "python": platform.python_version(),
@@ -262,11 +281,19 @@ def run_effplan_training(
             manifest["metrics_path"] = str(log.name)
             write_json_atomic(manifest_path, manifest)
             try:
-                while trainer.global_step < total_updates:
-                    metrics = trainer.step(
-                        draw(train_replay, trainer.rng),
-                    )
+                while trainer.global_step < stop_at:
+                    # Legacy runs used constant LR despite defining this schedule.
+                    # The isolated safety-v1 run uses the declared full-budget
+                    # warmup/cosine schedule, independent of a diagnostic pause.
+                    if settings.safety is not None:
+                        lr = planner_learning_rate(
+                            settings, total_updates, trainer.global_step
+                        )
+                        for group in trainer.optimizer.param_groups:
+                            group["lr"] = lr
+                    metrics = trainer.step(draw(train_replay, trainer.rng),)
                     metrics["event"] = "training"
+                    metrics["learning_rate"] = trainer.optimizer.param_groups[0]["lr"]
                     log.write(json.dumps(metrics, allow_nan=False) + "\n")
                     log.flush()
                     epoch, inside_epoch = divmod(trainer.global_step, updates_per_epoch)
@@ -294,24 +321,36 @@ def run_effplan_training(
                         )
                         log.flush()
                         save_checkpoint(epoch, completed_epoch=True)
-                    elif trainer.global_step % int(run["checkpoint_every_updates"]) == 0:
+                    elif trainer.global_step % int(
+                        run["checkpoint_every_updates"]
+                    ) == 0 or (
+                        settings.safety is not None
+                        and trainer.global_step in (1, 5, 10, 25, 50, 100)
+                    ):
                         save_checkpoint(epoch, completed_epoch=False)
                 else:
-                    manifest["status"] = "complete"
-                    write_json_atomic(
-                        output / "planner_manifest.json",
-                        {
-                            "format": MANIFEST_FORMAT,
-                            "method": "EffPlan",
-                            "phase": phase,
-                            "status": "complete",
-                            "completed_updates": trainer.global_step,
-                            "identity": identity,
-                            "identity_sha256": canonical_sha256(identity),
-                            "settings": dataclasses.asdict(settings),
-                            "checkpoint": manifest["last_recoverable_checkpoint"],
-                        },
-                    )
+                    if trainer.global_step < total_updates:
+                        save_checkpoint(
+                            trainer.global_step // updates_per_epoch,
+                            completed_epoch=False,
+                        )
+                        manifest["status"] = "paused"
+                    else:
+                        manifest["status"] = "complete"
+                        write_json_atomic(
+                            output / "planner_manifest.json",
+                            {
+                                "format": MANIFEST_FORMAT,
+                                "method": "EffPlan",
+                                "phase": phase,
+                                "status": "complete",
+                                "completed_updates": trainer.global_step,
+                                "identity": identity,
+                                "identity_sha256": canonical_sha256(identity),
+                                "settings": planner_settings_payload(settings),
+                                "checkpoint": manifest["last_recoverable_checkpoint"],
+                            },
+                        )
             except BaseException as exc:
                 manifest["status"] = "failed"
                 manifest["error"] = f"{type(exc).__name__}: {exc}"

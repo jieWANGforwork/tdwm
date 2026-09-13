@@ -22,6 +22,7 @@ from tdwm.adapters.runtime import prepare_cloud_runtime
 from tdwm.evaluation.frozen_actor_free_td_common import _resolve_frozen_dataset_source
 from tdwm.evaluation.lewm_checkpoint import _git_revision, _jsonable
 from tdwm.evaluation.mc_gt_lewm import _load_action_processor
+from tdwm.methods.effplan_safety import PlannerSafety
 from tdwm.training.eff_data import EpisodePartition, held_out_episode_pairs
 from tdwm.training.eff_protocol import (
     baseline_reference,
@@ -34,11 +35,17 @@ from tdwm.training.effplan_runtime import load_effplan_planner
 from tdwm.training.frozen_actor_free_td import _resolve_local_pretrained_lewm_export
 
 
+def validated_planner_safety(checkpoint_settings: dict, config: dict):
+    safety = checkpoint_settings.get("safety")
+    if safety != config["evaluation"].get("effplan_safety") or safety != config[
+        "planner_refinement"
+    ]["settings"].get("safety"):
+        raise ValueError("EffPlan checkpoint/training/evaluation safety differs.")
+    return None if safety is None else PlannerSafety(**safety)
+
+
 def prepare_eff_selections(
-    *,
-    config_path: str | Path,
-    terminal_metadata: str | Path,
-    output_dir: str | Path,
+    *, config_path: str | Path, terminal_metadata: str | Path, output_dir: str | Path,
 ) -> dict:
     """Seal pairs before choosing a model; never inherit all-episode C pairs."""
     config = load_eff_protocol(config_path)
@@ -306,6 +313,7 @@ def evaluate_effplan(
             raise ValueError(
                 "EffPlan training and deployment choose different G/V readouts."
             )
+        planner_safety = validated_planner_safety(ppayload["settings"], config)
         checkpoint_records["EffPlan"] = {
             "path": str(planner_checkpoint),
             "sha256": sha256_file(planner_checkpoint),
@@ -357,6 +365,7 @@ def evaluate_effplan(
                 device=device,
                 epsilon=ev["epsilon"],
                 dynamics_coefficient=ev["effplan_dynamics_coefficient"],
+                safety=planner_safety,
             )
             score = "state_path_tracking"
             extra_rerolls = len(allocation) - 1

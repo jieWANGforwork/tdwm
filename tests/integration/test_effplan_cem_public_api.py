@@ -100,8 +100,10 @@ def test_fixed_budget_distribution_includes_final_search():
         distribute_cem_iterations(total_iterations=8, searches=9)
 
 
-def test_public_cem_state_planner_final_search_and_returned_action_feedback():
+@pytest.mark.parametrize("protected", [False, True])
+def test_public_cem_state_planner_final_search_and_returned_action_feedback(protected):
     from gymnasium.spaces import Box
+    from tdwm.methods.effplan_safety import PlannerSafety
 
     world, eff = FrozenWorld(), _eff()
     planner = StatePlanner(hidden_dim=16).requires_grad_(False).eval()
@@ -119,6 +121,7 @@ def test_public_cem_state_planner_final_search_and_returned_action_feedback():
         device="cpu",
         epsilon=1e-6,
         dynamics_coefficient=0.1,
+        safety=PlannerSafety(10, 5) if protected else None,
     )
     solver.configure(
         action_space=Box(low=-1.0, high=1.0, shape=(2, 5), dtype=np.float32),
@@ -138,6 +141,9 @@ def test_public_cem_state_planner_final_search_and_returned_action_feedback():
     assert solver.last_diagnostics["candidate_rollouts"] == 12
     assert all(p.grad is None for p in world.parameters())
     assert all(p.grad is None for p in eff.parameters())
+    if protected:
+        assert solver.last_diagnostics["safety/protected_efficiency/max"] <= 1.000001
+        assert solver.last_diagnostics["safety/state_delta_capped_norm/max"] <= 5.00001
 
 
 def test_effplan_refuses_trainable_world_model():

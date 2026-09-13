@@ -19,6 +19,7 @@ from tdwm.methods.effplan import (
     generate_state_path,
     refine_state_path,
 )
+from tdwm.methods.effplan_safety import PlannerSafety, PlannerSafetyRuntime
 
 EFF_TERMINAL_SCORE_MODE = "terminal_eff_cost"
 EFF_LATENT_PATH_SCORE_MODE = "latent_path_eff_cost"
@@ -86,9 +87,7 @@ def cumulative_eff_cost(
         )
     if mode in EFF_SELF_CONTAINED_SCORE_MODES:
         flat = future.reshape(-1, future.shape[-1])
-        flat_goal = (
-            goal.unsqueeze(-2).expand_as(future).reshape(-1, future.shape[-1])
-        )
+        flat_goal = goal.unsqueeze(-2).expand_as(future).reshape(-1, future.shape[-1])
         costs = eff.value(flat, flat_goal, target=target)
         if costs.shape != (flat.shape[0],):
             raise ValueError("G -> V must return one scalar per action step.")
@@ -298,6 +297,7 @@ class EffPlanSolver:
         device: str | torch.device,
         epsilon: float,
         dynamics_coefficient: float,
+        safety: PlannerSafety | None = None,
     ) -> None:
         if len(search_iterations) < 2 or any(n < 1 for n in search_iterations):
             raise ValueError(
@@ -312,6 +312,7 @@ class EffPlanSolver:
         self.device = torch.device(device)
         self.epsilon = epsilon
         self.dynamics_coefficient = dynamics_coefficient
+        self.safety = safety
         self.inner = swm.solver.CEMSolver(
             model=model,
             batch_size=batch_size,
@@ -348,12 +349,19 @@ class EffPlanSolver:
 
     def solve(self, info_dict: dict, init_action: torch.Tensor | None = None) -> dict:
         with torch.inference_mode(False), torch.no_grad():
+            safety = None if self.safety is None else PlannerSafetyRuntime(self.safety)
             info = self.model.cached_context(info_dict, device=self.device)
             start = info["emb"][:, -1].clone()
             goal = info["goal_emb"][:, -1].clone()
             value = self.model.target_critic
             nodes = generate_state_path(
-                self.planner, start, goal, value, horizon=5, epsilon=self.epsilon
+                self.planner,
+                start,
+                goal,
+                value,
+                horizon=5,
+                epsilon=self.epsilon,
+                safety=safety,
             )
             actions = init_action
             output: dict[str, Any] = {}
@@ -380,8 +388,10 @@ class EffPlanSolver:
                     predicted_future=future,
                     epsilon=self.epsilon,
                     dynamics_coefficient=self.dynamics_coefficient,
+                    safety=safety,
                 )
             self.last_diagnostics = {
+                **({} if safety is None else safety.metrics()),
                 "search_iterations": list(self.search_iterations),
                 "candidate_rollouts": self.rollouts_per_solve,
                 "returned_action_rerolls": len(self.search_iterations) - 1,

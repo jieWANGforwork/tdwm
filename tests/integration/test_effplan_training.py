@@ -55,7 +55,7 @@ def batch(cross=0):
     )
 
 
-def trainer(phase="generation", supervision="final", planner=None):
+def trainer(phase="generation", supervision="final", planner=None, safety=None):
     cfg = EffPlanTrainSettings(
         phase=phase,
         seed=3072,
@@ -72,6 +72,7 @@ def trainer(phase="generation", supervision="final", planner=None):
         cem_elites=2,
         cem_batch_size=2,
         supervision=supervision,
+        safety=safety,
     )
     eff = EffModel(g_hidden_dim=8, v_hidden_dim=8).eval().requires_grad_(False)
     world = TinyFrozenWorld()
@@ -206,3 +207,127 @@ def test_ambiguous_generation_losses_are_rejected():
     t, _ = trainer()
     with pytest.raises(ValueError, match="trajectory loss only"):
         replace(t.settings, efficiency_coefficient=1)
+
+
+def test_stable_refinement_25_updates_with_public_cem_resume_and_frozen_gvf(tmp_path):
+    from tdwm.methods.effplan_safety import PlannerSafety
+
+    torch.manual_seed(3072)
+    safe = PlannerSafety(10, 5)
+    t, world = trainer("refinement", safety=safe)
+    # Reproduce the hazardous readout without changing P's loss definition.
+    with torch.no_grad():
+        t.eff.target_v.network[-1].weight.zero_()
+        t.eff.target_v.network[-1].bias.fill_(-200)
+    eff_before = copy.deepcopy(t.eff.state_dict())
+    p_before = copy.deepcopy(t.planner.state_dict())
+    for _ in range(25):
+        result = t.step(batch())
+        assert result["safety/protected_efficiency/max"] <= 1.000001
+        assert result["safety/candidate_gradient_capped_norm/max"] <= 10.00001
+        assert result["safety/state_delta_capped_norm/max"] <= 5.00001
+        assert np.isfinite(result["gradient_norm"])
+    assert any(
+        not torch.equal(v, p_before[k]) for k, v in t.planner.state_dict().items()
+    )
+    assert all(torch.equal(v, eff_before[k]) for k, v in t.eff.state_dict().items())
+    assert all(p.grad is None for p in world.parameters())
+    assert all(p.grad is None for p in t.eff.parameters())
+    path = tmp_path / "stable.pt"
+    t.save(path, epoch=0)
+    expected = t.step(batch())
+    restored, _ = trainer("refinement", safety=safe)
+    restored.eff.load_state_dict(t.eff.state_dict())
+    restored.resume(path)
+    assert restored.step(batch()) == expected
+    _, payload = load_effplan_planner(
+        path,
+        expected_identity=t.identity,
+        expected_global_step=25,
+        expected_phase="refinement",
+        device="cpu",
+    )
+    assert payload["settings"]["safety"]["state_delta_max_norm"] == 5
+    legacy, _ = trainer("refinement")
+    with pytest.raises(ValueError, match="settings"):
+        legacy.resume(path)
+
+
+def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
+    tmp_path, monkeypatch
+):
+    import dataclasses
+    import json
+    from pathlib import Path
+    import yaml
+    from tdwm.training import effplan_run as run
+    from tdwm.training.eff_run import EffRunSettings
+    from tdwm.training.eff_runtime import canonical_sha256
+
+    config = yaml.safe_load(
+        Path("configs/experiment/effplan_cube_stable_p_v1.yaml").read_text()
+    )
+    config["planner_refinement"]["run"].update(
+        epochs=1,
+        updates_per_epoch=4,
+        planner_hidden_dim=8,
+        batch_size=2,
+        validation_batches=1,
+        checkpoint_every_updates=1000,
+    )
+    config["planner_refinement"]["settings"].update(
+        search_iterations=[1, 1], cem_candidates=4, cem_elites=2, cem_batch_size=2,
+    )
+    conf = tmp_path / "protocol.yaml"
+    conf.write_text(yaml.safe_dump(config))
+    eff_settings = EffRunSettings(**config["eff_training"]["settings"])
+    meta = tmp_path / "eff.json"
+    meta.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "completed_updates": eff_settings.total_updates,
+                "identity": {
+                    "settings_sha256": canonical_sha256(
+                        dataclasses.asdict(eff_settings)
+                    )
+                },
+            }
+        )
+    )
+    eff_file = tmp_path / "eff.pt"
+    eff_file.write_bytes(b"test fixture only")
+    eff = EffModel(g_hidden_dim=8, v_hidden_dim=8).eval().requires_grad_(False)
+    monkeypatch.setattr(
+        run, "load_eff_replays", lambda **_: (replay(), replay(), {"fixture": True})
+    )
+    monkeypatch.setattr(run, "load_eff_model", lambda *_, **__: (eff, {}))
+    monkeypatch.setattr(
+        run, "load_frozen_world_model", lambda *_, **__: (TinyFrozenWorld(), None)
+    )
+    args = dict(
+        config_path=conf,
+        phase="refinement",
+        latent_store="fixture",
+        terminal_metadata="fixture",
+        eff_checkpoint=eff_file,
+        eff_manifest=meta,
+        lewm_checkpoint="fixture",
+        device="cpu",
+    )
+    paused = run.run_effplan_training(
+        **args, output_dir=tmp_path / "paused", stop_after_updates=2
+    )
+    assert paused["status"] == "paused" and paused["completed_updates"] == 2
+    assert not (tmp_path / "paused/planner_manifest.json").exists()
+    done = run.run_effplan_training(
+        **args, output_dir=tmp_path / "paused", resume=tmp_path / "paused/last.pt"
+    )
+    assert done["status"] == "complete" and done["completed_updates"] == 4
+    direct = run.run_effplan_training(**args, output_dir=tmp_path / "direct")
+    a = torch.load(done["last_recoverable_checkpoint"], weights_only=False)
+    b = torch.load(direct["last_recoverable_checkpoint"], weights_only=False)
+    for key, value in a["planner"].items():
+        torch.testing.assert_close(value, b["planner"][key], rtol=0, atol=0)
+    assert a["optimizer"]["param_groups"][0]["lr"] == 0
+    assert a["settings"]["safety"]["geometric_lower_bound"]
