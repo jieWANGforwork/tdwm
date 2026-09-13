@@ -1,9 +1,16 @@
-# C–G3: full-plan execution revalidation
+# LeWM and C–G3/C2/C3/C4: full-plan execution revalidation
 
 This is an opt-in evaluation protocol, not a training change. Historical
 configs, checkpoints, score formulas, weights, and result directories are
 preserved. New results must not be combined with historical 5-step-feedback
 results as if their execution protocols were identical.
+
+This is an **execution-only** fair comparison: keep each existing method and
+checkpoint, and change its evaluation settings through the independent entry
+point below. Do not edit the completed run's YAML to set `receding_horizon=5`:
+historical validators and runtime overrides still intentionally enforce the
+old protocol. The new entry point applies the override after those checks.
+Ordinary historical entry points retain their defaults.
 
 ## What changes
 
@@ -58,9 +65,53 @@ G and does not roll out F. Extending it to five blocks needs a separately
 agreed definition. Keep it labeled as a different protocol unless that
 decision is made.
 
+## Baseline and C-series extensions
+
+The same entry point also supports V1-C2 (existing O50 config), V1-C3 and
+V1-C4 (existing O25/O50/O100 configs), and the original LeWM baseline.
+It does not create new training methods. C3 keeps its native terminal
+State-V or State-V-plus-first-Q formula; C4 keeps its state-only G formula.
+Only execution fields in their score descriptions are updated.
+
+Baseline dry run, using the unchanged historical O50 source config:
+
+```bash
+python scripts/evaluate_actor_free_td_lewm_full_plan.py \
+  --version lewm --score-mode f_only \
+  --config configs/experiment/lewm_cube_seed3072_o50.yaml --dry-run
+```
+
+Use `lewm_cube_seed3072_o25.yaml` for the existing O25 baseline. The additional
+`lewm_cube_seed3072_o100_full_plan.yaml` supplies O100, budget 200, and 25-step
+execution without overwriting an old config. For a baseline formal run,
+`--checkpoint-path` must name the original exported `*_object.ckpt` **file**
+and `--checkpoint-sha256` must be that file's hash; no TD checkpoint is loaded.
+
+Examples for the existing C3 and C4 checkpoints:
+
+```bash
+python scripts/evaluate_actor_free_td_lewm_full_plan.py \
+  --version v1 --variant c3 --score-mode state_v_terminal \
+  --config configs/experiment/actor_free_td_lewm_v1_c3_cube_checkpoint_o100.yaml \
+  --dry-run
+
+python scripts/evaluate_actor_free_td_lewm_full_plan.py \
+  --version v1 --variant c4 --score-mode f_plus_g \
+  --config configs/experiment/actor_free_td_lewm_v1_c4_cube_checkpoint_o50.yaml \
+  --dry-run
+```
+
+This change preserves the existing local selected pairs, sampling population,
+seeds, normalization, success criterion and CEM budget. In particular, the
+local baseline samples from all 10,000 episodes, whereas RP1 reports a
+held-out 8,000–9,999 split. Matching the execution cadence is **not** a claim
+to reproduce RP1's complete data-split/multi-seed protocol. Keep that
+distinction in result tables; changing the sampling population would be a
+separate experiment.
+
 ## Running an existing checkpoint
 
-The entry point supports V0, V1, V2, and V2 EMA (`v2_ema_sg`), each with
+The C–G3 entry point supports V0, V1, V2, and V2 EMA (`v2_ema_sg`), each with
 C/D/F/G1/G2/G3. Source config validation remains authoritative. Existing
 checkpoint and selected-episode provenance checks still run.
 
@@ -101,5 +152,6 @@ the old protocol. They are not substitutes for formal environment results.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider \
-  tests/unit/test_full_plan_revalidation.py
+  tests/unit/test_full_plan_revalidation.py \
+  tests/unit/test_full_plan_revalidation_extensions.py
 ```

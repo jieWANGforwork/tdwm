@@ -22,6 +22,9 @@ FULL_PLAN_SCORE_MODES = frozenset(
         "f_plus_g_first",
         "f_plus_g_first_q2",
         "g_only_f_rollout_mean",
+        "state_v_terminal",
+        "state_v_plus_first_q",
+        "state_v_plus_first_q2",
     }
 )
 FULL_PLAN_EXECUTION = {
@@ -43,8 +46,9 @@ def configure_full_plan_revalidation(protocol: Mapping[str, Any]) -> dict[str, A
             "Full-plan revalidation must start from a historical protocol."
         )
     planning = configured["planning"]
-    inference = configured["inference_objective"]
-    mode = inference["score_mode"]
+    inference = configured.get("inference_objective")
+    # The baseline has no critic readout and must remain the original LeWM.
+    mode = "f_only" if configured.get("method") == "lewm" else inference["score_mode"]
     if mode not in FULL_PLAN_SCORE_MODES:
         raise ValueError(
             "Full-plan revalidation requires a predeclared five-block score mode; "
@@ -67,14 +71,14 @@ def configure_full_plan_revalidation(protocol: Mapping[str, Any]) -> dict[str, A
     ).hexdigest()
     planning["receding_horizon"] = 5
     planning["executed_environment_steps_before_replanning"] = 25
-    inference["replanning"] = FULL_PLAN_EXECUTION["replanning"]
-    definition = inference.get("score_definition")
-    if mode in {"f_plus_g_first", "f_plus_g_first_q2"}:
-        definition["cem_execution"] = FULL_PLAN_EXECUTION["cem_execution"]
-    elif mode == "g_only_f_rollout_mean":
-        for key in ("executed_action_block", "replanning"):
-            inference[key] = FULL_PLAN_EXECUTION[key]
-            definition[key] = FULL_PLAN_EXECUTION[key]
+    if inference is not None:
+        inference["replanning"] = FULL_PLAN_EXECUTION["replanning"]
+        # C3/C4 also record execution in their native score definitions. Update
+        # only existing execution fields; never replace a score formula or weight.
+        for fields in (inference, inference.get("score_definition", {})):
+            for key, value in FULL_PLAN_EXECUTION.items():
+                if key in fields:
+                    fields[key] = value
     configured["execution_revalidation"] = {
         "id": EXECUTION_PROTOCOL,
         "source_configured_protocol_sha256": source_hash,

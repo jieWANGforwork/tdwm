@@ -47,6 +47,11 @@ from tdwm.evaluation.frozen_actor_free_td_v1_common import (
     _load_protocol_mapping,
     v1_evaluation_protocol_label,
 )
+from tdwm.evaluation.full_plan_revalidation import (
+    configure_full_plan_revalidation,
+    full_plan_revalidation_metadata,
+    require_new_revalidation_output,
+)
 from tdwm.evaluation.lewm_checkpoint import (
     REQUIRED_PLANNING_KEYS,
     _git_revision,
@@ -685,6 +690,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
     checkpoint_epoch: int | None = None,
     score_mode: str | None = None,
     g_first_weight: float | None = None,
+    full_plan_revalidation: bool = False,
 ) -> dict[str, Any]:
     """Run the audited public Stable World Model CEM O25/O50/O100 evaluation."""
 
@@ -697,6 +703,9 @@ def evaluate_actor_free_td_lewm_v1_c3(
         score_mode=score_mode,
         g_first_weight=g_first_weight,
     )
+    if full_plan_revalidation:
+        protocol = configure_full_plan_revalidation(protocol)
+        require_new_revalidation_output(output_dir)
     if checkpoint_epoch is not None and (smoke or pilot):
         raise ValueError(
             "--checkpoint-epoch is only valid for full formal O25/O50/O100 evaluation."
@@ -860,6 +869,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "normalization": {"action": action_stats},
         "runtime": runtime,
         **_execution_metadata(planning),
+        **full_plan_revalidation_metadata(protocol),
     }
     if selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
         manifest["g_first_weight"] = protocol["inference_objective"][
@@ -942,6 +952,7 @@ def evaluate_actor_free_td_lewm_v1_c3(
         "pilot": pilot,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
         **_execution_metadata(planning),
+        **full_plan_revalidation_metadata(protocol),
     }
     if selected_score_mode in STATE_V_FIRST_ACTION_SCORE_MODES:
         result["g_first_weight"] = protocol["inference_objective"][

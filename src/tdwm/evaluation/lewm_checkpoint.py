@@ -7,6 +7,7 @@ import os
 import platform
 import subprocess
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,11 @@ import numpy as np
 import yaml
 
 from tdwm.adapters import prepare_cloud_runtime
-
+from tdwm.evaluation.full_plan_revalidation import (
+    configure_full_plan_revalidation,
+    full_plan_revalidation_metadata,
+    require_new_revalidation_output,
+)
 
 REQUIRED_PLANNING_KEYS = {
     "horizon",
@@ -235,8 +240,10 @@ def evaluate_official_lewm(
     checkpoint_path: str | Path | None = None,
     video: bool = False,
     smoke: bool = False,
+    full_plan_revalidation: bool = False,
 ) -> dict[str, Any]:
     protocol = load_protocol(protocol_path)
+    formal_protocol = deepcopy(protocol) if full_plan_revalidation else None
     if smoke:
         protocol["id"] = f"{protocol['id']}_smoke"
         protocol["evaluation"]["episodes"] = 1
@@ -250,6 +257,9 @@ def evaluate_official_lewm(
         )
         protocol["smoke"] = True
         validate_protocol(protocol)
+    if full_plan_revalidation:
+        protocol = configure_full_plan_revalidation(protocol)
+        require_new_revalidation_output(output_dir)
     dataset_path = Path(dataset_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -355,6 +365,9 @@ def evaluate_official_lewm(
             "compatibility_adapter": compatibility,
         },
     }
+    if full_plan_revalidation:
+        runtime_manifest["formal_protocol"] = formal_protocol
+        runtime_manifest.update(full_plan_revalidation_metadata(protocol))
     _write_json(output_dir / "protocol_manifest.json", runtime_manifest)
 
     action_stats_path = output_dir / "action_normalization.json"
@@ -484,5 +497,15 @@ def evaluate_official_lewm(
         "smoke": smoke,
         "protocol_manifest": str(output_dir / "protocol_manifest.json"),
     }
+    if full_plan_revalidation:
+        result.update(
+            {
+                "score_mode": "f_only",
+                "planning_horizon": planning_cfg["horizon"],
+                "goal_offset": evaluation_cfg["goal_offset"],
+                "episode_budget": planning_cfg["episode_budget"],
+                **full_plan_revalidation_metadata(protocol),
+            }
+        )
     _write_json(output_dir / "results.json", result)
     return _jsonable(result)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Re-evaluate an existing C--G3 checkpoint with 25-step real feedback.
+"""Re-evaluate LeWM or an existing C--G3/C2/C3/C4 checkpoint with 25-step feedback.
 
 This opt-in entry point retains the historical config and readout, requires a
 new result directory, and binds formal runs to an explicit checkpoint digest.
@@ -22,14 +22,14 @@ from tdwm.evaluation.full_plan_revalidation import (
 )
 from tdwm.evaluation.lewm_checkpoint import _sha256
 
-VERSIONS = ("v0", "v1", "v2", "v2_ema_sg")
-VARIANTS = ("c", "d", "f", "g1", "g2", "g3")
+VERSIONS = ("v0", "v1", "v2", "v2_ema_sg", "lewm")
+VARIANTS = ("c", "d", "f", "g1", "g2", "g3", "c2", "c3", "c4")
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", choices=VERSIONS, required=True)
-    parser.add_argument("--variant", choices=VARIANTS, required=True)
+    parser.add_argument("--variant", choices=VARIANTS)
     parser.add_argument("--config", required=True)
     parser.add_argument(
         "--score-mode", choices=sorted(FULL_PLAN_SCORE_MODES), required=True
@@ -44,6 +44,15 @@ def parse_args(argv=None):
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.version == "lewm":
+        if args.variant is not None or args.score_mode != "f_only":
+            parser.error("LeWM uses --score-mode f_only and no --variant.")
+        if args.g_first_weight is not None:
+            parser.error("LeWM has no critic weight.")
+    elif args.variant is None:
+        parser.error("--variant is required for a C--G3 or C-series checkpoint.")
+    elif args.variant in {"c2", "c3", "c4"} and args.version != "v1":
+        parser.error("C2/C3/C4 are existing V1 extensions only.")
     if args.checkpoint_epoch is not None:
         if (
             args.version not in {"v2", "v2_ema_sg"}
@@ -65,6 +74,21 @@ def parse_args(argv=None):
 
 
 def resolve_protocol(args):
+    if args.version == "lewm":
+        from tdwm.evaluation.lewm_checkpoint import (
+            evaluate_official_lewm,
+            load_protocol,
+        )
+
+        configured = load_protocol(args.config)
+        if args.smoke:
+            configured["id"] = f"{configured['id']}_smoke"
+            configured["evaluation"]["episodes"] = 1
+            configured["planning"].update(
+                {"candidates": 8, "iterations": 1, "elites": 2, "episode_budget": 25}
+            )
+            configured["smoke"] = True
+        return configure_full_plan_revalidation(configured), evaluate_official_lewm
     stem = f"actor_free_td_lewm_{args.version}_{args.variant}"
     module = importlib.import_module(f"tdwm.evaluation.{stem}")
     original = getattr(module, f"load_{stem}_evaluation_protocol")(args.config)
@@ -105,12 +129,12 @@ def main(argv=None):
         "dataset_path": args.dataset,
         "checkpoint_path": str(checkpoint),
         "output_dir": args.output_dir,
-        "score_mode": args.score_mode,
-        "g_first_weight": args.g_first_weight,
         "smoke": args.smoke,
         "video": args.video,
         "full_plan_revalidation": True,
     }
+    if args.version != "lewm":
+        kwargs.update(score_mode=args.score_mode, g_first_weight=args.g_first_weight)
     if args.checkpoint_epoch is not None:
         kwargs["checkpoint_epoch"] = args.checkpoint_epoch
     result = evaluate(**kwargs)
