@@ -168,6 +168,7 @@ def _read_eff_for_evaluation(config, checkpoint, manifest_path, device):
         expected_identity=identity,
         expected_global_step=settings.total_updates,
         device=device,
+        expected_v_parameterization=settings.v_parameterization,
     )
     return model, payload
 

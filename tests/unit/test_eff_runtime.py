@@ -32,7 +32,7 @@ def batch(rng=None):
     )
 
 
-def trainer(**overrides):
+def trainer(*, v_parameterization="total_work", **overrides):
     arguments = dict(
         identity={"source_sha256": "test-source", "training_episodes": [0, 1]},
         seed=3072,
@@ -47,7 +47,9 @@ def trainer(**overrides):
         device="cpu",
     )
     arguments.update(overrides)
-    return EffTrainer(EffModel(g_hidden_dim=16, v_hidden_dim=16), **arguments)
+    return EffTrainer(EffModel(
+        g_hidden_dim=16, v_hidden_dim=16, v_parameterization=v_parameterization
+    ), **arguments)
 
 
 def test_boundary_supervision_is_same_path_and_does_not_zero_g():
@@ -80,9 +82,10 @@ def test_optimizer_only_owns_online_g_and_v():
     assert all(p.grad is None for p in t.model.target_v.parameters())
 
 
-def test_checkpoint_resume_reproduces_next_sample_and_update(tmp_path):
+@pytest.mark.parametrize("mode", ["total_work", "extra_work"])
+def test_checkpoint_resume_reproduces_next_sample_and_update(tmp_path, mode):
     torch.manual_seed(4)
-    original = trainer()
+    original = trainer(v_parameterization=mode)
     original.step(batch(original.rng))
     path = tmp_path / "checkpoint.pt"
     checksum = original.save(path, epoch=1)
@@ -90,7 +93,7 @@ def test_checkpoint_resume_reproduces_next_sample_and_update(tmp_path):
     next_original = batch(original.rng)
     expected_metrics = original.step(next_original)
     expected_state = copy.deepcopy(original.model.state_dict())
-    resumed = trainer()
+    resumed = trainer(v_parameterization=mode)
     assert resumed.resume(path) == 1
     next_resumed = batch(resumed.rng)
     torch.testing.assert_close(next_resumed.state, next_original.state, rtol=0, atol=0)
@@ -126,8 +129,9 @@ def test_resume_identity_mismatch_rejected_without_mutation(tmp_path):
         torch.testing.assert_close(value, before[name], rtol=0, atol=0)
 
 
-def test_eval_restore_freezes_parameters_but_preserves_input_gradients(tmp_path):
-    t = trainer()
+@pytest.mark.parametrize("mode", ["total_work", "extra_work"])
+def test_eval_restore_freezes_parameters_but_preserves_input_gradients(tmp_path, mode):
+    t = trainer(v_parameterization=mode)
     t.step(batch())
     path = tmp_path / "eff.pt"
     t.save(path, epoch=1)
@@ -135,6 +139,7 @@ def test_eval_restore_freezes_parameters_but_preserves_input_gradients(tmp_path)
         path, expected_identity=t.identity, expected_global_step=1, device="cpu"
     )
     z = torch.randn(2, 192, requires_grad=True)
+    assert model.v_parameterization == mode
     goal = torch.randn(2, 192, requires_grad=True)
     model.value(z, goal, target=True).sum().backward()
     assert z.grad is not None and goal.grad is not None
@@ -144,6 +149,23 @@ def test_eval_restore_freezes_parameters_but_preserves_input_gradients(tmp_path)
             path, expected_identity=t.identity, expected_global_step=2, device="cpu"
         )
     assert payload["global_step"] == 1
+    with pytest.raises(ValueError, match="parameterization"):
+        load_eff_model(
+            path, expected_identity=t.identity, expected_global_step=1, device="cpu",
+            expected_v_parameterization="extra_work" if mode == "total_work" else "total_work",
+        )
+
+
+@pytest.mark.parametrize("mode", ["total_work", "extra_work"])
+def test_v_mode_resume_mismatch_rejected(tmp_path, mode):
+    original = trainer(v_parameterization=mode)
+    path = tmp_path / "eff.pt"
+    original.save(path, epoch=0)
+    other = trainer(v_parameterization=(
+        "extra_work" if mode == "total_work" else "total_work"
+    ))
+    with pytest.raises(ValueError, match="settings differ"):
+        other.resume(path)
 
 
 @pytest.mark.parametrize(

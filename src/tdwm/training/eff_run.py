@@ -82,8 +82,11 @@ class EffRunSettings:
     validation_batches: int
     validation_seed: int
     checkpoint_every_updates: int
+    v_parameterization: str = "total_work"
 
     def __post_init__(self) -> None:
+        if self.v_parameterization not in ("total_work", "extra_work"):
+            raise ValueError("Unknown V parameterization.")
         for name in (
             "epochs",
             "updates_per_epoch",
@@ -133,6 +136,14 @@ class EffRunSettings:
         )
 
 
+def eff_settings_payload(settings: EffRunSettings) -> dict:
+    """Preserve historical manifest identities for the default total-work V."""
+    payload = dataclasses.asdict(settings)
+    if settings.v_parameterization == "total_work":
+        payload.pop("v_parameterization")
+    return payload
+
+
 def scheduled_learning_rate(settings: EffRunSettings, update_index: int) -> float:
     """Linear warmup then cosine, indexed by accepted optimizer updates."""
     if not 0 <= update_index < settings.total_updates:
@@ -172,7 +183,7 @@ def run_eff_training(
     output = Path(output_dir).expanduser().resolve()
     identity = {
         "source": source_identity,
-        "settings_sha256": canonical_sha256(dataclasses.asdict(settings)),
+        "settings_sha256": canonical_sha256(eff_settings_payload(settings)),
         "training_episodes": replay.episodes.tolist(),
         "validation_episodes": validation_replay.episodes.tolist(),
         "state_stride": replay.stride,
@@ -191,7 +202,8 @@ def run_eff_training(
             torch.cuda.manual_seed_all(settings.seed)
         trainer = EffTrainer(
             EffModel(
-                g_hidden_dim=settings.g_hidden_dim, v_hidden_dim=settings.v_hidden_dim
+                g_hidden_dim=settings.g_hidden_dim, v_hidden_dim=settings.v_hidden_dim,
+                v_parameterization=settings.v_parameterization,
             ),
             identity=identity,
             device=device,
@@ -214,7 +226,7 @@ def run_eff_training(
             "status": "running",
             "identity": identity,
             "identity_sha256": canonical_sha256(identity),
-            "settings": dataclasses.asdict(settings),
+            "settings": eff_settings_payload(settings),
             "total_updates": settings.total_updates,
             "completed_updates": trainer.global_step,
             "resume_source": None if resume is None else str(Path(resume).resolve()),

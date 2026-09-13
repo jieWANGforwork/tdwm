@@ -12,7 +12,6 @@ goals are never given midpoint labels.
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import importlib.metadata
 import json
@@ -30,6 +29,7 @@ from tdwm.training.eff_data import sample_planner_paths
 from tdwm.training.eff_protocol import load_eff_protocol, load_eff_replays
 from tdwm.training.eff_run import (
     EffRunSettings,
+    eff_settings_payload,
     run_directory_lock,
     write_json_atomic,
 )
@@ -144,7 +144,7 @@ def run_effplan_training(
     if eff_payload.get("completed_updates") != eff_settings.total_updates:
         raise ValueError("Eff checkpoint does not match the configured budget.")
     if eff_payload["identity"]["settings_sha256"] != canonical_sha256(
-        dataclasses.asdict(eff_settings)
+        eff_settings_payload(eff_settings)
     ):
         raise ValueError("Eff training settings differ from this configuration.")
 
@@ -158,6 +158,7 @@ def run_effplan_training(
         expected_identity=eff_payload["identity"],
         expected_global_step=eff_settings.total_updates,
         device=device,
+        expected_v_parameterization=eff_settings.v_parameterization,
     )
     identity = {
         "source": dict(

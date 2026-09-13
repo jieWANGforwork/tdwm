@@ -55,7 +55,8 @@ def batch(cross=0):
     )
 
 
-def trainer(phase="generation", supervision="final", planner=None, safety=None):
+def trainer(phase="generation", supervision="final", planner=None, safety=None,
+            v_parameterization="total_work"):
     cfg = EffPlanTrainSettings(
         phase=phase,
         seed=3072,
@@ -74,7 +75,8 @@ def trainer(phase="generation", supervision="final", planner=None, safety=None):
         supervision=supervision,
         safety=safety,
     )
-    eff = EffModel(g_hidden_dim=8, v_hidden_dim=8).eval().requires_grad_(False)
+    eff = EffModel(g_hidden_dim=8, v_hidden_dim=8,
+                   v_parameterization=v_parameterization).eval().requires_grad_(False)
     world = TinyFrozenWorld()
     model = (
         None if phase == "generation" else EffPlanTrackingCost(world, eff, target=True)
@@ -209,12 +211,13 @@ def test_ambiguous_generation_losses_are_rejected():
         replace(t.settings, efficiency_coefficient=1)
 
 
-def test_stable_refinement_25_updates_with_public_cem_resume_and_frozen_gvf(tmp_path):
+@pytest.mark.parametrize("mode", ["total_work", "extra_work"])
+def test_stable_refinement_25_updates_with_public_cem_resume_and_frozen_gvf(tmp_path, mode):
     from tdwm.methods.effplan_safety import PlannerSafety
 
     torch.manual_seed(3072)
     safe = PlannerSafety(10, 5)
-    t, world = trainer("refinement", safety=safe)
+    t, world = trainer("refinement", safety=safe, v_parameterization=mode)
     # Reproduce the hazardous readout without changing P's loss definition.
     with torch.no_grad():
         t.eff.target_v.network[-1].weight.zero_()
@@ -236,7 +239,7 @@ def test_stable_refinement_25_updates_with_public_cem_resume_and_frozen_gvf(tmp_
     path = tmp_path / "stable.pt"
     t.save(path, epoch=0)
     expected = t.step(batch())
-    restored, _ = trainer("refinement", safety=safe)
+    restored, _ = trainer("refinement", safety=safe, v_parameterization=mode)
     restored.eff.load_state_dict(t.eff.state_dict())
     restored.resume(path)
     assert restored.step(batch()) == expected
@@ -256,12 +259,11 @@ def test_stable_refinement_25_updates_with_public_cem_resume_and_frozen_gvf(tmp_
 def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
     tmp_path, monkeypatch
 ):
-    import dataclasses
     import json
     from pathlib import Path
     import yaml
     from tdwm.training import effplan_run as run
-    from tdwm.training.eff_run import EffRunSettings
+    from tdwm.training.eff_run import EffRunSettings, eff_settings_payload
     from tdwm.training.eff_runtime import canonical_sha256
 
     config = yaml.safe_load(
@@ -289,7 +291,7 @@ def test_safety_run_pause_resume_keeps_full_schedule_and_completes(
                 "completed_updates": eff_settings.total_updates,
                 "identity": {
                     "settings_sha256": canonical_sha256(
-                        dataclasses.asdict(eff_settings)
+                        eff_settings_payload(eff_settings)
                     )
                 },
             }

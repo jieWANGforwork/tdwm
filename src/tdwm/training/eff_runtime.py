@@ -145,6 +145,8 @@ class EffTrainer:
             g_hidden_dim=model.g.hidden_dim,
             v_hidden_dim=model.v.hidden_dim,
         )
+        if model.v_parameterization != "total_work":
+            self.settings["v_parameterization"] = model.v_parameterization
         self.optimizer = torch.optim.AdamW(
             self.model.online_parameters(), lr=learning_rate, weight_decay=weight_decay
         )
@@ -279,6 +281,7 @@ def load_eff_model(
     expected_identity: dict,
     expected_global_step: int,
     device: str | torch.device,
+    expected_v_parameterization: str | None = None,
 ) -> tuple[EffModel, dict]:
     """Restore a frozen deployment model with explicit provenance/update gates."""
     payload = torch.load(path, map_location="cpu", weights_only=False)
@@ -291,8 +294,12 @@ def load_eff_model(
     if payload.get("global_step") != expected_global_step:
         raise ValueError("Eff checkpoint optimizer updates differ from protocol.")
     settings = payload["settings"]
+    mode = settings.get("v_parameterization", "total_work")
+    if expected_v_parameterization is not None and mode != expected_v_parameterization:
+        raise ValueError("V parameterization differs from the requested protocol.")
     model = EffModel(
-        g_hidden_dim=settings["g_hidden_dim"], v_hidden_dim=settings["v_hidden_dim"]
+        g_hidden_dim=settings["g_hidden_dim"], v_hidden_dim=settings["v_hidden_dim"],
+        v_parameterization=mode,
     )
     model.load_state_dict(payload["model"], strict=True)
     model.to(device).eval().requires_grad_(False)

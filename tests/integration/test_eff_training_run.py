@@ -55,12 +55,12 @@ def replays():
     )
 
 
-def run(output, **kwargs):
+def run(output, *, mode="total_work", **kwargs):
     train, validation = replays()
     return run_eff_training(
         replay=train,
         validation_replay=validation,
-        settings=settings(),
+        settings=replace(settings(), v_parameterization=mode),
         source_identity={"cache": "fixture", "terminal_mapping": "verified-fixture"},
         output_dir=output,
         device="cpu",
@@ -68,8 +68,10 @@ def run(output, **kwargs):
     )
 
 
-def test_full_loop_runs_all_epochs_and_persists_both_validation_losses(tmp_path):
-    result = run(tmp_path / "complete")
+@pytest.mark.parametrize("mode", ["total_work", "extra_work"])
+def test_full_loop_runs_all_epochs_and_persists_both_validation_losses(tmp_path, mode):
+    result = run(tmp_path / "complete", mode=mode)
+    assert result["settings"].get("v_parameterization", "total_work") == mode
     assert result["status"] == "complete" and result["completed_updates"] == 6
     assert set(result["checkpoints"]) == {"1", "2"}
     with open(result["metrics_path"]) as stream:
@@ -80,7 +82,8 @@ def test_full_loop_runs_all_epochs_and_persists_both_validation_losses(tmp_path)
     assert result["identity"]["training_episodes"] == [0, 1]
 
 
-def test_graceful_stop_and_full_resume_match_uninterrupted_parameters(tmp_path):
+@pytest.mark.parametrize("mode", ["total_work", "extra_work"])
+def test_graceful_stop_and_full_resume_match_uninterrupted_parameters(tmp_path, mode):
     calls = 0
 
     def stop():
@@ -88,12 +91,12 @@ def test_graceful_stop_and_full_resume_match_uninterrupted_parameters(tmp_path):
         calls += 1
         return calls > 2
 
-    interrupted = run(tmp_path / "resumed", should_stop=stop)
+    interrupted = run(tmp_path / "resumed", mode=mode, should_stop=stop)
     assert interrupted["status"] == "stopped" and interrupted["completed_updates"] == 2
     resumed = run(
-        tmp_path / "resumed", resume=interrupted["last_recoverable_checkpoint"]
+        tmp_path / "resumed", mode=mode, resume=interrupted["last_recoverable_checkpoint"]
     )
-    uninterrupted = run(tmp_path / "direct")
+    uninterrupted = run(tmp_path / "direct", mode=mode)
     a = torch.load(resumed["last_recoverable_checkpoint"], weights_only=False)
     b = torch.load(uninterrupted["last_recoverable_checkpoint"], weights_only=False)
     assert a["global_step"] == b["global_step"] == 6

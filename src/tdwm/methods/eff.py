@@ -78,8 +78,14 @@ class EffCritic(nn.Module):
 class EffModel(nn.Module):
     """Online G/V and frozen EMA copies; LeWM is deliberately not owned here."""
 
-    def __init__(self, *, g_hidden_dim: int, v_hidden_dim: int) -> None:
+    def __init__(
+        self, *, g_hidden_dim: int, v_hidden_dim: int,
+        v_parameterization: str = "total_work",
+    ) -> None:
         super().__init__()
+        if v_parameterization not in ("total_work", "extra_work"):
+            raise ValueError("Unknown V parameterization.")
+        self.v_parameterization = v_parameterization
         self.g = EffSuccessor(hidden_dim=g_hidden_dim)
         self.v = EffCritic(hidden_dim=v_hidden_dim)
         self.target_g = copy.deepcopy(self.g).requires_grad_(False).eval()
@@ -104,7 +110,25 @@ class EffModel(nn.Module):
         """
         task = goal_task(goal)
         g, v = (self.target_g, self.target_v) if target else (self.g, self.v)
-        return v(g(state, task), task)
+        return self.total_work(v(g(state, task), task), state, goal)
+
+    def total_work(
+        self, positive_readout: torch.Tensor, state: torch.Tensor, goal: torch.Tensor
+    ) -> torch.Tensor:
+        """Decode V into total movement; never use successor/task distance.
+
+        Extra-work mode adds the raw-state geometric lower bound. At exactly
+        the goal the remaining path is empty, so its cost is exactly zero.
+        This explicit terminal boundary is not a proximity/success threshold;
+        the positive residual need not be continuous as the goal is approached.
+        """
+        if self.v_parameterization == "total_work":
+            return positive_readout
+        _vector_pair(state, goal)
+        distance = torch.linalg.vector_norm(state - goal, dim=-1)
+        if positive_readout.shape != distance.shape:
+            raise ValueError("V readout must match the state batch axes.")
+        return torch.where(distance == 0, distance, distance + positive_readout)
 
     @torch.no_grad()
     def update_targets(self, *, rate: float) -> None:
@@ -304,7 +328,7 @@ def eff_loss(
     goal, bootstrap_state = goal.detach(), bootstrap_state.detach()
     task = goal_task(goal)
     prediction = model.g(state, task)
-    value = model.v(prediction.detach(), task)
+    value = model.total_work(model.v(prediction.detach(), task), state, goal)
     with torch.no_grad():
         yg = successor_target(
             next_state,
@@ -312,7 +336,7 @@ def eff_loss(
             terminal_after_transition,
             gamma=gamma_g,
         )
-        remaining = model.target_v(model.target_g(bootstrap_state, task), task)
+        remaining = model.value(bootstrap_state, goal, target=True)
         yv, v_valid = movement_target(
             observed_cost.detach(), remaining, goal_reached, continuation_valid
         )
