@@ -43,6 +43,10 @@ def main():
     )
     evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
+    evaluate.add_argument(
+        "--adaptive-one-shot", action="store_true",
+        help="Independent variable-node, single-execution EffPlan protocol; no retraining.",
+    )
     args = parser.parse_args()
     if args.command == "prepare-selections":
         result = prepare_eff_selections(
@@ -66,6 +70,7 @@ def main():
             video=args.video,
             eff_score=args.eff_score,
             cumulative_weight=args.eff_cumulative_weight,
+            adaptive_one_shot=args.adaptive_one_shot,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

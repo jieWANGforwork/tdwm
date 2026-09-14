@@ -189,11 +189,14 @@ def evaluate_effplan(
     video: bool = False,
     eff_score: str | None = None,
     cumulative_weight: float | None = None,
+    adaptive_one_shot: bool = False,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
     if method not in {"F-only", "Eff", "EffPlan"}:
         raise ValueError("Unknown predeclared method.")
+    if adaptive_one_shot and method != "EffPlan":
+        raise ValueError("Adaptive one-shot is an independent EffPlan evaluation mode.")
     ev = config["evaluation"]
     # A predeclared sweep over Eff scoring modes, not post-hoc tuning: every
     # override is recorded verbatim in the manifest next to the locked config.
@@ -348,7 +351,33 @@ def evaluate_effplan(
                 transforms.Resize(size=reference["world"]["image_size"]),
             ]
         )
-        if method == "EffPlan":
+        execution_limits = None
+        if adaptive_one_shot:
+            from tdwm.adapters.effplan_adaptive import (
+                AdaptiveEffPlanSolver, AdaptiveTrackingCost, PlanExecutionLimits,
+            )
+            if planner_safety is None:
+                raise ValueError("Adaptive mode requires the stable P safeguards.")
+            execution_limits = PlanExecutionLimits(2 * offset)
+            model = AdaptiveTrackingCost(world_model, eff, target=ev["target_readout"])
+            solver = AdaptiveEffPlanSolver(
+                model=model, planner=planner, limits=execution_limits,
+                safety=planner_safety, budget=2*offset, device=device,
+                search_iterations=tuple(ev["effplan_search_iterations"]),
+                epsilon=ev["epsilon"], minimum_relative_gain=1e-6,
+                dynamics_coefficient=ev["effplan_dynamics_coefficient"],
+            )
+            score = "adaptive_work_gain_one_shot_v1"
+            extra_rerolls = len(ev["effplan_search_iterations"])-1
+            overrides["adaptive_one_shot"] = dict(
+                minimum_relative_gain=1e-6, subdivision="breadth_first",
+                max_action_blocks=2*offset//5, root_forced_split=False,
+                action_blocks="intermediate_nodes_plus_one",
+                exhaustion="truncate_failure_without_replanning",
+                planning_calls_per_episode=1, reuse_checkpoint_without_training=True,
+                note="Variable-horizon open-loop protocol, not matched-compute H5/RH5.",
+            )
+        elif method == "EffPlan":
             model = EffPlanTrackingCost(world_model, eff, target=ev["target_readout"])
             allocation = tuple(ev["effplan_search_iterations"])
             if sum(allocation) != 30:
@@ -404,11 +433,11 @@ def evaluate_effplan(
             )
             extra_rerolls = 0
         plan = swm.PlanConfig(
-            horizon=5,
-            receding_horizon=receding,
+            horizon=2*offset//5 if adaptive_one_shot else 5,
+            receding_horizon=2*offset//5 if adaptive_one_shot else receding,
             history_len=1,
             action_block=5,
-            warm_start=True,
+            warm_start=not adaptive_one_shot,
         )
         policy = swm.policy.WorldModelPolicy(
             solver=solver,
@@ -465,6 +494,13 @@ def evaluate_effplan(
             },
         }
         manifest_path = output / "protocol_manifest.json"
+        if adaptive_one_shot:
+            manifest["paired_protocol"].update(
+                horizon="adaptive", receding_horizon="no_replanning",
+                max_action_blocks=2*offset//5, warm_start=False,
+                execution="one_shot_until_success_or_plan_exhaustion",
+            )
+            manifest["compute"]["variable_horizon"] = True
         write_json_atomic(manifest_path, manifest)
         wc = reference["world"]
         world = None
@@ -482,6 +518,7 @@ def evaluate_effplan(
                 height=wc["image_size"],
                 visualize_info=wc["visualize_info"],
                 terminate_at_goal=wc["terminate_at_goal"],
+                **({"pre_wrappers": [execution_limits.wrap]} if adaptive_one_shot else {}),
             )
             world.set_policy(policy)
             callables = [
@@ -529,6 +566,25 @@ def evaluate_effplan(
                 )
                 for i in range(50)
             ]
+            if adaptive_one_shot:
+                if solver.solve_calls != 1 or len(solver.records) != 50:
+                    raise RuntimeError("One-shot evaluation did not plan exactly once per pair.")
+                for i, wrapper in enumerate(execution_limits.wrappers):
+                    record = solver.records[i]
+                    assert wrapper.steps <= wrapper.limit <= 2*offset
+                    assert wrapper.limit == 5*(record["intermediate_nodes"]+1)
+                    record["executed_primitive_steps"] = wrapper.steps
+                    record["success"] = bool(successes[i])
+                    episodes[i].update(
+                        action_blocks=record["action_blocks"],
+                        intermediate_nodes=record["intermediate_nodes"],
+                        planned_primitive_steps=wrapper.limit,
+                        executed_primitive_steps=wrapper.steps,
+                        planning_calls=1,
+                    )
+                write_json_atomic(output / "adaptive_planning.json", {"episodes": solver.records})
+                torch.save(solver.artifacts, output / "adaptive_plans.pt")
+                manifest["compute"]["per_episode"] = solver.records
             result = {
                 "method": method,
                 "protocol": f"O{offset}",
