@@ -47,6 +47,10 @@ def main():
         "--adaptive-one-shot", action="store_true",
         help="Independent variable-node, single-execution EffPlan protocol; no retraining.",
     )
+    evaluate.add_argument(
+        "--adaptive-rolling", action="store_true",
+        help="Adaptive node/action count each round; replan from real state until total budget.",
+    )
     args = parser.parse_args()
     if args.command == "prepare-selections":
         result = prepare_eff_selections(
@@ -71,6 +75,7 @@ def main():
             eff_score=args.eff_score,
             cumulative_weight=args.eff_cumulative_weight,
             adaptive_one_shot=args.adaptive_one_shot,
+            adaptive_rolling=args.adaptive_rolling,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

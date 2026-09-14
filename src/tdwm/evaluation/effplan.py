@@ -190,12 +190,15 @@ def evaluate_effplan(
     eff_score: str | None = None,
     cumulative_weight: float | None = None,
     adaptive_one_shot: bool = False,
+    adaptive_rolling: bool = False,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
     if method not in {"F-only", "Eff", "EffPlan"}:
         raise ValueError("Unknown predeclared method.")
-    if adaptive_one_shot and method != "EffPlan":
+    if adaptive_one_shot and adaptive_rolling:
+        raise ValueError("Choose either one-shot or rolling adaptive evaluation, not both.")
+    if (adaptive_one_shot or adaptive_rolling) and method != "EffPlan":
         raise ValueError("Adaptive one-shot is an independent EffPlan evaluation mode.")
     ev = config["evaluation"]
     # A predeclared sweep over Eff scoring modes, not post-hoc tuning: every
@@ -352,7 +355,7 @@ def evaluate_effplan(
             ]
         )
         execution_limits = None
-        if adaptive_one_shot:
+        if adaptive_one_shot or adaptive_rolling:
             from tdwm.adapters.effplan_adaptive import (
                 AdaptiveEffPlanSolver, AdaptiveTrackingCost, PlanExecutionLimits,
             )
@@ -377,6 +380,16 @@ def evaluate_effplan(
                 planning_calls_per_episode=1, reuse_checkpoint_without_training=True,
                 note="Variable-horizon open-loop protocol, not matched-compute H5/RH5.",
             )
+            if adaptive_rolling:
+                score = "adaptive_work_gain_rolling_v1"
+                settings = overrides.pop("adaptive_one_shot")
+                settings.update(
+                    exhaustion="replan_from_real_observation_until_total_budget",
+                    planning_calls_per_episode="adaptive",
+                    max_action_blocks="remaining_primitive_budget_div_5",
+                    note="Adaptive execution windows; same total environment budget, not matched compute.",
+                )
+                overrides["adaptive_rolling"] = settings
         elif method == "EffPlan":
             model = EffPlanTrackingCost(world_model, eff, target=ev["target_readout"])
             allocation = tuple(ev["effplan_search_iterations"])
@@ -445,6 +458,14 @@ def evaluate_effplan(
             process={"action": processor},
             transform={"pixels": transform, "goal": transform},
         )
+        if adaptive_rolling:
+            from tdwm.adapters.effplan_adaptive_rolling import AdaptiveRollingPolicy
+            policy = AdaptiveRollingPolicy(
+                model=model, planner=planner, safety=planner_safety, budget=2*offset,
+                device=device, search_iterations=tuple(ev["effplan_search_iterations"]),
+                epsilon=ev["epsilon"], dynamics_coefficient=ev["effplan_dynamics_coefficient"],
+                process={"action": processor}, transform={"pixels": transform, "goal": transform},
+            )
         manifest = {
             "format": "tdwm-eff-formal-evaluation-v1",
             "status": "running",
@@ -499,6 +520,13 @@ def evaluate_effplan(
                 horizon="adaptive", receding_horizon="no_replanning",
                 max_action_blocks=2*offset//5, warm_start=False,
                 execution="one_shot_until_success_or_plan_exhaustion",
+            )
+            manifest["compute"]["variable_horizon"] = True
+        if adaptive_rolling:
+            manifest["paired_protocol"].update(
+                horizon="adaptive_remaining_budget", receding_horizon="all_adaptive_blocks",
+                max_action_blocks=2*offset//5, warm_start=False,
+                execution="replan_from_real_observation_until_success_or_total_budget",
             )
             manifest["compute"]["variable_horizon"] = True
         write_json_atomic(manifest_path, manifest)
@@ -585,6 +613,30 @@ def evaluate_effplan(
                 write_json_atomic(output / "adaptive_planning.json", {"episodes": solver.records})
                 torch.save(solver.artifacts, output / "adaptive_plans.pt")
                 manifest["compute"]["per_episode"] = solver.records
+            if adaptive_rolling:
+                if len(policy.records) != 50:
+                    raise RuntimeError("Adaptive rolling evaluation must cover every fixed pair.")
+                for i, rounds in enumerate(policy.records):
+                    executed = int(policy.executed_steps[i])
+                    if not rounds or executed > 2*offset:
+                        raise RuntimeError("Missing decisions or exceeded cumulative budget.")
+                    if not successes[i] and executed != 2*offset:
+                        raise RuntimeError("Unsuccessful episode stopped before its total budget.")
+                    position = 0
+                    for r in rounds:
+                        assert r["start_primitive_step"] == position
+                        assert r["remaining_budget_before"] == 2*offset-position
+                        assert r["planned_primitive_steps"] <= r["remaining_budget_before"]
+                        assert r["planned_primitive_steps"] == 5*(r["intermediate_nodes"]+1)
+                        position += r["executed_primitive_steps"]
+                    assert position == executed
+                    episodes[i].update(
+                        executed_primitive_steps=executed, planning_calls=len(rounds),
+                        action_blocks_per_decision=[r["action_blocks"] for r in rounds],
+                    )
+                write_json_atomic(output / "adaptive_planning.json", {"episodes": policy.records})
+                torch.save(policy.artifacts, output / "adaptive_plans.pt")
+                manifest["compute"]["per_episode"] = policy.records
             result = {
                 "method": method,
                 "protocol": f"O{offset}",
