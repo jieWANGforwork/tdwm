@@ -298,7 +298,11 @@ class EffPlanSolver:
         epsilon: float,
         dynamics_coefficient: float,
         safety: PlannerSafety | None = None,
+        planning_horizon: int = 5,
     ) -> None:
+        if type(planning_horizon) is not int or planning_horizon not in (5, 10, 20):
+            raise ValueError("EffPlan fixed horizon must be 5, 10 or 20 blocks.")
+        self.planning_horizon = planning_horizon
         if len(search_iterations) < 2 or any(n < 1 for n in search_iterations):
             raise ValueError(
                 "EffPlan requires improvement searches and a final search."
@@ -328,8 +332,8 @@ class EffPlanSolver:
         self.last_diagnostics: dict[str, Any] = {}
 
     def configure(self, *, action_space, n_envs, config) -> None:
-        if config.horizon != 5 or config.action_block != 5 or config.history_len != 1:
-            raise ValueError("EffPlan requires H=5, action_block=5, history_len=1.")
+        if config.horizon != self.planning_horizon or config.action_block != 5 or config.history_len != 1:
+            raise ValueError("EffPlan requires its declared horizon, action_block=5, history_len=1.")
         self.inner.configure(action_space=action_space, n_envs=n_envs, config=config)
 
     @property
@@ -359,7 +363,7 @@ class EffPlanSolver:
                 start,
                 goal,
                 value,
-                horizon=5,
+                horizon=self.planning_horizon,
                 epsilon=self.epsilon,
                 safety=safety,
             )

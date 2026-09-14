@@ -25,12 +25,18 @@ from tdwm.methods.eff import EffModel
 CONFIG = Path(__file__).resolve().parents[2] / "configs/experiment/effplan_cube.yaml"
 
 
-@pytest.mark.parametrize("method", ["F-only", "Eff", "EffPlan"])
-@pytest.mark.parametrize("offset", [25, 50, 100])
-@pytest.mark.parametrize("stop_after", [None, 7])
+@pytest.mark.parametrize("method,offset,offset_window", [
+    (method, offset, False)
+    for method in ["F-only", "Eff", "EffPlan"] for offset in [25, 50, 100]
+] + [("EffPlan", 50, True), ("EffPlan", 100, True)])
+@pytest.mark.parametrize("stop_after", [None, 7, "second_window"])
 def test_formal_evaluator_executes_full_plan_before_replanning(
-    monkeypatch, tmp_path, method, offset, stop_after
+    monkeypatch, tmp_path, method, offset, offset_window, stop_after
 ):
+    window = offset if offset_window else 25
+    horizon = window // 5
+    if stop_after == "second_window":
+        stop_after = window + 7
     config = module.load_eff_protocol(CONFIG, stage="evaluation")
     reference = module.baseline_reference(config, CONFIG)
     checkpoint = tmp_path / "f.pt"
@@ -114,7 +120,7 @@ def test_formal_evaluator_executes_full_plan_before_replanning(
             # H == RH: no unexecuted tail is carried to the next decision.
             assert init_action is None
             seen["calls"].append(tick)
-            actions = torch.arange(125, dtype=torch.float32).reshape(1, 5, 25)
+            actions = torch.arange(horizon*25, dtype=torch.float32).reshape(1, horizon, 25)
             return {"actions": actions.expand(len(info["clock"]), -1, -1) + tick * 1000}
 
         def __call__(self, *args, **kwargs):
@@ -152,7 +158,7 @@ def test_formal_evaluator_executes_full_plan_before_replanning(
                     assert np.isnan(action).all()
                 else:
                     # Every one of the 25 returned actions is consumed in order.
-                    expected = (tick // 25) * 25000 + (tick % 25) * 5
+                    expected = (tick // window) * window * 1000 + (tick % window) * 5
                     np.testing.assert_array_equal(action[:, 0], np.full(50, expected))
             success = stop_after is not None
             return {
@@ -171,15 +177,16 @@ def test_formal_evaluator_executes_full_plan_before_replanning(
         output_dir=output, method=method, device="cpu",
         eff_checkpoint=eff_checkpoint, eff_manifest=tmp_path / "unused.json",
         planner_checkpoint=planner_checkpoint, planner_manifest=pmeta,
+        offset_window=offset_window,
     )
-    expected_calls = [0] if stop_after is not None else list(range(0, 2 * offset, 25))
+    expected_calls = list(range(0, stop_after or 2*offset, window))
     assert seen["calls"] == expected_calls
-    assert seen["plan"].horizon == seen["plan"].receding_horizon == 5
+    assert seen["plan"].horizon == seen["plan"].receding_horizon == horizon
     assert seen["plan"].action_block == 5
     assert seen["eval_budget"] == 2 * offset
     assert seen["closed"]
     paired = result["paired_protocol"]
-    assert paired["receding_horizon"] == paired["horizon"] == 5
+    assert paired["receding_horizon"] == paired["horizon"] == horizon
     assert paired["action_block"] == 5
     assert paired["episode_budget"] == 2 * offset
     assert (paired["cem_candidates"], paired["cem_iterations"], paired["cem_elites"]) == (300, 30, 30)
@@ -189,7 +196,13 @@ def test_formal_evaluator_executes_full_plan_before_replanning(
     assert len(result["episode_results"]) == 50
     constructor = seen["constructors"][0]
     if method == "EffPlan":
-        assert isinstance(constructor["model"], module.EffPlanTrackingCost)
+        if offset_window:
+            from tdwm.adapters.effplan_adaptive import AdaptiveTrackingCost
+            assert isinstance(constructor["model"], AdaptiveTrackingCost)
+            assert manifest["protocol_overrides"]["offset_window"]["maximum_decisions"] == 2
+            assert constructor["planning_horizon"] == horizon
+        else:
+            assert isinstance(constructor["model"], module.EffPlanTrackingCost)
         assert sum(constructor["search_iterations"]) == 30
     elif method == "Eff":
         assert isinstance(constructor["model"], module.EffCEMCost)

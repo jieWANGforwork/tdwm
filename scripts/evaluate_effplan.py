@@ -44,6 +44,10 @@ def main():
     evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
     evaluate.add_argument(
+        "--offset-window", action="store_true",
+        help="Independent fixed EffPlan window: O50 H10/RH10, O100 H20/RH20; total budget unchanged.",
+    )
+    evaluate.add_argument(
         "--adaptive-one-shot", action="store_true",
         help="Independent variable-node, single-execution EffPlan protocol; no retraining.",
     )
@@ -76,6 +80,7 @@ def main():
             cumulative_weight=args.eff_cumulative_weight,
             adaptive_one_shot=args.adaptive_one_shot,
             adaptive_rolling=args.adaptive_rolling,
+            offset_window=args.offset_window,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

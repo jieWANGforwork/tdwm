@@ -101,7 +101,8 @@ def test_fixed_budget_distribution_includes_final_search():
 
 
 @pytest.mark.parametrize("protected", [False, True])
-def test_public_cem_state_planner_final_search_and_returned_action_feedback(protected):
+@pytest.mark.parametrize("horizon", [5, 10, 20])
+def test_public_cem_state_planner_final_search_and_returned_action_feedback(protected, horizon):
     from gymnasium.spaces import Box
     from tdwm.methods.effplan_safety import PlannerSafety
 
@@ -109,7 +110,9 @@ def test_public_cem_state_planner_final_search_and_returned_action_feedback(prot
     planner = StatePlanner(hidden_dim=16).requires_grad_(False).eval()
     with torch.no_grad():
         planner.network[-1].bias.fill_(0.01)
-    cost = EffPlanTrackingCost(world, eff, target=True)
+    from tdwm.adapters.effplan_adaptive import AdaptiveTrackingCost
+    cost_type = EffPlanTrackingCost if horizon == 5 else AdaptiveTrackingCost
+    cost = cost_type(world, eff, target=True)
     solver = EffPlanSolver(
         model=cost,
         planner=planner,
@@ -122,16 +125,18 @@ def test_public_cem_state_planner_final_search_and_returned_action_feedback(prot
         epsilon=1e-6,
         dynamics_coefficient=0.1,
         safety=PlannerSafety(10, 5) if protected else None,
+        planning_horizon=horizon,
     )
     solver.configure(
         action_space=Box(low=-1.0, high=1.0, shape=(2, 5), dtype=np.float32),
         n_envs=2,
         config=swm.PlanConfig(
-            horizon=5, receding_horizon=5, history_len=1, action_block=5
+            horizon=horizon, receding_horizon=horizon, history_len=1, action_block=5
         ),
     )
     output = solver.solve(_info())
-    assert output["actions"].shape == (2, 5, 25)
+    assert output["actions"].shape == (2, horizon, 25)
+    assert solver.last_diagnostics["final_state_nodes"].shape == (2, horizon+1, 192)
     assert isinstance(solver.inner, swm.solver.CEMSolver)
     assert solver.last_diagnostics["state_updates"] == 2
     assert solver.last_diagnostics["final_search_after_last_state_update"]

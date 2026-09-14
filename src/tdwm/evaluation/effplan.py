@@ -191,6 +191,7 @@ def evaluate_effplan(
     cumulative_weight: float | None = None,
     adaptive_one_shot: bool = False,
     adaptive_rolling: bool = False,
+    offset_window: bool = False,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
@@ -200,6 +201,8 @@ def evaluate_effplan(
         raise ValueError("Choose either one-shot or rolling adaptive evaluation, not both.")
     if (adaptive_one_shot or adaptive_rolling) and method != "EffPlan":
         raise ValueError("Adaptive one-shot is an independent EffPlan evaluation mode.")
+    if offset_window and (method != "EffPlan" or adaptive_one_shot or adaptive_rolling):
+        raise ValueError("Offset-window requires fixed EffPlan, without adaptive flags.")
     ev = config["evaluation"]
     # A predeclared sweep over Eff scoring modes, not post-hoc tuning: every
     # override is recorded verbatim in the manifest next to the locked config.
@@ -253,6 +256,19 @@ def evaluate_effplan(
         )
     if ev["episode_budget_multiplier"] != 2:
         raise ValueError("Formal episode budget must be twice the goal offset.")
+    horizon = 5
+    if offset_window:
+        if offset not in (50, 100):
+            raise ValueError("Offset-window is predeclared only for O50 and O100.")
+        horizon = receding = offset // 5
+        overrides["offset_window"] = dict(
+            from_primitive_steps=25, to_primitive_steps=offset,
+            horizon=horizon, receding_horizon=receding,
+            intermediate_nodes=horizon-1, maximum_decisions=2,
+            execution="execute_full_window_then_replan_from_real_state_if_unfinished",
+            reuse_checkpoint_without_training=True,
+            note="Fixed longer state/action paths; same total environment budget, not matched compute.",
+        )
     reference = baseline_reference(config, config_path)
     compatibility = prepare_cloud_runtime()
     import stable_worldmodel as swm
@@ -391,7 +407,11 @@ def evaluate_effplan(
                 )
                 overrides["adaptive_rolling"] = settings
         elif method == "EffPlan":
-            model = EffPlanTrackingCost(world_model, eff, target=ev["target_readout"])
+            if offset_window:
+                from tdwm.adapters.effplan_adaptive import AdaptiveTrackingCost
+                model = AdaptiveTrackingCost(world_model, eff, target=ev["target_readout"])
+            else:
+                model = EffPlanTrackingCost(world_model, eff, target=ev["target_readout"])
             allocation = tuple(ev["effplan_search_iterations"])
             if sum(allocation) != 30:
                 raise ValueError(
@@ -409,8 +429,9 @@ def evaluate_effplan(
                 epsilon=ev["epsilon"],
                 dynamics_coefficient=ev["effplan_dynamics_coefficient"],
                 safety=planner_safety,
+                planning_horizon=horizon,
             )
-            score = "state_path_tracking"
+            score = "state_path_tracking_offset_window" if offset_window else "state_path_tracking"
             extra_rerolls = len(allocation) - 1
         else:
             if method == "Eff" and ev["eff_score"] not in EFF_SCORE_MODES:
@@ -446,7 +467,7 @@ def evaluate_effplan(
             )
             extra_rerolls = 0
         plan = swm.PlanConfig(
-            horizon=2*offset//5 if adaptive_one_shot else 5,
+            horizon=2*offset//5 if adaptive_one_shot else horizon,
             receding_horizon=2*offset//5 if adaptive_one_shot else receding,
             history_len=1,
             action_block=5,
@@ -486,7 +507,7 @@ def evaluate_effplan(
                 "episodes": 50,
                 "planning_seed": 42,
                 "receding_horizon": receding,
-                "horizon": 5,
+                "horizon": horizon,
                 "action_block": 5,
                 "episode_budget": 2 * offset,
                 "cem_candidates": 300,
