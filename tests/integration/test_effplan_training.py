@@ -56,7 +56,8 @@ def batch(cross=0):
 
 
 def trainer(phase="generation", supervision="final", planner=None, safety=None,
-            v_parameterization="total_work"):
+            v_parameterization="total_work", calibration_interval=1,
+            calibration_batch_size=None):
     cfg = EffPlanTrainSettings(
         phase=phase,
         seed=3072,
@@ -74,6 +75,8 @@ def trainer(phase="generation", supervision="final", planner=None, safety=None,
         cem_batch_size=2,
         supervision=supervision,
         safety=safety,
+        calibration_interval=calibration_interval,
+        calibration_batch_size=calibration_batch_size,
     )
     eff = EffModel(g_hidden_dim=8, v_hidden_dim=8,
                    v_parameterization=v_parameterization).eval().requires_grad_(False)
@@ -150,6 +153,66 @@ def test_refinement_can_mask_cross_episode_trajectory_fit():
     result = t.step(batch(cross=1))
     assert result["trajectory_loss"] == 0 and result["trajectory_labelled_paths"] == 0
     assert result["dynamics_loss"] > 0
+
+
+def test_sparse_updates_skip_f_and_calibrate_only_subset():
+    from tdwm.methods.effplan_safety import PlannerSafety
+    t, world = trainer("refinement", safety=PlannerSafety(10, 5),
+                       calibration_interval=3, calibration_batch_size=1)
+    before = copy.deepcopy(t.planner.state_dict())
+    for _ in range(2):
+        result = t.step(batch())
+        assert not result["calibration_update"]
+        assert result["cem_candidate_rollouts"] == 0
+        assert result["dynamics_loss"] == 0
+        assert result["trajectory_labelled_paths"] == 2
+    assert not world.seen_samples
+    assert any(not torch.equal(v, before[k]) for k,v in t.planner.state_dict().items())
+    result = t.step(batch())
+    assert result["calibration_update"] and result["cem_candidate_rollouts"] == 8
+    assert result["trajectory_labelled_paths"] == 1
+    assert result["dynamics_loss"] > 0
+    assert all(p.grad is None for p in t.eff.parameters())
+    assert all(p.grad is None for p in world.parameters())
+
+
+def test_sparse_branch_preserves_optimizer_rng_and_step_then_resumes(tmp_path):
+    from tdwm.training.effplan_runtime import planner_settings_payload
+    from tdwm.training.eff_runtime import canonical_sha256
+    dense, _ = trainer("refinement")
+    dense.identity = {"source": "fixed", "settings_sha256": canonical_sha256(planner_settings_payload(dense.settings))}
+    dense.step(batch())
+    parent = tmp_path / "dense.pt"
+    dense.save(parent, epoch=0)
+    sparse, _ = trainer("refinement", calibration_interval=3, calibration_batch_size=1)
+    sparse.identity = {"source": "fixed", "settings_sha256": canonical_sha256(planner_settings_payload(sparse.settings))}
+    sparse.eff.load_state_dict(dense.eff.state_dict())
+    with pytest.raises(ValueError, match="identity"):
+        sparse.resume(parent)
+    sparse.resume(parent, schedule_branch=True)
+    assert sparse.global_step == 1
+    assert sparse.schedule_transition["switch_after_update"] == 1
+    assert sparse.rng.bit_generator.state == dense.rng.bit_generator.state
+    assert torch.equal(sparse.solver.torch_gen.get_state(), dense.solver.torch_gen.get_state())
+    for p, q in zip(sparse.planner.parameters(), dense.planner.parameters()):
+        torch.testing.assert_close(p, q, rtol=0, atol=0)
+        torch.testing.assert_close(sparse.optimizer.state[p]["exp_avg"], dense.optimizer.state[q]["exp_avg"], rtol=0, atol=0)
+    assert not sparse.step(batch())["calibration_update"]
+    child = tmp_path / "sparse.pt"
+    sparse.save(child, epoch=0)
+    expected = sparse.step(batch())
+    restored, _ = trainer("refinement", calibration_interval=3, calibration_batch_size=1)
+    restored.identity = sparse.identity
+    restored.eff.load_state_dict(sparse.eff.state_dict())
+    restored.resume(child)
+    assert restored.step(batch()) == expected
+    assert restored.schedule_transition == sparse.schedule_transition
+    # An unrelated loss change cannot be smuggled into a schedule handoff.
+    changed, _ = trainer("refinement", calibration_interval=3)
+    changed.settings = replace(changed.settings, efficiency_coefficient=.7)
+    changed.identity = {"source": "fixed", "settings_sha256": canonical_sha256(planner_settings_payload(changed.settings))}
+    with pytest.raises(ValueError, match="identity"):
+        changed.resume(parent, schedule_branch=True)
 
 
 @pytest.mark.parametrize("phase", ["generation", "refinement"])

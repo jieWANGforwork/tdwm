@@ -1,0 +1,183 @@
+schema_version: 1
+method_family: effplan
+runtime:
+  stable_worldmodel_version: 0.1.1
+
+# P stability v1: old F/G/V and generation initialization are unchanged.
+# Limits chosen before evaluation: gradient L2 10; delta L2 5 latent units,
+# comparable to the observed training-segment median distance (~5.3).
+# These are conservative engineering limits, not validated optima.
+# Immutable existing artifacts; paths are supplied on the command line.
+source:
+  baseline_reference: actor_free_td_lewm_v1_c3_cube_checkpoint_o50.yaml
+  lewm_checkpoint_sha256: 198c468cadb63655066c968726cef69e36fe5682fcaec55620dd610a8b75e257
+  dataset_source_sha256: 3cf6477768f1a2979acefa3aeb6c27c45422b8b6fbce8527419943d3e679a245
+  column_normalization_sha256: 7fd14e6a72841a36abd8f1d4aedf4f17f4f71ca508cacefe331e989664954818
+  frozen_store_manifest_sha256: fc80bcc4187a7fd98ff7bbfcfa1d5a4c3a76b467af2f5f22fed601855c573c7e
+data:
+  episode_split: rp1_cube_8000_2000
+  state_stride: 5
+  # Forced by load_eff_protocol for the eff_training stage.
+  efficiency_groups: time_offset_within_minibatch
+
+# Draft means formal execution is refused. Null fields await the user's choice;
+# do not infer approval from the existence of this file or fill them from C3.
+eff_training:
+  status: locked
+  settings:
+    seed: 3072
+    epochs: 10
+    updates_per_epoch: 12796
+    batch_size: 256
+    # Locked by the accepted first-round hyperparameter package.
+    g_hidden_dim: 512
+    v_hidden_dim: 512
+    learning_rate: 0.0001
+    weight_decay: 0.001
+    # User 2026-09-12: 0.98. Note this applies per training transition, and the
+    # Eff training stride is 5 primitive steps, so it is a per-BLOCK discount.
+    # If a per-primitive-step 0.98 was intended, this should be 0.98^5=0.9039.
+    gamma_g: 0.98
+    beta: 5
+    # lambda_V, i.e. the V loss weight relative to G. User: 1 (2026-09-12).
+    critic_coefficient: 1.0
+    ema_rate: 0.005
+    gradient_clip: 1.0
+    include_goal_boundary: true
+    backup_primitive_steps: 50
+    cross_episode_probability: 0.3
+    epsilon: 0.000001
+    warmup_fraction: 0.01
+    # Matches the sibling eff_action_cube_train.yaml validation.batches.
+    validation_batches: 16
+    validation_seed: 50
+    checkpoint_every_updates: 1000
+
+planner_generation:
+  status: locked
+  run:
+    epochs: 5
+    updates_per_epoch: 2560
+    # Planner width. Not given in the method text; matched to G/V (512).
+    # StatePlanner is a two-layer MLP: 4*192+1 -> 512 -> 512 -> 192.
+    # Changing this changes the planner identity, so P must be retrained --
+    # it must never be retuned after formal evaluation has started.
+    planner_hidden_dim: 512
+    # Same draw/validation bookkeeping as eff_training.settings.
+    batch_size: 256
+    validation_batches: 16
+    validation_seed: 50
+    checkpoint_every_updates: 1000
+  settings:
+    phase: generation
+    seed: 3072
+    learning_rate: 0.0001
+    weight_decay: 0.001
+    gradient_clip: 1.0
+    epsilon: 0.000001
+    # Must match evaluation.target_readout; the evaluator asserts it.
+    target_readout: true
+    trajectory_coefficient: 1.0
+    # Generation is trajectory-only: EffPlanTrainSettings rejects any CEM,
+    # efficiency or dynamics term in this phase.
+    efficiency_coefficient: 0.0
+    dynamics_coefficient: 0.0
+    search_iterations: []
+    cem_candidates: 300
+    cem_elites: 30
+    cem_batch_size: 1
+    supervision: final
+
+planner_refinement:
+  status: locked
+  run:
+    epochs: 5
+    updates_per_epoch: 2560
+    # Planner width. Not given in the method text; matched to G/V (512).
+    # StatePlanner is a two-layer MLP: 4*192+1 -> 512 -> 512 -> 192.
+    # Changing this changes the planner identity, so P must be retrained --
+    # it must never be retuned after formal evaluation has started.
+    planner_hidden_dim: 512
+    # Same draw/validation bookkeeping as eff_training.settings.
+    batch_size: 256
+    validation_batches: 16
+    validation_seed: 50
+    checkpoint_every_updates: 1000
+  settings:
+    phase: refinement
+    calibration_interval: 10
+    calibration_batch_size: 32
+    safety: &p_safety
+      geometric_lower_bound: true
+      state_gradient_max_norm: 10.0
+      state_delta_max_norm: 5.0
+    seed: 3072
+    learning_rate: 0.0001
+    weight_decay: 0.001
+    gradient_clip: 1.0
+    epsilon: 0.000001
+    target_readout: true
+    trajectory_coefficient: 1.0
+    efficiency_coefficient: 0.1
+    dynamics_coefficient: 0.1
+    # Training-time CEM budget, deliberately smaller than the formal 30 rounds:
+    # it only exists to produce the F rollout the dynamics term compares against.
+    search_iterations: [2, 2, 2, 2]
+    cem_candidates: 300
+    cem_elites: 30
+    cem_batch_size: 1
+    supervision: final
+
+evaluation:
+  status: locked
+  planning_seed: 42
+  episodes_per_protocol: 50
+  goal_offsets: [25, 50, 100]
+  episode_budget_multiplier: 2
+  horizon: 5
+  action_block: 5
+  candidates: 300
+  iterations: 30
+  elites: 30
+  # Baseline-forced: V1-C3 used solver_batch_size 1 and MUJOCO_GL=osmesa.
+  cem_batch_size: 1
+  # Execute the complete five-block plan before observing/replanning: 25
+  # primitive steps for EVERY offset. The episode budget remains 2 * offset.
+  # LeWM Cube / RP1 C.1 use H5/RH5; O50 extends the same execution rule.
+  # Do not inherit the historical C-family O50/O100 RH1 execution schedule.
+  receding_horizons: { "25": 5, "50": 5, "100": 5 }
+  # Eff CEM cost. terminal_eff_cost | latent_path_eff_cost |
+  # value_path_eff_cost | goal_distance_eff_cost |
+  # value_to_goal_sum_eff_cost | value_to_goal_mean_eff_cost.
+  # The first five add the listed term on top of the terminal V(G(z5, m_g), m_g);
+  # the last two are self-contained (their k=5 term IS the terminal).
+  # Sweep them with `evaluate_effplan.py evaluate --eff-score ...`.
+  eff_score: value_path_eff_cost
+  eff_cumulative_weight: 1.0
+  # Baseline-forced: V1-C3 scored with the EMA target critic, not the online one.
+  target_readout: true
+  # Locked: 8 state-improvement searches + 1 final action search share 30
+  # rounds, i.e. distribute_cem_iterations(total_iterations=30, searches=9).
+  effplan_search_iterations: [3, 3, 3, 3, 3, 3, 4, 4, 4]
+  effplan_dynamics_coefficient: 0.1
+  effplan_safety: *p_safety
+  epsilon: 0.000001
+  # Baseline-forced: C-G3 formal runs recorded MUJOCO_GL=osmesa.
+  render_backend: osmesa
+
+locked_decisions:
+  frozen_f: pretrained LeWM 198c468c... (the older checkpoint), frozen throughout.
+  gamma_g: 0.98 per training transition (stride 5, so this is per block).
+  critic_coefficient: 1.0, i.e. G and V losses are equally weighted.
+  validation_batches: 16, matching the sibling eff_action_cube_train.yaml.
+  planner: trajectory 1.0 / efficiency 0.1 / dynamics 0.1, supervision final,
+    target_readout true, 5 epochs x 2560 updates per phase.
+  effplan_dynamics_coefficient: 0.1.
+  baseline_forced: >-
+    render_backend osmesa, cem_batch_size 1, target_readout true.
+  execution_protocol: >-
+    O25/O50/O100 all use H5/RH5 with five-primitive-step action blocks:
+    plan and execute 25 primitive steps, then replan if the episode continues.
+    Total episode budgets stay 50/100/200. This supersedes the old RH1 runs.
+open_item:
+  - Which of the five GPUs is free; must not disturb the other scheme.

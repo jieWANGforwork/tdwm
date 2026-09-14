@@ -205,7 +205,7 @@ def refine_state_path(
     states: torch.Tensor,
     value: ValueFunction,
     *,
-    predicted_future: torch.Tensor,
+    predicted_future: torch.Tensor | None,
     epsilon: float,
     dynamics_coefficient: float,
     safety: PlannerSafetyRuntime | None = None,

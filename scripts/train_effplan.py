@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--lewm-checkpoint")
     parser.add_argument("--resume")
     parser.add_argument("--init-from")
+    parser.add_argument("--branch-from", help="Dense-to-sparse continuation retaining optimizer, RNG and step.")
     parser.add_argument(
         "--stop-after-updates",
         type=int,
@@ -43,6 +44,7 @@ def main():
         resume=args.resume,
         init_from=args.init_from,
         stop_after_updates=args.stop_after_updates,
+        branch_from=args.branch_from,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

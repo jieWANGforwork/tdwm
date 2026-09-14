@@ -107,6 +107,7 @@ def run_effplan_training(
     resume: str | Path | None = None,
     init_from: str | Path | None = None,
     stop_after_updates: int | None = None,
+    branch_from: str | Path | None = None,
 ) -> dict:
     """Train one planner phase. ``init_from`` carries phase-one weights over.
 
@@ -134,8 +135,8 @@ def run_effplan_training(
             "stop_after_updates must be an absolute update within the full budget."
         )
     stop_at = total_updates if stop_after_updates is None else stop_after_updates
-    if resume is not None and init_from is not None:
-        raise ValueError("Choose resume or weights-only initialization, not both.")
+    if sum(x is not None for x in (resume, init_from, branch_from)) > 1:
+        raise ValueError("Choose resume, initialization or schedule branch, not multiple.")
 
     eff_payload = json.loads(Path(eff_manifest).read_text())
     if eff_payload.get("status") != "complete":
@@ -187,6 +188,8 @@ def run_effplan_training(
     with run_directory_lock(output):
         manifest_path = output / "training_manifest.json"
         existing = None
+        if branch_from is not None and manifest_path.exists():
+            raise FileExistsError("A schedule branch needs a new output directory.")
         if manifest_path.exists() and resume is None and init_from is None:
             raise FileExistsError(
                 "EffPlan output already exists; use explicit resume or init-from."
@@ -214,6 +217,8 @@ def run_effplan_training(
             planner.load_state_dict(weights["planner"], strict=True)
         if resume is not None:
             trainer.resume(resume)
+        if branch_from is not None:
+            trainer.resume(branch_from, schedule_branch=True)
         if trainer.global_step > stop_at:
             raise ValueError("Requested stop precedes the restored checkpoint.")
         if (
@@ -237,6 +242,7 @@ def run_effplan_training(
             "completed_updates": trainer.global_step,
             "init_from": None if init_from is None else str(Path(init_from).resolve()),
             "resume_source": None if resume is None else str(Path(resume).resolve()),
+            "schedule_transition": getattr(trainer, "schedule_transition", None),
             "stop_after_updates_this_invocation": stop_after_updates,
             "runtime": {
                 "torch": torch.__version__,
@@ -279,11 +285,17 @@ def run_effplan_training(
             )
 
         updates_per_epoch = int(run["updates_per_epoch"])
+        if branch_from is not None:
+            save_checkpoint(trainer.global_step // updates_per_epoch, completed_epoch=False)
         with (output / f"metrics-{trainer.global_step:08d}.jsonl").open("a") as log:
             manifest["metrics_path"] = str(log.name)
             write_json_atomic(manifest_path, manifest)
             try:
                 while trainer.global_step < stop_at:
+                    if (output / "STOP_REQUESTED").exists():
+                        save_checkpoint(trainer.global_step // updates_per_epoch, completed_epoch=False)
+                        manifest["status"] = "paused"
+                        break
                     # Legacy runs used constant LR despite defining this schedule.
                     # The isolated safety-v1 run uses the declared full-budget
                     # warmup/cosine schedule, independent of a diagnostic pause.

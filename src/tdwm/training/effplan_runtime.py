@@ -57,8 +57,20 @@ class EffPlanTrainSettings:
     cem_batch_size: int
     supervision: str
     safety: PlannerSafety | None = None
+    calibration_interval: int = 1
+    calibration_batch_size: int | None = None
 
     def __post_init__(self) -> None:
+        if type(self.calibration_interval) is not int or self.calibration_interval < 1:
+            raise ValueError("calibration_interval must be a positive integer.")
+        if self.calibration_batch_size is not None and (
+            type(self.calibration_batch_size) is not int or self.calibration_batch_size < 1
+        ):
+            raise ValueError("calibration_batch_size must be positive.")
+        if self.phase != "refinement" and (
+            self.calibration_interval != 1 or self.calibration_batch_size is not None
+        ):
+            raise ValueError("Sparse calibration only applies to refinement.")
         if isinstance(self.safety, dict):
             object.__setattr__(self, "safety", PlannerSafety(**self.safety))
         if self.safety is not None and not isinstance(self.safety, PlannerSafety):
@@ -120,6 +132,10 @@ def planner_settings_payload(settings: EffPlanTrainSettings) -> dict:
     payload = dataclasses.asdict(settings)
     if settings.safety is None:
         payload.pop("safety")
+    if settings.calibration_interval == 1:
+        payload.pop("calibration_interval")
+    if settings.calibration_batch_size is None:
+        payload.pop("calibration_batch_size")
     return payload
 
 
@@ -201,7 +217,7 @@ class EffPlanTrainer:
     def value(self, left, right):
         return self.eff.value(left, right, target=self.settings.target_readout)
 
-    def _loss(self, batch: EffPlanReplayBatch):
+    def _loss(self, batch: EffPlanReplayBatch, *, validation: bool = False):
         import stable_worldmodel as swm
         from gymnasium.spaces import Box
 
@@ -212,6 +228,15 @@ class EffPlanTrainer:
             else PlannerSafetyRuntime(self.settings.safety)
         )
         valid = batch.trajectory_valid.to(self.device)
+        calibration = self.solver is not None and (
+            validation or (self.global_step + 1) % self.settings.calibration_interval == 0
+        )
+        if calibration and self.settings.calibration_batch_size is not None:
+            # The replay batch is IID; its first K paths are an unbiased subset.
+            states = states[:self.settings.calibration_batch_size]
+            valid = valid[:len(states)]
+        self.last_calibration = calibration
+        self.last_cem_paths = len(states) if calibration else 0
         if states.ndim != 3 or states.shape[1:] != (6, 192) or batch.state_stride != 5:
             raise ValueError(
                 "Planner training needs six nodes at primitive stride five."
@@ -242,6 +267,15 @@ class EffPlanTrainer:
         losses = []
         if self.solver is None:
             losses.append(planner_loss(nodes, predicted_future=None, **loss_args))
+        elif not calibration:
+            loss_args["dynamics_coefficient"] = 0.0
+            for _ in self.settings.search_iterations:
+                nodes = refine_state_path(
+                    self.planner, nodes, self.value, predicted_future=None,
+                    epsilon=self.settings.epsilon, dynamics_coefficient=0.0,
+                    safety=self.safety_runtime,
+                )
+                losses.append(planner_loss(nodes, predicted_future=None, **loss_args))
         else:
             self.solver.configure(
                 action_space=Box(-1.0, 1.0, shape=(len(states), 5), dtype=np.float32),
@@ -312,10 +346,11 @@ class EffPlanTrainer:
             .item(),
             "dynamics_loss": torch.stack([x.dynamics for x in selected]).mean().item(),
             "trajectory_labelled_paths": int(valid.sum()),
-            "cem_candidate_rollouts": len(valid)
+            "calibration_update": self.last_calibration,
+            "cem_candidate_rollouts": self.last_cem_paths
             * self.settings.cem_candidates
             * sum(self.settings.search_iterations),
-            "returned_action_rerolls": len(valid)
+            "returned_action_rerolls": self.last_cem_paths
             * len(self.settings.search_iterations),
         }
 
@@ -325,7 +360,7 @@ class EffPlanTrainer:
         self.planner.eval()
         cem_rng = None if self.solver is None else self.solver.torch_gen.get_state()
         try:
-            loss, selected, valid = self._loss(batch)
+            loss, selected, valid = self._loss(batch, validation=True)
             return {
                 **(
                     {} if self.safety_runtime is None else self.safety_runtime.metrics()
@@ -369,6 +404,7 @@ class EffPlanTrainer:
             "cuda_rng": torch.cuda.get_rng_state_all()
             if self.device.type == "cuda"
             else None,
+            "schedule_transition": getattr(self, "schedule_transition", None),
         }
         with tempfile.NamedTemporaryFile(
             dir=path.parent, prefix=".effplan-", delete=False
@@ -380,17 +416,25 @@ class EffPlanTrainer:
         os.replace(temporary, path)
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    def resume(self, path: str | Path) -> int:
+    def resume(self, path: str | Path, *, schedule_branch: bool = False) -> int:
         payload = torch.load(path, map_location="cpu", weights_only=False)
         if (
             payload.get("format") != CHECKPOINT_FORMAT
             or payload.get("method") != "EffPlan"
         ):
             raise ValueError("Not an EffPlan training checkpoint.")
+        expected_identity = copy.deepcopy(self.identity)
+        expected_settings = planner_settings_payload(self.settings)
+        if schedule_branch:
+            if self.settings.phase != "refinement" or self.settings.calibration_interval <= 1:
+                raise ValueError("A schedule branch requires sparse refinement.")
+            expected_settings.pop("calibration_interval", None)
+            expected_settings.pop("calibration_batch_size", None)
+            expected_identity["settings_sha256"] = canonical_sha256(expected_settings)
         if (
-            payload.get("identity") != self.identity
-            or payload.get("identity_sha256") != canonical_sha256(self.identity)
-            or payload.get("settings") != planner_settings_payload(self.settings)
+            payload.get("identity") != expected_identity
+            or payload.get("identity_sha256") != canonical_sha256(expected_identity)
+            or payload.get("settings") != expected_settings
             or payload.get("planner_hidden_dim") != self.planner.hidden_dim
         ):
             raise ValueError("EffPlan resume identity, phase or settings differ.")
@@ -407,6 +451,13 @@ class EffPlanTrainer:
         if self.device.type == "cuda":
             torch.cuda.set_rng_state_all(payload["cuda_rng"])
         self.global_step = int(payload["global_step"])
+        self.schedule_transition = (
+            {"parent_checkpoint": str(Path(path).resolve()),
+             "parent_sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+             "switch_after_update": self.global_step,
+             "parent_settings": payload["settings"]}
+            if schedule_branch else payload.get("schedule_transition")
+        )
         return int(payload["epoch"])
 
 
