@@ -18,10 +18,12 @@ DISTANCE_ONLY_SCORE = 'adaptive_local_distance_only_rolling_v1'
 
 
 def build_jobs(*, repo, runs_root, output_root, dataset, lewm_checkpoint, python, devices,
-               local_distance_limit=None, distance_only=False):
+               local_distance_limit=None, distance_only=False, execution_device='cuda'):
     """Build exactly six jobs; paths/devices are explicit, never discovered by mutation."""
     repo, runs_root, output_root = (Path(p).expanduser().resolve() for p in (repo, runs_root, output_root))
-    if not devices or any(not str(d).isdigit() for d in devices):
+    if execution_device not in ('cpu', 'cuda'):
+        raise ValueError('execution_device must be cpu or cuda.')
+    if execution_device == 'cuda' and (not devices or any(not str(d).isdigit() for d in devices)):
         raise ValueError('Provide explicit numeric GPU indices.')
     if distance_only and local_distance_limit is None:
         raise ValueError('Distance-only study requires an explicit distance limit.')
@@ -45,7 +47,7 @@ def build_jobs(*, repo, runs_root, output_root, dataset, lewm_checkpoint, python
             command = [str(python), '-u', str(repo/'scripts/evaluate_effplan.py'), 'evaluate']
             for key, value in inputs.items():
                 command.extend(['--'+key.replace('_', '-'), str(value)])
-            command.extend(['--output-dir', str(output), '--device', 'cuda', '--method', 'EffPlan',
+            command.extend(['--output-dir', str(output), '--device', execution_device, '--method', 'EffPlan',
                             '--adaptive-rolling'])
             command.extend(['--adaptive-distance-only'] if distance_only else
                            ['--adaptive-efficiency-threshold', str(THRESHOLD)])
@@ -53,14 +55,18 @@ def build_jobs(*, repo, runs_root, output_root, dataset, lewm_checkpoint, python
                 command.extend(['--adaptive-local-distance-limit', str(local_distance_limit)])
             jobs.append(dict(variant=variant, offset=offset, output=str(output),
                              log=str(output.with_suffix('.log')), command=command,
-                             gpu=str(devices[len(jobs) % len(devices)]),
+                             gpu='' if execution_device == 'cpu' else str(devices[len(jobs) % len(devices)]),
                              inputs={key: str(value) for key, value in inputs.items()}))
     return jobs
 
 
 def run_jobs(jobs, *, repo, output_root):
-    """All six start concurrently. Existing runs are never overwritten or relaunched."""
+    """GPU jobs start concurrently; explicitly requested CPU jobs run one at a time."""
     output = Path(output_root)
+    cpu_modes = {j['command'][j['command'].index('--device')+1] == 'cpu' for j in jobs}
+    if len(cpu_modes) != 1:
+        raise ValueError('Do not mix CPU and GPU jobs in one study.')
+    cpu = True in cpu_modes
     for job in jobs:
         for path in job['inputs'].values():
             if not Path(path).exists():
@@ -75,7 +81,9 @@ def run_jobs(jobs, *, repo, output_root):
         if len(distance_modes) != 1:
             raise ValueError('Do not mix gate types in one study.')
         manifest = dict(status='launching', threshold=None if True in distance_modes else THRESHOLD, jobs=jobs,
-                        formal_episodes=300, training=False)
+                        formal_episodes=300, training=False,
+                        execution_device='cpu' if cpu else 'cuda',
+                        max_parallel_jobs=1 if cpu else len(jobs))
         write_json_atomic(manifest_path, manifest)
         children = []
         try:
@@ -90,15 +98,24 @@ def run_jobs(jobs, *, repo, output_root):
                                              stdin=subprocess.DEVNULL, start_new_session=True)
                 job['pid'] = child.pid
                 children.append((job, child))
+                manifest['status'] = 'running'
                 write_json_atomic(manifest_path, manifest)
+                if cpu:
+                    job['exit_code'] = child.wait()
+                    write_json_atomic(manifest_path, manifest)
+                    if job['exit_code'] != 0:
+                        manifest['status'] = 'failed'
+                        raise RuntimeError('CPU evaluation failed; remaining jobs not launched.')
             manifest['status'] = 'running'
             write_json_atomic(manifest_path, manifest)
             for job, child in children:
-                job['exit_code'] = child.wait()
+                if not cpu:
+                    job['exit_code'] = child.wait()
                 write_json_atomic(manifest_path, manifest)
             manifest['status'] = 'evaluated' if all(j['exit_code'] == 0 for j in jobs) else 'failed'
         except BaseException:
-            manifest['status'] = 'interrupted_or_launch_failed; inspect recorded PIDs before recovery'
+            if manifest['status'] != 'failed':
+                manifest['status'] = 'interrupted_or_launch_failed; inspect recorded PIDs before recovery'
             write_json_atomic(manifest_path, manifest)
             raise
         write_json_atomic(manifest_path, manifest)

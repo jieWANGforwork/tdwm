@@ -233,3 +233,34 @@ def test_run_refuses_cpu_only_without_creating_outputs(tmp_path, monkeypatch):
                        run_name='__main__')
     assert e.value.code == 2
     assert not (tmp_path/'new').exists()
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_explicit_cpu_runs_serially_and_stops_on_failure(tmp_path, monkeypatch, fail):
+    matrix = study.build_jobs(repo=tmp_path/'repo', runs_root=tmp_path/'history',
+        output_root=tmp_path/'cpu', dataset=tmp_path/'data', lewm_checkpoint=tmp_path/'f',
+        python='python', devices=None, local_distance_limit=10., distance_only=True,
+        execution_device='cpu')
+    for j in matrix:
+        assert j['command'][j['command'].index('--device')+1] == 'cpu'
+        assert j['gpu'] == ''
+        for name in j['inputs'].values():
+            p = Path(name); p.parent.mkdir(parents=True,exist_ok=True); p.touch()
+    started, waited = [], []
+    class Child:
+        def __init__(self, command, **kwargs):
+            assert len(started) == len(waited), 'CPU jobs unexpectedly overlap'
+            started.append(command)
+            self.pid = len(started)
+        def wait(self):
+            waited.append(self.pid)
+            return 1 if fail else 0
+    monkeypatch.setattr(study.subprocess,'Popen',Child)
+    if fail:
+        with pytest.raises(RuntimeError,match='CPU evaluation failed'):
+            study.run_jobs(matrix,repo=tmp_path/'repo',output_root=tmp_path/'cpu')
+        assert len(started) == 1
+    else:
+        m=study.run_jobs(matrix,repo=tmp_path/'repo',output_root=tmp_path/'cpu')
+        assert m['status']=='evaluated' and m['execution_device']=='cpu'
+        assert m['max_parallel_jobs']==1 and len(started)==6 and len(waited)==6

@@ -39,6 +39,20 @@ does not count as a formal evaluation. No training or F-only rerun is needed.
 A small latent distance still cannot prove
 one-action reachability or exclude an obstacle between the endpoints.
 
+### Explicit CPU fallback
+
+When the user requests formal CPU execution, pass `--execution-device cpu`
+to the study preview/run command; `--devices` is not required.
+This uses the same six 50-pair selections, CEM samples/iterations/elites,
+checkpoints, rendering backend and execution budgets. Only the compute device
+and job concurrency change: one full evaluation at a time, one numerical
+thread per process, stopping the queue if a job fails. CUDA remains the default,
+with all six concurrent and its existing availability guard intact.
+Use a separate output directory for CPU runs; never overwrite GPU runs or claim
+bitwise equality across devices. The unchanged evaluator still creates 50
+environment instances, so low-memory CPU hosts may be unable to load a full
+job. Do not silently reduce episode count or CEM settings to make it fit.
+
 The revised rule stops a leaf if and only if:
 
 `D <= d_local AND eta >= tau`.
