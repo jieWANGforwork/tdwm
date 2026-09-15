@@ -81,3 +81,39 @@ def test_rolling_policy_carries_distance_limit_to_solver():
                                    dynamics_coefficient=0.1, efficiency_threshold=0.8,
                                    local_distance_limit=2.5)
     assert policy.solver_kwargs['local_distance_limit'] == 2.5
+
+
+def test_cli_forwards_independent_distance_only(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(module, 'evaluate_effplan', lambda **kw: seen.update(kw) or {})
+    monkeypatch.setattr(sys, 'argv', arguments()+[
+        '--adaptive-rolling', '--adaptive-distance-only',
+        '--adaptive-local-distance-limit', '2.5'])
+    runpy.run_path(str(Path(__file__).resolve().parents[2]/'scripts/evaluate_effplan.py'),
+                   run_name='__main__')
+    assert seen['adaptive_distance_only']
+    assert seen['adaptive_efficiency_threshold'] is None
+    assert seen['adaptive_local_distance_limit'] == 2.5
+
+
+@pytest.mark.parametrize('flags', [
+    [], ['--adaptive-rolling'],
+    ['--adaptive-rolling', '--adaptive-local-distance-limit', '2', '--adaptive-efficiency-threshold', '.8'],
+    ['--adaptive-one-shot', '--adaptive-local-distance-limit', '2'],
+])
+def test_distance_only_rejects_ambiguous_or_missing_options(monkeypatch, flags):
+    monkeypatch.setattr(sys, 'argv', arguments()+['--adaptive-distance-only']+flags)
+    with pytest.raises(SystemExit):
+        runpy.run_path(str(Path(__file__).resolve().parents[2]/'scripts/evaluate_effplan.py'),
+                       run_name='__main__')
+
+
+def test_rolling_policy_carries_distance_only():
+    from tdwm.adapters.effplan_adaptive_rolling import AdaptiveRollingPolicy
+    policy = AdaptiveRollingPolicy(model=None, planner=None, safety=None, budget=50,
+                                   device='cpu', search_iterations=(1,1), epsilon=1e-6,
+                                   dynamics_coefficient=0.1, distance_only=True,
+                                   local_distance_limit=2.5)
+    assert policy.solver_kwargs['distance_only'] is True
+    assert policy.solver_kwargs['local_distance_limit'] == 2.5
+    assert policy.solver_kwargs.get('efficiency_threshold') is None

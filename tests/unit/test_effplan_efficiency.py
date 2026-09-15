@@ -19,7 +19,8 @@ class MidpointP(nn.Module):
         return torch.zeros_like(candidate)
 
 
-def run(value, *, threshold=0.8, cap=8, planner=None, goal_value=8., local_distance_limit=None):
+def run(value, *, threshold=0.8, cap=8, planner=None, goal_value=8., local_distance_limit=None,
+        distance_only=False):
     start = torch.zeros(1, 192, requires_grad=True)
     goal = start.detach().clone(); goal[0, 0] = goal_value
     p = MidpointP() if planner is None else planner
@@ -28,6 +29,7 @@ def run(value, *, threshold=0.8, cap=8, planner=None, goal_value=8., local_dista
         safety=PlannerSafetyRuntime(PlannerSafety(10, 5)),
         efficiency_threshold=threshold,
         local_distance_limit=local_distance_limit,
+        distance_only=distance_only,
     )
     assert not path.requires_grad and start.grad is None
     return path, record, p
@@ -169,3 +171,36 @@ def test_floor_does_not_hide_large_absolute_distance():
 def test_invalid_local_distance_limit(limit):
     with pytest.raises(ValueError, match='local_distance_limit'):
         run(distance, local_distance_limit=limit)
+
+
+@pytest.mark.parametrize('goal_value', [0., 1e-6, 1., 2.])
+def test_distance_only_short_leaf_does_not_call_value(goal_value):
+    def forbidden(*args):
+        raise AssertionError("Distance stopping must not query G/V")
+    _, r, p = run(forbidden, threshold=None, goal_value=goal_value,
+                  local_distance_limit=2., distance_only=True)
+    assert p.calls == 0 and r['criterion'] == 'local_distance'
+    leaf = r['split_attempts'][0]
+    assert leaf['efficiency'] is None and leaf['predicted_work'] is None
+    assert leaf['stop_reason'] == ('degenerate_segment' if goal_value <= 1e-6
+                                  else 'distance_sufficient')
+
+
+def test_distance_only_splits_long_path_but_ignores_low_efficiency():
+    path, r, p = run(lambda a,b: 100*distance(a,b), threshold=None,
+                     local_distance_limit=2., distance_only=True)
+    assert p.calls == 3 and path.shape == (1, 5, 192)
+    assert all(x['stop_reason'] == 'distance_sufficient'
+               for x in r['split_attempts'] if not x['accepted'])
+
+
+def test_distance_only_budget_cap_is_not_distance_sufficient():
+    _, r, _ = run(distance, threshold=None, cap=2,
+                  local_distance_limit=2., distance_only=True)
+    assert r['action_blocks'] == 2 and r['stop_reason'] == 'budget_cap'
+
+
+@pytest.mark.parametrize('threshold,limit', [(0.8,2.), (None,None), (None,0.)])
+def test_distance_only_requires_limit_and_no_efficiency_threshold(threshold,limit):
+    with pytest.raises(ValueError):
+        run(distance, threshold=threshold, local_distance_limit=limit, distance_only=True)

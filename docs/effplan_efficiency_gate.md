@@ -1,5 +1,37 @@
 # Local-distance AND efficiency recursion
 
+## Additional distance-only ablation
+
+Keep the combined rule below unchanged. The separate option
+`--adaptive-distance-only --adaptive-rolling --adaptive-local-distance-limit <P95>`
+(method EffPlan) stops each generated segment solely when
+`D(u,v) = ||v-u||_2 <= d_local`. Do not supply an efficiency threshold.
+Use the same training-only P95 calibration artifact as the combined rule:
+`d_local = quantile_0.95({||E(o[t+5])-E(o[t])||_2})`, episodes 0..7999,
+all valid within-episode t. These are adjacent **big-action boundary states**,
+five primitive steps apart, not adjacent raw frames. P95 is not a mean:
+95% of those training transition distances are at or below this cutoff.
+Do not select between the mean and P95 using evaluation outcomes.
+
+For every current leaf, including newly generated child segments:
+first stop if D <= 1e-6 (degenerate, not environment success);
+otherwise stop if D <= d_local; otherwise ask the existing P for a
+finite, nonduplicate midpoint and check both children independently.
+Retain existing remaining-budget cap and duplicate guard. Neither guard
+certifies short distance or reachability. Efficiency and predicted work are null
+in stopping records: G/V is not called to decide whether to stop.
+G/V still supplies the unchanged P generation/refinement feedback; this is
+**distance-only stopping**, not removing G/V from the entire planner.
+Keep subsequent CEM/F tracking, real-environment success checking, and
+replanning until success or total budget unchanged.
+
+Record score mode `adaptive_local_distance_only_rolling_v1` and criterion
+`local_distance` separately. Do not overwrite or mix with the running combined
+study, and do not use its six-job launcher/analyzer for this new score mode.
+This adds a runnable option, not a claim that formal distance-only evaluations
+have been launched or completed. A small latent distance still cannot prove
+one-action reachability or exclude an obstacle between the endpoints.
+
 The revised rule stops a leaf if and only if:
 
 `D <= d_local AND eta >= tau`.

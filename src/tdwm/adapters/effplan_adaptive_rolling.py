@@ -43,7 +43,10 @@ class AdaptiveRollingPolicy:
 
     def __init__(self, *, model, planner, safety, budget, device,
                  search_iterations, epsilon, dynamics_coefficient,
-                 process=None, transform=None, efficiency_threshold=None, local_distance_limit=None):
+                 process=None, transform=None, efficiency_threshold=None, local_distance_limit=None,
+                 distance_only=False):
+        from tdwm.methods.effplan_efficiency import validate_distance_only
+        validate_distance_only(distance_only, local_distance_limit, efficiency_threshold)
         if budget < 5 or budget % 5:
             raise ValueError("Episode budget must be whole five-step blocks.")
         self.budget = budget
@@ -57,10 +60,12 @@ class AdaptiveRollingPolicy:
             validate_efficiency_threshold(efficiency_threshold)
             self.solver_kwargs["efficiency_threshold"] = efficiency_threshold
         self.process, self.transform = process or {}, transform or {}
+        if distance_only:
+            self.solver_kwargs["distance_only"] = True
         if local_distance_limit is not None:
             from tdwm.methods.effplan_efficiency import validate_local_distance_limit
             validate_local_distance_limit(local_distance_limit)
-            if efficiency_threshold is None:
+            if efficiency_threshold is None and not distance_only:
                 raise ValueError("Distance gate requires an efficiency threshold.")
             self.solver_kwargs["local_distance_limit"] = local_distance_limit
 
