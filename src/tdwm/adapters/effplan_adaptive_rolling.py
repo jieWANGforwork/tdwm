@@ -43,7 +43,7 @@ class AdaptiveRollingPolicy:
 
     def __init__(self, *, model, planner, safety, budget, device,
                  search_iterations, epsilon, dynamics_coefficient,
-                 process=None, transform=None):
+                 process=None, transform=None, efficiency_threshold=None):
         if budget < 5 or budget % 5:
             raise ValueError("Episode budget must be whole five-step blocks.")
         self.budget = budget
@@ -52,6 +52,10 @@ class AdaptiveRollingPolicy:
             search_iterations=tuple(search_iterations), epsilon=epsilon,
             dynamics_coefficient=dynamics_coefficient, minimum_relative_gain=1e-6,
         )
+        if efficiency_threshold is not None:
+            from tdwm.methods.effplan_efficiency import validate_efficiency_threshold
+            validate_efficiency_threshold(efficiency_threshold)
+            self.solver_kwargs["efficiency_threshold"] = efficiency_threshold
         self.process, self.transform = process or {}, transform or {}
 
     def set_env(self, env):

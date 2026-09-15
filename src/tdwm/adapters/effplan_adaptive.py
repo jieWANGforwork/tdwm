@@ -97,7 +97,11 @@ class AdaptiveEffPlanSolver:
                  search_iterations=(3, 3, 3, 3, 3, 3, 4, 4, 4),
                  candidates=300, elites=30, seed=42, device="cuda",
                  epsilon=1e-6, minimum_relative_gain=1e-6,
-                 dynamics_coefficient=0.1):
+                 dynamics_coefficient=0.1, efficiency_threshold=None):
+        if efficiency_threshold is not None:
+            from tdwm.methods.effplan_efficiency import validate_efficiency_threshold
+            validate_efficiency_threshold(efficiency_threshold)
+        self.efficiency_threshold = efficiency_threshold
         if budget % 5 or budget < 5 or len(search_iterations) < 1:
             raise ValueError("Budget must contain whole five-primitive-action blocks.")
         if any(p.requires_grad for p in planner.parameters()):
@@ -142,11 +146,17 @@ class AdaptiveEffPlanSolver:
                 started = time.monotonic()
                 sample = {k: v[i:i+1] for k, v in info.items() if torch.is_tensor(v)}
                 safety = PlannerSafetyRuntime(self.safety)
-                nodes, record = adaptive_state_path(
+                path_builder = adaptive_state_path
+                criterion_kwargs = dict(minimum_relative_gain=self.minimum_relative_gain)
+                if self.efficiency_threshold is not None:
+                    from tdwm.methods.effplan_efficiency import efficiency_state_path
+                    path_builder = efficiency_state_path
+                    criterion_kwargs = dict(efficiency_threshold=self.efficiency_threshold)
+                nodes, record = path_builder(
                     self.planner, sample["emb"][:, -1].clone(),
                     sample["goal_emb"][:, -1].clone(), self.model.target_critic,
                     max_blocks=self.horizon, safety=safety, epsilon=self.epsilon,
-                    minimum_relative_gain=self.minimum_relative_gain,
+                    **criterion_kwargs,
                 )
                 initial_nodes = nodes.clone()
                 horizon = nodes.shape[1]-1

@@ -63,20 +63,29 @@ class Counter(gym.Env):
         return np.zeros(1, np.float32), 0., False, False, {}
 
 
-def test_public_cem_once_all_networks_frozen(monkeypatch):
+@pytest.mark.parametrize('efficiency_threshold', [None, 0.8])
+def test_public_cem_once_all_networks_frozen(monkeypatch, efficiency_threshold):
     import tdwm.adapters.effplan_adaptive as module
     world = ToyWorld()
     eff = EffModel(g_hidden_dim=8, v_hidden_dim=8).eval().requires_grad_(False)
     p = StatePlanner(hidden_dim=8).eval().requires_grad_(False)
     limits = PlanExecutionLimits(50); limits.wrap(Counter()).reset()
     def fixed(*args, **kwargs):
+        if efficiency_threshold is not None:
+            assert kwargs['efficiency_threshold'] == efficiency_threshold
+            assert 'minimum_relative_gain' not in kwargs
         states = torch.zeros(1, 4, 192); states[:, -1] = 1
         return states, dict(intermediate_nodes=2, action_blocks=3)
-    monkeypatch.setattr(module, 'adaptive_state_path', fixed)
+    if efficiency_threshold is None:
+        monkeypatch.setattr(module, 'adaptive_state_path', fixed)
+    else:
+        import tdwm.methods.effplan_efficiency as efficiency_module
+        monkeypatch.setattr(efficiency_module, 'efficiency_state_path', fixed)
     solver = AdaptiveEffPlanSolver(
         model=AdaptiveTrackingCost(world, eff, target=True), planner=p,
         limits=limits, safety=PlannerSafety(10, 5), budget=50,
         search_iterations=(1, 1), candidates=4, elites=2, device='cpu',
+        efficiency_threshold=efficiency_threshold,
     )
     solver.configure(action_space=gym.spaces.Box(-1, 1, (1, 5), np.float32), n_envs=1,
                      config=swm.PlanConfig(10, 10, action_block=5))

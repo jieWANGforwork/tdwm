@@ -192,6 +192,7 @@ def evaluate_effplan(
     adaptive_one_shot: bool = False,
     adaptive_rolling: bool = False,
     offset_window: bool = False,
+    adaptive_efficiency_threshold: float | None = None,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
@@ -203,6 +204,11 @@ def evaluate_effplan(
         raise ValueError("Adaptive one-shot is an independent EffPlan evaluation mode.")
     if offset_window and (method != "EffPlan" or adaptive_one_shot or adaptive_rolling):
         raise ValueError("Offset-window requires fixed EffPlan, without adaptive flags.")
+    if adaptive_efficiency_threshold is not None:
+        if not adaptive_rolling or adaptive_one_shot or method != "EffPlan" or offset_window:
+            raise ValueError("Efficiency threshold requires only --method EffPlan --adaptive-rolling.")
+        from tdwm.methods.effplan_efficiency import validate_efficiency_threshold
+        validate_efficiency_threshold(adaptive_efficiency_threshold)
     ev = config["evaluation"]
     # A predeclared sweep over Eff scoring modes, not post-hoc tuning: every
     # override is recorded verbatim in the manifest next to the locked config.
@@ -385,6 +391,7 @@ def evaluate_effplan(
                 search_iterations=tuple(ev["effplan_search_iterations"]),
                 epsilon=ev["epsilon"], minimum_relative_gain=1e-6,
                 dynamics_coefficient=ev["effplan_dynamics_coefficient"],
+                efficiency_threshold=adaptive_efficiency_threshold,
             )
             score = "adaptive_work_gain_one_shot_v1"
             extra_rerolls = len(ev["effplan_search_iterations"])-1
@@ -406,6 +413,17 @@ def evaluate_effplan(
                     note="Adaptive execution windows; same total environment budget, not matched compute.",
                 )
                 overrides["adaptive_rolling"] = settings
+                if adaptive_efficiency_threshold is not None:
+                    score = "adaptive_local_efficiency_rolling_v1"
+                    settings.pop("minimum_relative_gain")
+                    settings.update(
+                        criterion="local_efficiency",
+                        efficiency_threshold=adaptive_efficiency_threshold,
+                        efficiency="distance / (max(predicted_work, distance) + epsilon)",
+                        stop_when="efficiency >= threshold",
+                        left_right="independent; breadth-first scheduling, not competing scores",
+                        reject_work_increase=False,
+                    )
         elif method == "EffPlan":
             if offset_window:
                 from tdwm.adapters.effplan_adaptive import AdaptiveTrackingCost
@@ -486,6 +504,7 @@ def evaluate_effplan(
                 device=device, search_iterations=tuple(ev["effplan_search_iterations"]),
                 epsilon=ev["epsilon"], dynamics_coefficient=ev["effplan_dynamics_coefficient"],
                 process={"action": processor}, transform={"pixels": transform, "goal": transform},
+                efficiency_threshold=adaptive_efficiency_threshold,
             )
         manifest = {
             "format": "tdwm-eff-formal-evaluation-v1",

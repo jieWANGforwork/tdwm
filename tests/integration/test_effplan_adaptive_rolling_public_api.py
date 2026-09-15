@@ -32,8 +32,10 @@ class Counter(gym.Env):
 class DecisionStub:
     observed_starts = []
     budgets = []
+    expected_threshold = None
 
     def __init__(self, *, budget, **kwargs):
+        assert kwargs.get('efficiency_threshold') == self.expected_threshold
         self.budget = budget
         self.solve_calls = 0
         self.records, self.artifacts = [], []
@@ -59,14 +61,17 @@ class DecisionStub:
 
 @pytest.mark.parametrize('budget', [50, 100, 200])
 @pytest.mark.parametrize('success_at', [None, 3, 13])
-def test_roll_until_total_budget_or_success_using_real_updated_start(monkeypatch, budget, success_at):
+@pytest.mark.parametrize('efficiency_threshold', [None, 0.8])
+def test_roll_until_total_budget_or_success_using_real_updated_start(monkeypatch, budget, success_at, efficiency_threshold):
     monkeypatch.setattr(module, 'AdaptiveDecisionSolver', DecisionStub)
+    monkeypatch.setattr(DecisionStub, 'expected_threshold', efficiency_threshold)
     DecisionStub.observed_starts = []; DecisionStub.budgets = []
     name = 'TDWMAdaptiveRollingCounter-v0'
     if name not in gym.registry: gym.register(name, entry_point=Counter)
     policy = AdaptiveRollingPolicy(
         model=None, planner=None, safety=None, budget=budget, device='cpu',
         search_iterations=(1,), epsilon=1e-6, dynamics_coefficient=0.1,
+        efficiency_threshold=efficiency_threshold,
     )
     world = swm.World(name, num_envs=1, max_episode_steps=budget, add_pixels=False,
                       success_at=success_at)

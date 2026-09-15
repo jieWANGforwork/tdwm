@@ -44,6 +44,10 @@ def main():
     evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
     evaluate.add_argument(
+        "--adaptive-efficiency-threshold", type=float,
+        help="Explicit 0<tau<1: independently stop each leaf when efficiency>=tau; requires --adaptive-rolling.",
+    )
+    evaluate.add_argument(
         "--offset-window", action="store_true",
         help="Independent fixed EffPlan window: O50 H10/RH10, O100 H20/RH20; total budget unchanged.",
     )
@@ -56,6 +60,9 @@ def main():
         help="Adaptive node/action count each round; replan from real state until total budget.",
     )
     args = parser.parse_args()
+    if args.command == "evaluate" and args.adaptive_efficiency_threshold is not None:
+        if not args.adaptive_rolling or args.adaptive_one_shot or args.offset_window or args.method != "EffPlan":
+            parser.error("--adaptive-efficiency-threshold requires only --method EffPlan --adaptive-rolling")
     if args.command == "prepare-selections":
         result = prepare_eff_selections(
             config_path=args.config,
@@ -81,6 +88,7 @@ def main():
             adaptive_one_shot=args.adaptive_one_shot,
             adaptive_rolling=args.adaptive_rolling,
             offset_window=args.offset_window,
+            adaptive_efficiency_threshold=args.adaptive_efficiency_threshold,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
