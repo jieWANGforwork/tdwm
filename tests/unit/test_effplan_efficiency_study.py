@@ -107,7 +107,8 @@ def test_paired_new_lost_not_just_aggregate():
         study.paired_comparison(current, reference)
 
 
-def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_path):
+@pytest.mark.parametrize('local_limit', [None, 10.])
+def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_path, local_limit):
     import json
     import torch
     root, output = tmp_path/'history', tmp_path/'new'
@@ -117,6 +118,16 @@ def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_
             r['score_mode'] = study.SCORE
             m = dict(status='complete', checkpoints={k: {'sha256': k} for k in ('LeWM', 'Eff', 'EffPlan')},
                      protocol_overrides={'adaptive_rolling': {'efficiency_threshold': 0.8}})
+            if local_limit is not None:
+                r['score_mode'] = study.DISTANCE_SCORE
+                m['protocol_overrides']['adaptive_rolling']['local_distance_limit'] = local_limit
+                for rr in records:
+                    for record in rr:
+                        record.update(criterion='local_distance_efficiency',
+                                      local_distance_limit=local_limit)
+                        for gate in record['split_attempts']:
+                            gate.update(local_distance_limit=local_limit,
+                                        stop_reason='distance_and_efficiency_sufficient')
             paths = [output/v/f'O{o}', root/'sparse_v_compare_20260914'/v/'eval/EffPlan'/f'O{o}',
                      root/'adaptive_rolling_20260915'/v/f'O{o}']
             for p in paths:
@@ -134,4 +145,30 @@ def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_
     assert (output/'study_analysis.json').exists()
     text = (output/'study_analysis.md').read_text()
     assert 'Original V O100 | Extra-work V O25' in text
-    assert 'floor-driven stops' in text and 'adaptive_efficiency_080' in text
+    name = 'adaptive_efficiency_080' if local_limit is None else 'adaptive_distance_efficiency_080'
+    assert 'floor-driven stops' in text and name in text
+
+
+def test_distance_study_passes_explicit_scale_to_all_jobs(tmp_path):
+    matrix = study.build_jobs(repo=tmp_path/'repo', runs_root=tmp_path/'historical',
+                              output_root=tmp_path/'new', dataset=tmp_path/'data',
+                              lewm_checkpoint=tmp_path/'f', python='python',
+                              devices=['0'], local_distance_limit=2.5)
+    for job in matrix:
+        command = job['command']
+        assert command[command.index('--adaptive-local-distance-limit')+1] == '2.5'
+
+
+def test_distance_audit_rejects_high_efficiency_but_long_stop():
+    result, records = fixture_result()
+    for rr in records:
+        for r in rr:
+            r.update(criterion='local_distance_efficiency', local_distance_limit=10.)
+            for g in r['split_attempts']:
+                g.update(local_distance_limit=10., stop_reason='distance_and_efficiency_sufficient')
+    study.audit_records(result, records, offset=25, local_distance_limit=10.)
+    bad = copy.deepcopy(records)
+    bad[0][0]['split_attempts'][0].update(distance=11., predicted_work=11.,
+                                         efficiency=11/(11+1e-6))
+    with pytest.raises(ValueError, match='distance/efficiency'):
+        study.audit_records(result, bad, offset=25, local_distance_limit=10.)

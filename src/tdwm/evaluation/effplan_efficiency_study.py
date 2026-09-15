@@ -13,13 +13,18 @@ THRESHOLD = 0.8
 VARIANTS = ('old_v', 'extra_work_v')
 OFFSETS = (25, 50, 100)
 SCORE = 'adaptive_local_efficiency_rolling_v1'
+DISTANCE_SCORE = 'adaptive_local_distance_efficiency_rolling_v2'
 
 
-def build_jobs(*, repo, runs_root, output_root, dataset, lewm_checkpoint, python, devices):
+def build_jobs(*, repo, runs_root, output_root, dataset, lewm_checkpoint, python, devices,
+               local_distance_limit=None):
     """Build exactly six jobs; paths/devices are explicit, never discovered by mutation."""
     repo, runs_root, output_root = (Path(p).expanduser().resolve() for p in (repo, runs_root, output_root))
     if not devices or any(not str(d).isdigit() for d in devices):
         raise ValueError('Provide explicit numeric GPU indices.')
+    if local_distance_limit is not None:
+        from tdwm.methods.effplan_efficiency import validate_local_distance_limit
+        validate_local_distance_limit(local_distance_limit)
     jobs = []
     for variant in VARIANTS:
         old = variant == 'old_v'
@@ -39,6 +44,8 @@ def build_jobs(*, repo, runs_root, output_root, dataset, lewm_checkpoint, python
                 command.extend(['--'+key.replace('_', '-'), str(value)])
             command.extend(['--output-dir', str(output), '--device', 'cuda', '--method', 'EffPlan',
                             '--adaptive-rolling', '--adaptive-efficiency-threshold', str(THRESHOLD)])
+            if local_distance_limit is not None:
+                command.extend(['--adaptive-local-distance-limit', str(local_distance_limit)])
             jobs.append(dict(variant=variant, offset=offset, output=str(output),
                              log=str(output.with_suffix('.log')), command=command,
                              gpu=str(devices[len(jobs) % len(devices)]),
@@ -106,7 +113,7 @@ def paired_comparison(current, reference):
     return dict(new=new, lost=lost, delta_pp=2*(new-lost))
 
 
-def audit_records(result, rounds, *, offset):
+def audit_records(result, rounds, *, offset, local_distance_limit=None):
     episodes = result['episode_results']
     if len(episodes) != 50 or len(rounds) != 50 or not result['formal']:
         raise ValueError('Formal result incomplete.')
@@ -129,28 +136,43 @@ def audit_records(result, rounds, *, offset):
                 raise ValueError('Decision budget or node/action count mismatch.')
             if j+1 < len(decisions) and r['executed_primitive_steps'] != 5*n:
                 raise ValueError('Replanned before consuming full decision.')
-            if r['criterion'] != 'local_efficiency' or r['efficiency_threshold'] != THRESHOLD:
+            criterion = 'local_efficiency' if local_distance_limit is None else 'local_distance_efficiency'
+            if r['criterion'] != criterion or r['efficiency_threshold'] != THRESHOLD:
                 raise ValueError('Unexpected gate/threshold.')
+            if local_distance_limit is not None and r.get('local_distance_limit') != local_distance_limit:
+                raise ValueError('Distance limit changed between decisions.')
             position += r['executed_primitive_steps']
             blocks.append(n)
             for gate in r['split_attempts']:
                 if gate['threshold'] != THRESHOLD:
                     raise ValueError('Gate threshold changed.')
+                if local_distance_limit is not None and gate.get('local_distance_limit') != local_distance_limit:
+                    raise ValueError('Distance limit changed between segments.')
                 eta = gate['efficiency']
+                if eta is None:
+                    if (gate['distance'] > 1e-6 or gate['stop_reason'] != 'degenerate_segment'
+                            or gate['accepted']):
+                        raise ValueError('Invalid degenerate endpoint guard.')
                 if eta is not None:
                     expected = gate['distance']/(gate['predicted_work']+1e-6)
                     if not math.isfinite(eta) or not math.isclose(eta, expected, rel_tol=1e-5, abs_tol=1e-7):
                         raise ValueError('Efficiency calculation mismatch.')
                     gate_checks.append(gate)
-                    if gate['accepted'] and eta >= THRESHOLD:
-                        raise ValueError('Split an efficient leaf.')
-                    if gate['stop_reason'] == 'efficiency_sufficient' and eta < THRESHOLD:
-                        raise ValueError('Stopped inefficient leaf without a guard.')
+                    short = local_distance_limit is None or gate['distance'] <= local_distance_limit
+                    if gate['accepted'] and eta >= THRESHOLD and short:
+                        raise ValueError('Split a leaf satisfying both stopping conditions.')
+                    sufficient = ('efficiency_sufficient' if local_distance_limit is None
+                                  else 'distance_and_efficiency_sufficient')
+                    if gate['stop_reason'] == sufficient and not (eta >= THRESHOLD and short):
+                        raise ValueError('Stopped leaf without satisfying the distance/efficiency gate.')
+                    if local_distance_limit is not None and gate['stop_reason'] == 'efficiency_sufficient':
+                        raise ValueError('Used the legacy efficiency-only stop in a distance-gated run.')
                 if not gate['accepted']:
                     stops[gate['stop_reason']] += 1
         if position != episode['executed_primitive_steps'] or (not episode['success'] and position != 2*offset):
             raise ValueError('Failure ended before budget or execution count differs.')
-    floor_stops = sum(g['raw_work'] < g['distance'] and g['stop_reason'] == 'efficiency_sufficient' for g in gate_checks)
+    floor_stops = sum(g['raw_work'] < g['distance'] and g['stop_reason'] in (
+        'efficiency_sufficient', 'distance_and_efficiency_sufficient') for g in gate_checks)
     return dict(successes=success, success_rate=2*success, decisions=len(blocks),
                 mean_blocks=sum(blocks)/len(blocks), max_blocks=max(blocks),
                 single_block_decisions=sum(n == 1 for n in blocks), stop_reasons=dict(stops),
@@ -164,18 +186,30 @@ def analyze_study(*, runs_root, output_root):
     root, output = Path(runs_root), Path(output_root)
     summary = {}
     table = {'fixed_5_blocks': [], 'adaptive_work_gain': [], 'adaptive_efficiency_080': []}
+    study_gate = None
     for variant in VARIANTS:
         for offset in OFFSETS:
             p = output/variant/f'O{offset}'
             r, m = load(p/'result.json'), load(p/'protocol_manifest.json')
-            if m['status'] != 'complete' or r['score_mode'] != SCORE:
+            if m['status'] != 'complete' or r['score_mode'] not in (SCORE, DISTANCE_SCORE):
                 raise ValueError('Wrong mode or incomplete evaluation.')
+            local_limit = m['protocol_overrides']['adaptive_rolling'].get('local_distance_limit')
+            if (r['score_mode'] == DISTANCE_SCORE) != (local_limit is not None):
+                raise ValueError('Distance score/manifest mismatch.')
+            if local_limit is not None:
+                from tdwm.methods.effplan_efficiency import validate_local_distance_limit
+                validate_local_distance_limit(local_limit)
+            current_gate = (r['score_mode'], local_limit)
+            if study_gate is not None and current_gate != study_gate:
+                raise ValueError('Do not mix distance scales or gate versions in one study.')
+            study_gate = current_gate
             if m['protocol_overrides']['adaptive_rolling']['efficiency_threshold'] != THRESHOLD:
                 raise ValueError('Threshold differs from predeclared study.')
             if r['episode_results'] != load(p/'episode_results.json')['episodes']:
                 raise ValueError('Episode sidecar differs.')
             rounds = load(p/'adaptive_planning.json')['episodes']
-            audit = audit_records(r, rounds, offset=offset)
+            audit = audit_records(r, rounds, offset=offset, local_distance_limit=local_limit)
+            audit.update(score_mode=r['score_mode'], local_distance_limit=local_limit)
             refs = {'fixed_5_blocks': root/'sparse_v_compare_20260914'/variant/'eval/EffPlan'/f'O{offset}',
                     'adaptive_work_gain': root/'adaptive_rolling_20260915'/variant/f'O{offset}'}
             for key, rp in refs.items():
@@ -204,7 +238,10 @@ def analyze_study(*, runs_root, output_root):
                         raise ValueError('Goal changed between decisions.')
             table['adaptive_efficiency_080'].append(r['success_rate'])
             summary[f'{variant}/O{offset}'] = audit
-    lines = ['# Efficiency-gated adaptive EffPlan, tau=0.8', '',
+    if study_gate[0] == DISTANCE_SCORE:
+        table['adaptive_distance_efficiency_080'] = table.pop('adaptive_efficiency_080')
+    lines = ['# Efficiency-gated adaptive EffPlan, tau=0.8',
+             f'Local distance limit: {study_gate[1]} (None = historical efficiency-only rule).', '',
              '| Method | Original V O25 | Original V O50 | Original V O100 | Extra-work V O25 | Extra-work V O50 | Extra-work V O100 |',
              '|---|---:|---:|---:|---:|---:|---:|']
     for name, rates in table.items():

@@ -19,7 +19,7 @@ class MidpointP(nn.Module):
         return torch.zeros_like(candidate)
 
 
-def run(value, *, threshold=0.8, cap=8, planner=None, goal_value=8.):
+def run(value, *, threshold=0.8, cap=8, planner=None, goal_value=8., local_distance_limit=None):
     start = torch.zeros(1, 192, requires_grad=True)
     goal = start.detach().clone(); goal[0, 0] = goal_value
     p = MidpointP() if planner is None else planner
@@ -27,6 +27,7 @@ def run(value, *, threshold=0.8, cap=8, planner=None, goal_value=8.):
         p, start, goal, value, max_blocks=cap,
         safety=PlannerSafetyRuntime(PlannerSafety(10, 5)),
         efficiency_threshold=threshold,
+        local_distance_limit=local_distance_limit,
     )
     assert not path.requires_grad and start.grad is None
     return path, record, p
@@ -121,3 +122,50 @@ def test_invalid_threshold(threshold):
 def test_nonfinite_v_fails_instead_of_silently_stopping():
     with pytest.raises(FloatingPointError):
         run(lambda a,b: distance(a,b)*math.nan)
+
+
+def test_long_efficient_path_is_split_until_both_conditions_hold():
+    path, r, p = run(distance, local_distance_limit=2.)
+    assert r['criterion'] == 'local_distance_efficiency'
+    assert r['local_distance_limit'] == 2
+    assert path.shape == (1, 5, 192) and p.calls == 3
+    assert r['split_attempts'][0]['accepted']
+    for leaf in r['split_attempts']:
+        if not leaf['accepted']:
+            assert leaf['distance'] <= 2 and leaf['efficiency'] >= 0.8
+            assert leaf['stop_reason'] == 'distance_and_efficiency_sufficient'
+
+
+def test_short_inefficient_path_still_splits_and_budget_is_not_a_success():
+    _, r, p = run(lambda a,b: 2*distance(a,b), goal_value=1., local_distance_limit=2., cap=3)
+    assert p.calls == 2 and r['action_blocks'] == 3
+    assert r['stop_reason'] == 'budget_cap'
+
+
+def test_short_efficient_path_stops_and_distance_equality_is_inclusive():
+    _, r, p = run(distance, goal_value=2., local_distance_limit=2.)
+    assert p.calls == 0
+    assert r['split_attempts'][0]['stop_reason'] == 'distance_and_efficiency_sufficient'
+
+
+@pytest.mark.parametrize('goal_value', [0., 0.5e-6, 1e-6])
+def test_distance_gate_degenerate_boundary_skips_v_and_p(goal_value):
+    def forbidden(*args):
+        raise AssertionError('Coincident endpoints must not evaluate efficiency.')
+    path, r, p = run(forbidden, goal_value=goal_value, local_distance_limit=2.)
+    assert p.calls == 0 and torch.isfinite(path).all()
+    leaf = r['split_attempts'][0]
+    assert leaf['stop_reason'] == 'degenerate_segment'
+    assert leaf['efficiency'] is None and leaf['predicted_work'] is None
+
+
+def test_floor_does_not_hide_large_absolute_distance():
+    _, r, _ = run(lambda a,b: distance(a,b)*0, local_distance_limit=2.)
+    assert r['split_attempts'][0]['efficiency'] > 0.8
+    assert r['split_attempts'][0]['accepted']
+
+
+@pytest.mark.parametrize('limit', [0, -1, math.inf, math.nan, True])
+def test_invalid_local_distance_limit(limit):
+    with pytest.raises(ValueError, match='local_distance_limit'):
+        run(distance, local_distance_limit=limit)

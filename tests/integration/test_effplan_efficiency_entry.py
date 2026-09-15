@@ -53,3 +53,31 @@ def test_api_rejects_invalid_efficiency_mode_before_data_load(monkeypatch, kwarg
     args.update(kwargs)
     with pytest.raises(ValueError):
         module.evaluate_effplan(**args)
+
+
+def test_cli_forwards_both_distance_and_efficiency(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(module, 'evaluate_effplan', lambda **kw: seen.update(kw) or {})
+    monkeypatch.setattr(sys, 'argv', arguments()+[
+        '--adaptive-rolling', '--adaptive-efficiency-threshold', '0.8',
+        '--adaptive-local-distance-limit', '2.5'])
+    runpy.run_path(str(Path(__file__).resolve().parents[2]/'scripts/evaluate_effplan.py'),
+                   run_name='__main__')
+    assert seen['adaptive_local_distance_limit'] == 2.5
+    assert seen['adaptive_efficiency_threshold'] == 0.8
+
+
+def test_distance_flag_without_efficiency_is_rejected(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', arguments()+['--adaptive-local-distance-limit', '2.5'])
+    with pytest.raises(SystemExit):
+        runpy.run_path(str(Path(__file__).resolve().parents[2]/'scripts/evaluate_effplan.py'),
+                       run_name='__main__')
+
+
+def test_rolling_policy_carries_distance_limit_to_solver():
+    from tdwm.adapters.effplan_adaptive_rolling import AdaptiveRollingPolicy
+    policy = AdaptiveRollingPolicy(model=None, planner=None, safety=None, budget=50,
+                                   device='cpu', search_iterations=(1,1), epsilon=1e-6,
+                                   dynamics_coefficient=0.1, efficiency_threshold=0.8,
+                                   local_distance_limit=2.5)
+    assert policy.solver_kwargs['local_distance_limit'] == 2.5

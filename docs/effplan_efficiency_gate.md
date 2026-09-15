@@ -1,4 +1,31 @@
-# Independent local-efficiency recursion
+# Local-distance AND efficiency recursion
+
+The revised rule stops a leaf if and only if:
+
+`D <= d_local AND eta >= tau`.
+
+Before computing eta or calling G/V, handle `D <= epsilon` separately: stop
+subdivision with `degenerate_segment`, keep eta undefined (null), and never turn
+this numerical guard into real-environment success. The existing epsilon is 1e-6.
+The raw distance limit must be explicit, finite and positive; it has no default.
+It can be calibrated from a predeclared quantile of training-only
+`||z[t+5]-z[t]||_2` (one big A). No quantile or value is selected here, and no
+test-pair outcomes may be used to select it.
+
+New study preview/run requires `--local-distance-limit <d_local>`. It forwards
+`--adaptive-local-distance-limit <d_local>` to every evaluation. Score mode is
+`adaptive_local_distance_efficiency_rolling_v2`; the manifest and every leaf
+record the distance limit. Efficiency tau remains 0.8 in the study launcher.
+A far but straight path must continue subdividing; a close but inefficient path
+also continues. Both children are checked independently. A budget-cap or duplicate
+guard is NOT evidence that either stopping condition is satisfied.
+
+The evaluator retains the no-distance, efficiency-only option solely to reproduce
+historical runs; the study CLI no longer silently launches that old option.
+The analyzer supports both versions but rejects mixing versions/scales in a study.
+No server jobs, checkpoints or training settings are changed by this revision.
+
+## Historical efficiency-only option and shared mechanics
 
 Opt-in only. Existing fixed-25, offset-window and work-gain adaptive evaluations
 retain their defaults and numerical paths. No training or checkpoint changes.

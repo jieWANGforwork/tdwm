@@ -15,15 +15,23 @@ def validate_efficiency_threshold(threshold):
         raise ValueError("efficiency_threshold must be finite and strictly between 0 and 1.")
 
 
-def efficiency_state_path(planner, start, goal, value, *, max_blocks, safety,
-                          efficiency_threshold, epsilon=1e-6):
-    """Split each leaf iff D/(max(predicted work,D)+epsilon) < threshold.
+def validate_local_distance_limit(limit):
+    if isinstance(limit, bool) or not math.isfinite(limit) or limit <= 0:
+        raise ValueError("local_distance_limit must be finite and positive.")
 
+
+def efficiency_state_path(planner, start, goal, value, *, max_blocks, safety,
+                          efficiency_threshold, epsilon=1e-6, local_distance_limit=None):
+    """Stop only if local distance and efficiency pass, or endpoints coincide.
+
+    None retains the historical efficiency-only gate for reproducibility.
     Breadth-first order is only scheduling, never a left/right score comparison.
     A valid midpoint is retained regardless of the sum of its children's work.
     This is an efficiency heuristic, NOT a one-action reachability certificate.
     """
     validate_efficiency_threshold(efficiency_threshold)
+    if local_distance_limit is not None:
+        validate_local_distance_limit(local_distance_limit)
     if start.shape != (1, 192) or goal.shape != start.shape:
         raise ValueError("Efficiency subdivision needs one 192D start/goal pair.")
     if type(max_blocks) is not int or max_blocks < 1:
@@ -45,6 +53,9 @@ def efficiency_state_path(planner, start, goal, value, *, max_blocks, safety,
             require_finite(distance, "efficiency segment distance")
             record = dict(branch=branch, depth=len(branch), distance=float(distance),
                           accepted=False, threshold=float(efficiency_threshold))
+            if local_distance_limit is not None:
+                record.update(local_distance_limit=float(local_distance_limit),
+                              distance_sufficient=float(distance) <= local_distance_limit)
             records.append(record)
             if float(distance) <= epsilon:
                 record.update(efficiency=None, predicted_work=None,
@@ -59,8 +70,10 @@ def efficiency_state_path(planner, start, goal, value, *, max_blocks, safety,
             require_finite(efficiency, "segment efficiency")
             record.update(predicted_work=float(work), raw_work=float(raw.item()),
                           efficiency=float(efficiency))
-            if float(efficiency) >= efficiency_threshold:
-                record["stop_reason"] = "efficiency_sufficient"
+            if (float(efficiency) >= efficiency_threshold
+                    and (local_distance_limit is None or float(distance) <= local_distance_limit)):
+                record["stop_reason"] = ("efficiency_sufficient" if local_distance_limit is None
+                                         else "distance_and_efficiency_sufficient")
                 continue
             if accepted == max_blocks-1:
                 record["stop_reason"] = "budget_cap"
@@ -83,8 +96,12 @@ def efficiency_state_path(planner, start, goal, value, *, max_blocks, safety,
             pending.extend(((left, midpoint, branch+"L"), (midpoint, right, branch+"R")))
         path = torch.stack(nodes, dim=1).detach()
     reasons = {r["stop_reason"] for r in records if not r["accepted"]}
-    return path, dict(
-        criterion="local_efficiency", efficiency_threshold=float(efficiency_threshold),
+    summary = dict(
+        criterion="local_efficiency" if local_distance_limit is None else "local_distance_efficiency",
+        efficiency_threshold=float(efficiency_threshold),
         intermediate_nodes=accepted, action_blocks=accepted+1, max_action_blocks=max_blocks,
         split_attempts=records, stop_reason="budget_cap" if "budget_cap" in reasons else "leaves_stopped",
     )
+    if local_distance_limit is not None:
+        summary["local_distance_limit"] = float(local_distance_limit)
+    return path, summary

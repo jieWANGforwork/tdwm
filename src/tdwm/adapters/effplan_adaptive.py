@@ -97,7 +97,13 @@ class AdaptiveEffPlanSolver:
                  search_iterations=(3, 3, 3, 3, 3, 3, 4, 4, 4),
                  candidates=300, elites=30, seed=42, device="cuda",
                  epsilon=1e-6, minimum_relative_gain=1e-6,
-                 dynamics_coefficient=0.1, efficiency_threshold=None):
+                 dynamics_coefficient=0.1, efficiency_threshold=None, local_distance_limit=None):
+        if local_distance_limit is not None:
+            from tdwm.methods.effplan_efficiency import validate_local_distance_limit
+            validate_local_distance_limit(local_distance_limit)
+            if efficiency_threshold is None:
+                raise ValueError("Distance gate requires an efficiency threshold.")
+        self.local_distance_limit = local_distance_limit
         if efficiency_threshold is not None:
             from tdwm.methods.effplan_efficiency import validate_efficiency_threshold
             validate_efficiency_threshold(efficiency_threshold)
@@ -151,7 +157,8 @@ class AdaptiveEffPlanSolver:
                 if self.efficiency_threshold is not None:
                     from tdwm.methods.effplan_efficiency import efficiency_state_path
                     path_builder = efficiency_state_path
-                    criterion_kwargs = dict(efficiency_threshold=self.efficiency_threshold)
+                    criterion_kwargs = dict(efficiency_threshold=self.efficiency_threshold,
+                                            local_distance_limit=self.local_distance_limit)
                 nodes, record = path_builder(
                     self.planner, sample["emb"][:, -1].clone(),
                     sample["goal_emb"][:, -1].clone(), self.model.target_critic,

@@ -193,9 +193,15 @@ def evaluate_effplan(
     adaptive_rolling: bool = False,
     offset_window: bool = False,
     adaptive_efficiency_threshold: float | None = None,
+    adaptive_local_distance_limit: float | None = None,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
+    if adaptive_local_distance_limit is not None:
+        from tdwm.methods.effplan_efficiency import validate_local_distance_limit
+        validate_local_distance_limit(adaptive_local_distance_limit)
+        if adaptive_efficiency_threshold is None:
+            raise ValueError("Distance gate requires an efficiency threshold.")
     if method not in {"F-only", "Eff", "EffPlan"}:
         raise ValueError("Unknown predeclared method.")
     if adaptive_one_shot and adaptive_rolling:
@@ -392,6 +398,7 @@ def evaluate_effplan(
                 epsilon=ev["epsilon"], minimum_relative_gain=1e-6,
                 dynamics_coefficient=ev["effplan_dynamics_coefficient"],
                 efficiency_threshold=adaptive_efficiency_threshold,
+                local_distance_limit=adaptive_local_distance_limit,
             )
             score = "adaptive_work_gain_one_shot_v1"
             extra_rerolls = len(ev["effplan_search_iterations"])-1
@@ -424,6 +431,15 @@ def evaluate_effplan(
                         left_right="independent; breadth-first scheduling, not competing scores",
                         reject_work_increase=False,
                     )
+                    if adaptive_local_distance_limit is not None:
+                        score = "adaptive_local_distance_efficiency_rolling_v2"
+                        settings.update(
+                            criterion="local_distance_efficiency",
+                            local_distance_limit=adaptive_local_distance_limit,
+                            stop_when="distance <= local_distance_limit AND efficiency >= threshold",
+                            degenerate_stop="distance <= epsilon; stop before G/V, efficiency undefined",
+                            degenerate_is_environment_success=False,
+                        )
         elif method == "EffPlan":
             if offset_window:
                 from tdwm.adapters.effplan_adaptive import AdaptiveTrackingCost
@@ -505,6 +521,7 @@ def evaluate_effplan(
                 epsilon=ev["epsilon"], dynamics_coefficient=ev["effplan_dynamics_coefficient"],
                 process={"action": processor}, transform={"pixels": transform, "goal": transform},
                 efficiency_threshold=adaptive_efficiency_threshold,
+                local_distance_limit=adaptive_local_distance_limit,
             )
         manifest = {
             "format": "tdwm-eff-formal-evaluation-v1",

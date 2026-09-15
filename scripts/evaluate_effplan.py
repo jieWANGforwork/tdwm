@@ -44,6 +44,10 @@ def main():
     evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
     evaluate.add_argument(
+        "--adaptive-local-distance-limit", type=float,
+        help="Stop subdivision only when D <= this explicit scale AND efficiency >= threshold.",
+    )
+    evaluate.add_argument(
         "--adaptive-efficiency-threshold", type=float,
         help="Explicit 0<tau<1: independently stop each leaf when efficiency>=tau; requires --adaptive-rolling.",
     )
@@ -60,6 +64,9 @@ def main():
         help="Adaptive node/action count each round; replan from real state until total budget.",
     )
     args = parser.parse_args()
+    if (args.command == "evaluate" and args.adaptive_local_distance_limit is not None
+            and args.adaptive_efficiency_threshold is None):
+        parser.error("--adaptive-local-distance-limit requires --adaptive-efficiency-threshold")
     if args.command == "evaluate" and args.adaptive_efficiency_threshold is not None:
         if not args.adaptive_rolling or args.adaptive_one_shot or args.offset_window or args.method != "EffPlan":
             parser.error("--adaptive-efficiency-threshold requires only --method EffPlan --adaptive-rolling")
@@ -89,6 +96,7 @@ def main():
             adaptive_rolling=args.adaptive_rolling,
             offset_window=args.offset_window,
             adaptive_efficiency_threshold=args.adaptive_efficiency_threshold,
+            adaptive_local_distance_limit=args.adaptive_local_distance_limit,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
