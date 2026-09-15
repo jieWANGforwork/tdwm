@@ -25,6 +25,13 @@ historical runs; the study CLI no longer silently launches that old option.
 The analyzer supports both versions but rejects mixing versions/scales in a study.
 No server jobs, checkpoints or training settings are changed by this revision.
 
+The user has now fixed calibration to P95. Run
+`scripts/calibrate_effplan_distance.py --latent-store <store> --config <config> --output <new-json>`
+before launching the study. It validates the frozen store hashes, uses episodes
+0..7999 only, computes all within-episode pairs separated by exactly 5 primitive
+steps, and saves the exact linear-interpolated P95 and provenance. Pass its
+`local_distance_limit` unchanged to both V variants; do not recalibrate on outcomes.
+
 ## Historical efficiency-only option and shared mechanics
 
 Opt-in only. Existing fixed-25, offset-window and work-gain adaptive evaluations
