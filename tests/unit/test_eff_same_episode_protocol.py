@@ -37,10 +37,29 @@ def test_same_episode_ablation_changes_only_the_two_requested_settings():
     assert settings.include_goal_boundary is False
 
 
-@pytest.mark.parametrize("seed", [3072, 50, 42])
-def test_no_cross_episode_goals_and_ten_block_backup(seed):
-    config = load_eff_protocol(
+def test_paired_extra_work_changes_only_v_parameterization():
+    original = load_eff_protocol(
         CONFIGS / "effplan_cube_same_episode_v1.yaml", stage="eff_training"
+    )
+    extra = load_eff_protocol(
+        CONFIGS / "effplan_cube_same_episode_extra_work_v1.yaml", stage="eff_training"
+    )
+    expected = deepcopy(original)
+    expected["eff_training"]["settings"]["v_parameterization"] = "extra_work"
+    assert extra == expected
+    settings = EffRunSettings(**extra["eff_training"]["settings"])
+    assert settings.v_parameterization == "extra_work"
+    assert settings.total_updates == 127960
+
+
+@pytest.mark.parametrize("config_name", [
+    "effplan_cube_same_episode_v1.yaml",
+    "effplan_cube_same_episode_extra_work_v1.yaml",
+])
+@pytest.mark.parametrize("seed", [3072, 50, 42])
+def test_no_cross_episode_goals_and_ten_block_backup(seed, config_name):
+    config = load_eff_protocol(
+        CONFIGS / config_name, stage="eff_training"
     )
     settings = EffRunSettings(**config["eff_training"]["settings"])
     ids = np.repeat(np.arange(4), 201)
@@ -72,7 +91,8 @@ def test_no_cross_episode_goals_and_ten_block_backup(seed):
     assert len(inputs["path_ids"]) == settings.batch_size
     assert torch.equal(inputs["state"], batch.state)
     assert torch.equal(inputs["goal"], batch.goal)
-    model = EffModel(g_hidden_dim=8, v_hidden_dim=8)
+    model = EffModel(g_hidden_dim=8, v_hidden_dim=8,
+                     v_parameterization=settings.v_parameterization)
     losses = eff_loss(model, **inputs)
     assert len(losses.critic_target) == settings.batch_size
     torch.testing.assert_close(losses.critic_target[direct], batch.observed_cost[direct])
