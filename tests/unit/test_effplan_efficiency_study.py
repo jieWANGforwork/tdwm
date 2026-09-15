@@ -107,8 +107,8 @@ def test_paired_new_lost_not_just_aggregate():
         study.paired_comparison(current, reference)
 
 
-@pytest.mark.parametrize('local_limit', [None, 10.])
-def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_path, local_limit):
+@pytest.mark.parametrize('local_limit,distance_only', [(None,False), (10.,False), (10.,True)])
+def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_path, local_limit, distance_only):
     import json
     import torch
     root, output = tmp_path/'history', tmp_path/'new'
@@ -128,6 +128,15 @@ def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_
                         for gate in record['split_attempts']:
                             gate.update(local_distance_limit=local_limit,
                                         stop_reason='distance_and_efficiency_sufficient')
+            if distance_only:
+                r['score_mode'] = study.DISTANCE_ONLY_SCORE
+                m['protocol_overrides']['adaptive_rolling']['efficiency_threshold'] = None
+                for rr in records:
+                    for record in rr:
+                        record.update(criterion='local_distance', efficiency_threshold=None)
+                        for gate in record['split_attempts']:
+                            gate.update(threshold=None, efficiency=None, predicted_work=None,
+                                        stop_reason='distance_sufficient')
             paths = [output/v/f'O{o}', root/'sparse_v_compare_20260914'/v/'eval/EffPlan'/f'O{o}',
                      root/'adaptive_rolling_20260915'/v/f'O{o}']
             for p in paths:
@@ -146,6 +155,8 @@ def test_complete_analysis_writes_six_paired_reports_and_checks_saved_plans(tmp_
     text = (output/'study_analysis.md').read_text()
     assert 'Original V O100 | Extra-work V O25' in text
     name = 'adaptive_efficiency_080' if local_limit is None else 'adaptive_distance_efficiency_080'
+    if distance_only:
+        name = 'adaptive_distance_only'
     assert 'floor-driven stops' in text and name in text
 
 
@@ -172,3 +183,53 @@ def test_distance_audit_rejects_high_efficiency_but_long_stop():
                                          efficiency=11/(11+1e-6))
     with pytest.raises(ValueError, match='distance/efficiency'):
         study.audit_records(result, bad, offset=25, local_distance_limit=10.)
+
+
+def test_distance_only_launcher_has_six_isolated_jobs_without_efficiency_flag(tmp_path):
+    matrix = study.build_jobs(repo=tmp_path/'repo', runs_root=tmp_path/'history',
+                              output_root=tmp_path/'new', dataset=tmp_path/'data',
+                              lewm_checkpoint=tmp_path/'f', python='python',
+                              devices=['0','1'], local_distance_limit=10., distance_only=True)
+    assert len(matrix) == 6 and len({j['output'] for j in matrix}) == 6
+    for j in matrix:
+        assert '--adaptive-distance-only' in j['command']
+        assert '--adaptive-efficiency-threshold' not in j['command']
+    assert not (tmp_path/'new').exists()
+
+
+@pytest.mark.parametrize('fault', ['none', 'long_stop', 'short_split', 'eta', 'degenerate'])
+def test_distance_only_auditor_checks_boundaries(fault):
+    result, records = fixture_result()
+    for rr in records:
+        for r in rr:
+            r.update(criterion='local_distance', efficiency_threshold=None, local_distance_limit=10.)
+            for g in r['split_attempts']:
+                g.update(threshold=None, efficiency=None, predicted_work=None,
+                         local_distance_limit=10., stop_reason='distance_sufficient')
+    g=records[0][0]['split_attempts'][0]
+    if fault == 'long_stop': g['distance']=11.
+    if fault == 'short_split': g.update(accepted=True,stop_reason=None)
+    if fault == 'eta': g['efficiency']=.9
+    if fault == 'degenerate': g['distance']=0.
+    if fault == 'none':
+        assert study.audit_records(result,records,offset=25,local_distance_limit=10.,
+                                   distance_only=True)['geometric_floor_stop_count'] == 0
+    else:
+        with pytest.raises(ValueError):
+            study.audit_records(result,records,offset=25,local_distance_limit=10.,distance_only=True)
+
+
+def test_run_refuses_cpu_only_without_creating_outputs(tmp_path, monkeypatch):
+    import runpy
+    import sys
+    import torch
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    monkeypatch.setattr(sys, 'argv', ['run_effplan_efficiency_study.py', 'run',
+        '--runs-root', str(tmp_path/'history'), '--output-root', str(tmp_path/'new'),
+        '--dataset', 'unused', '--lewm-checkpoint', 'unused', '--devices', '0',
+        '--local-distance-limit', '10', '--distance-only'])
+    with pytest.raises(SystemExit) as e:
+        runpy.run_path(str(Path(__file__).resolve().parents[2]/'scripts/run_effplan_efficiency_study.py'),
+                       run_name='__main__')
+    assert e.value.code == 2
+    assert not (tmp_path/'new').exists()

@@ -26,10 +26,17 @@ Keep subsequent CEM/F tracking, real-environment success checking, and
 replanning until success or total budget unchanged.
 
 Record score mode `adaptive_local_distance_only_rolling_v1` and criterion
-`local_distance` separately. Do not overwrite or mix with the running combined
-study, and do not use its six-job launcher/analyzer for this new score mode.
-This adds a runnable option, not a claim that formal distance-only evaluations
-have been launched or completed. A small latent distance still cannot prove
+`local_distance` separately. Do not overwrite or mix with the combined study.
+The shared study launcher now supports `--distance-only` for preview/run;
+its analyzer detects and validates this separate score mode. Supply the same
+calibrated `--local-distance-limit`, existing model/data arguments, explicit
+GPU indices, and a new output directory. Preview performs no GPU work.
+Run launches all six evaluations concurrently and refuses existing output/logs
+or a previously launched study. It automatically audits completed results and
+writes one comparison table, original V O25/O50/O100 followed by extra-work V
+O25/O50/O100. Do not launch until CUDA GPUs are available; CPU-only preparation
+does not count as a formal evaluation. No training or F-only rerun is needed.
+A small latent distance still cannot prove
 one-action reachability or exclude an obstacle between the endpoints.
 
 The revised rule stops a leaf if and only if:
