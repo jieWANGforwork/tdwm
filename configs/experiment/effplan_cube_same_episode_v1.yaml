@@ -1,4 +1,4 @@
-# Same-episode G/V ablation: change only cross_episode_probability from 0.3 to 0.
+# Same-episode G/V retraining: cross-episode targets and appended zero labels off.
 # Total-work V, 10-block TD backup, seed and optimizer budget are unchanged.
 # Train G/V from scratch in a new output directory; historical runs are immutable.
 schema_version: 1
@@ -46,7 +46,7 @@ eff_training:
     critic_coefficient: 1.0
     ema_rate: 0.005
     gradient_clip: 1.0
-    include_goal_boundary: true
+    include_goal_boundary: false
     backup_primitive_steps: 50
     cross_episode_probability: 0.0
     epsilon: 0.000001
