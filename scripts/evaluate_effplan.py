@@ -13,6 +13,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     select = sub.add_parser("prepare-selections")
+    select.add_argument("--selection-protocol", choices=["episode_heldout", "baseline_fixed"],
+                        default="episode_heldout")
     for name in ("config", "terminal-metadata", "output-dir"):
         select.add_argument("--" + name, required=True)
     evaluate = sub.add_parser("evaluate")
@@ -84,6 +86,7 @@ def main():
             config_path=args.config,
             terminal_metadata=args.terminal_metadata,
             output_dir=args.output_dir,
+            selection_protocol=args.selection_protocol,
         )
     else:
         result = evaluate_effplan(

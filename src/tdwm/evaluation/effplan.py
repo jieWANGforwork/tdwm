@@ -46,8 +46,11 @@ def validated_planner_safety(checkpoint_settings: dict, config: dict):
 
 def prepare_eff_selections(
     *, config_path: str | Path, terminal_metadata: str | Path, output_dir: str | Path,
+    selection_protocol: str = "episode_heldout",
 ) -> dict:
-    """Seal pairs before choosing a model; never inherit all-episode C pairs."""
+    """Seal an explicit pair protocol; historical heldout behavior is unchanged."""
+    if selection_protocol not in {"episode_heldout", "baseline_fixed"}:
+        raise ValueError("Unknown Eff selection protocol.")
     config = load_eff_protocol(config_path)
     metadata = json.loads((Path(terminal_metadata) / "manifest.json").read_text())
     if metadata["dataset_source_sha256"] != config["source"]["dataset_source_sha256"]:
@@ -74,6 +77,21 @@ def prepare_eff_selections(
             "held_out_episode_range": [8000, 10000],
             "pairs": pairs,
         }
+        if selection_protocol == "baseline_fixed":
+            from tdwm.evaluation.eff_action import select_eff_action_episodes
+            baseline_pairs, provenance = select_eff_action_episodes(
+                np.asarray(metadata["episode_lengths"]),
+                dict(protocol="historical_cg3", goal_offset=offset, episodes=50, seed=42),
+            )
+            selection = {
+                "format": "tdwm-eff-baseline-selection-v1",
+                "goal_offset": offset, "planning_seed": 42, "episodes": 50,
+                "dataset_source_sha256": metadata["dataset_source_sha256"],
+                "pairs": _jsonable(baseline_pairs),
+                "baseline_pairs_sha256": provenance["selection_sha256"],
+                "selection_protocol": "baseline_fixed",
+                "episode_range_half_open": [0, 10000],
+            }
         path = output / f"o{offset}_selection.json"
         if path.exists():
             if json.loads(path.read_text()) != selection:
@@ -87,6 +105,23 @@ def prepare_eff_selections(
 
 
 def validate_selection(selection: dict, *, source_sha256: str) -> None:
+    if selection.get("format") == "tdwm-eff-baseline-selection-v1":
+        from tdwm.evaluation.eff_action import select_eff_action_episodes
+        if (selection.get("dataset_source_sha256") != source_sha256
+                or selection.get("planning_seed") != 42
+                or selection.get("episodes") != 50
+                or selection.get("selection_protocol") != "baseline_fixed"
+                or selection.get("episode_range_half_open") != [0, 10000]):
+            raise ValueError("Baseline selection metadata mismatch.")
+        pairs, provenance = select_eff_action_episodes(
+            np.full(10000, 201),
+            dict(protocol="historical_cg3", goal_offset=selection.get("goal_offset"),
+                 episodes=50, seed=42),
+        )
+        if (selection.get("pairs") != _jsonable(pairs)
+                or selection.get("baseline_pairs_sha256") != provenance["selection_sha256"]):
+            raise ValueError("Baseline selection does not match the exact fixed pairs.")
+        return
     if selection.get("format") != "tdwm-eff-selection-v1":
         raise ValueError("Unrecognized Eff paired selection artifact.")
     if selection.get("goal_offset") not in (25, 50, 100):
@@ -562,6 +597,8 @@ def evaluate_effplan(
             "dataset": provenance,
             "selection": selection,
             "selection_sha256": sha256_file(selection_path),
+            "baseline_pairs_sha256": selection.get("baseline_pairs_sha256"),
+            "evaluation_pair_protocol": selection.get("selection_protocol", "episode_heldout"),
             "paired_protocol": {
                 "goal_offset": offset,
                 "episodes": 50,
