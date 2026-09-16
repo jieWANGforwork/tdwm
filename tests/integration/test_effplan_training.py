@@ -14,6 +14,7 @@ from tdwm.adapters.effplan import EffPlanTrackingCost
 from tdwm.methods.eff import EffModel
 from tdwm.methods.effplan import StatePlanner
 from tdwm.training.eff_data import EffEpisodeReplay, sample_planner_paths
+from tdwm.training.effplan_discrete_data import DiscretePlannerSampler
 from tdwm.training.effplan_runtime import (
     EffPlanTrainer,
     EffPlanTrainSettings,
@@ -129,6 +130,55 @@ def test_generation_updates_only_p_and_never_calls_f_or_cem():
         for key, value in t.eff.state_dict().items()
     )
     assert all(p.grad is None for p in t.eff.parameters())
+
+
+@pytest.mark.parametrize("phase", ["generation", "refinement"])
+def test_discrete_long_spans_keep_four_nodes_five_actions_and_resume(tmp_path, phase):
+    store = SimpleNamespace(
+        latents=np.random.default_rng(17).normal(size=(402, 192)).astype(np.float32),
+        episode_ids=np.repeat([0, 1], 201),
+    )
+    source = EffEpisodeReplay(store, episodes=(0, 1), stride=5,
+                              terminal_at_state=np.zeros(402, bool))
+    sampler = DiscretePlannerSampler(source)
+    b = sampler.sample(batch_size=12, rng=np.random.default_rng(0))
+    assert set(b.action_spans.tolist()) == {5, 10, 20}
+    t, world = trainer(phase)
+    t.identity["planner_sampling"] = sampler.identity
+    frozen = copy.deepcopy(t.eff.state_dict())
+    initial = copy.deepcopy(t.planner.state_dict())
+    horizons = []
+    original = world.rollout
+    def record(info, actions, history_size):
+        horizons.append(actions.shape[-2])
+        return original(info, actions, history_size)
+    world.rollout = record
+    metrics = t.step(b)
+    assert metrics["global_step"] == 1 and np.isfinite(metrics["total_loss"])
+    assert any(not torch.equal(v, initial[k]) for k, v in t.planner.state_dict().items())
+    assert all(torch.equal(v, frozen[k]) for k, v in t.eff.state_dict().items())
+    assert all(p.grad is None for p in t.eff.parameters()) and world.fixed.grad is None
+    assert set(horizons) == ({5} if phase == "refinement" else set())
+    checkpoint = tmp_path / "discrete.pt"
+    t.save(checkpoint, epoch=0)
+    restored, _ = trainer(phase)
+    restored.identity["planner_sampling"] = sampler.identity
+    restored.eff.load_state_dict(t.eff.state_dict())
+    restored.resume(checkpoint)
+    assert torch.equal(sampler.sample(batch_size=12, rng=t.rng).rows,
+                       sampler.sample(batch_size=12, rng=restored.rng).rows)
+    assert t.step(b)["total_loss"] == pytest.approx(restored.step(b)["total_loss"], rel=1e-6)
+    for k, v in t.planner.state_dict().items():
+        torch.testing.assert_close(v, restored.planner.state_dict()[k], rtol=0, atol=0)
+    legacy, _ = trainer(phase)
+    with pytest.raises(ValueError, match="identity"):
+        legacy.resume(checkpoint)
+    deployed, payload = load_effplan_planner(
+        checkpoint, expected_identity=t.identity, expected_global_step=1,
+        expected_phase=phase, device="cpu",
+    )
+    assert isinstance(deployed, StatePlanner)
+    assert payload["identity"]["planner_sampling"] == sampler.identity
 
 
 @pytest.mark.parametrize("supervision", ["final", "mean_rounds"])

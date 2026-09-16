@@ -71,6 +71,13 @@ def test_settings_keep_search_budget_ordered_and_hashable():
     assert isinstance(refinement, EffPlanTrainSettings)
 
 
+def test_discrete_config_only_changes_p_sampling_not_frozen_v_or_evaluation():
+    base = eff_protocol.load_eff_protocol("configs/experiment/effplan_cube_stable_p_sparse_v1.yaml")
+    new = eff_protocol.load_eff_protocol("configs/experiment/effplan_fixed4_discrete_5_10_20_old_v.yaml")
+    assert new["data"].pop("planner_action_spans") == [5, 10, 20]
+    assert new == base
+
+
 def test_safety_config_and_deployment_cannot_silently_disagree():
     from tdwm.evaluation.effplan import validated_planner_safety
     from tdwm.training.effplan_runtime import planner_settings_payload

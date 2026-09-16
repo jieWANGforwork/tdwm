@@ -5,9 +5,11 @@ runs, validation uses its own RNG, and each epoch leaves an atomic checkpoint
 plus a manifest. Nothing here chooses scientific values; the configuration must
 already be locked.
 
-Phase-two supervision uses same-episode paths only: every labelled path is six
-real states at primitive stride five (25 primitive steps) and cross-episode
-goals are never given midpoint labels.
+Phase-two supervision uses same-episode paths only. By default labels are six
+consecutive stride-five states. The opt-in discrete-span configuration instead
+selects six evenly positioned real states from 5/10/20-block source paths.
+In both cases P and CEM retain five output segments; cross-episode goals never
+receive midpoint labels.
 """
 
 from __future__ import annotations
@@ -26,6 +28,9 @@ import torch
 from tdwm.adapters.effplan import EffPlanTrackingCost
 from tdwm.methods.effplan import StatePlanner
 from tdwm.training.eff_data import sample_planner_paths
+from tdwm.training.effplan_discrete_data import (
+    DiscretePlannerSampler, discrete_sampling_identity,
+)
 from tdwm.training.eff_protocol import load_eff_protocol, load_eff_replays
 from tdwm.training.eff_run import (
     EffRunSettings,
@@ -121,6 +126,10 @@ def run_effplan_training(
     stage_config = config[stage]
     run = stage_config["run"]
     settings = _planner_settings(stage_config)
+    action_spans = config["data"].get("planner_action_spans")
+    sampling_identity = (
+        None if action_spans is None else discrete_sampling_identity(action_spans)
+    )
     if settings.phase != phase:
         raise ValueError("Configuration phase does not match the requested phase.")
     total_updates = int(run["epochs"]) * int(run["updates_per_epoch"])
@@ -174,6 +183,12 @@ def run_effplan_training(
         "validation_episodes": validation_replay.episodes.tolist(),
         "state_stride": train_replay.stride,
     }
+    if sampling_identity is not None:
+        identity["planner_sampling"] = sampling_identity
+    samplers = {} if action_spans is None else {
+        id(replay): DiscretePlannerSampler(replay, action_spans)
+        for replay in (train_replay, validation_replay)
+    }
 
     tracking_model = None
     if phase == "refinement":
@@ -214,6 +229,12 @@ def run_effplan_training(
             weights = torch.load(init_from, map_location="cpu", weights_only=False)
             if weights.get("planner_hidden_dim") != planner.hidden_dim:
                 raise ValueError("Phase handoff planner width differs.")
+            if sampling_identity is not None:
+                parent_source = weights.get("identity", {}).get("source", {})
+                if any(parent_source.get(key) != identity["source"][key] for key in (
+                    "eff_checkpoint_sha256", "lewm_checkpoint_sha256",
+                )):
+                    raise ValueError("Discrete-span P initialization must use the same frozen G/V/F.")
             planner.load_state_dict(weights["planner"], strict=True)
         if resume is not None:
             trainer.resume(resume)
@@ -276,6 +297,8 @@ def run_effplan_training(
             write_json_atomic(manifest_path, manifest)
 
         def draw(replay, rng):
+            if samplers:
+                return samplers[id(replay)].sample(batch_size=int(run["batch_size"]), rng=rng)
             return sample_planner_paths(
                 replay,
                 batch_size=int(run["batch_size"]),
@@ -305,7 +328,13 @@ def run_effplan_training(
                         )
                         for group in trainer.optimizer.param_groups:
                             group["lr"] = lr
-                    metrics = trainer.step(draw(train_replay, trainer.rng),)
+                    sampled_batch = draw(train_replay, trainer.rng)
+                    metrics = trainer.step(sampled_batch)
+                    if sampling_identity is not None:
+                        for span in action_spans:
+                            metrics[f"sampling/span_{span}_count"] = int(
+                                sampled_batch.action_spans.eq(span).sum()
+                            )
                     metrics["event"] = "training"
                     metrics["learning_rate"] = trainer.optimizer.param_groups[0]["lr"]
                     log.write(json.dumps(metrics, allow_nan=False) + "\n")
