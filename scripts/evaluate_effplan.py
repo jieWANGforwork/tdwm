@@ -46,6 +46,10 @@ def main():
     evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
     evaluate.add_argument(
+        "--action-robustness-config",
+        help="Opt-in JSON action perturbation risk settings; fixed H5/RH5 EffPlan only.",
+    )
+    evaluate.add_argument(
         "--adaptive-distance-only", action="store_true",
         help="Independent distance-only stopping; requires a local distance limit, no efficiency threshold.",
     )
@@ -110,6 +114,7 @@ def main():
             adaptive_efficiency_threshold=args.adaptive_efficiency_threshold,
             adaptive_local_distance_limit=args.adaptive_local_distance_limit,
             adaptive_distance_only=args.adaptive_distance_only,
+            action_robustness_path=args.action_robustness_config,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

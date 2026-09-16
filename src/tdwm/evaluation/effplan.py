@@ -230,9 +230,20 @@ def evaluate_effplan(
     adaptive_efficiency_threshold: float | None = None,
     adaptive_local_distance_limit: float | None = None,
     adaptive_distance_only: bool = False,
+    action_robustness_path: str | Path | None = None,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
+    robustness = None
+    if action_robustness_path is not None:
+        from tdwm.adapters.effplan_robust import load_action_robustness
+        robustness = load_action_robustness(action_robustness_path)
+        if (method != "EffPlan" or adaptive_one_shot or adaptive_rolling or offset_window
+                or adaptive_efficiency_threshold is not None
+                or adaptive_local_distance_limit is not None or adaptive_distance_only):
+            raise ValueError("Action robustness requires fixed H5/RH5 EffPlan only.")
+        if robustness.shortlist is not None and robustness.shortlist < 30:
+            raise ValueError("Robustness shortlist must retain at least all 30 CEM elites.")
     from tdwm.methods.effplan_efficiency import validate_distance_only
     validate_distance_only(adaptive_distance_only, adaptive_local_distance_limit,
                            adaptive_efficiency_threshold)
@@ -499,7 +510,13 @@ def evaluate_effplan(
                             degenerate_is_environment_success=False,
                         )
         elif method == "EffPlan":
-            if offset_window:
+            if robustness is not None:
+                from tdwm.adapters.effplan_robust import RobustEffPlanTrackingCost
+                model = RobustEffPlanTrackingCost(
+                    world_model, eff, target=ev["target_readout"], robustness=robustness,
+                )
+                overrides["action_robustness"] = robustness.manifest()
+            elif offset_window:
                 from tdwm.adapters.effplan_adaptive import AdaptiveTrackingCost
                 model = AdaptiveTrackingCost(world_model, eff, target=ev["target_readout"])
             else:
@@ -524,6 +541,8 @@ def evaluate_effplan(
                 planning_horizon=horizon,
             )
             score = "state_path_tracking_offset_window" if offset_window else "state_path_tracking"
+            if robustness is not None:
+                score = "state_path_tracking_action_robustness_v1"
             extra_rerolls = len(allocation) - 1
         else:
             if method == "Eff" and ev["eff_score"] not in EFF_SCORE_MODES:
@@ -633,6 +652,15 @@ def evaluate_effplan(
             },
         }
         manifest_path = output / "protocol_manifest.json"
+        if robustness is not None:
+            perturbations = (9000 * robustness.samples * min(robustness.shortlist or 300, 300) // 300
+                             if robustness.active else 0)
+            manifest["compute"].update(
+                perturbation_rollouts_per_decision=perturbations,
+                total_f_rollouts_per_decision=9000 + extra_rerolls + perturbations,
+                matched_model_compute=False,
+            )
+            manifest["action_robustness_config_sha256"] = sha256_file(action_robustness_path)
         if adaptive_one_shot:
             manifest["paired_protocol"].update(
                 horizon="adaptive", receding_horizon="no_replanning",
@@ -778,6 +806,8 @@ def evaluate_effplan(
             manifest["error"] = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            if robustness is not None:
+                write_json_atomic(output / "action_robustness_diagnostics.json", model.diagnostics())
             if world is not None:
                 world.close()
             manifest["elapsed_seconds"] = time.monotonic() - started
