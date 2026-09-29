@@ -5,7 +5,14 @@ from dataclasses import replace
 import streamlit as st
 
 from .comparison import COMPARISON_CSS, compare_to_baseline, comparison_html
-from .data import REAL_PREVIEW_MANIFEST, demo_trials, historical_trials, load_manifest
+from .data import (
+    REAL_PREVIEW_MANIFEST,
+    available_experiments,
+    demo_trials,
+    historical_trials,
+    load_manifest,
+    manifest_report,
+)
 from .endpoints import endpoint_images_html
 from .models import Trajectory, method_catalog, select_runs
 from .player import CARD_WIDTH, PREVIEW_SIZE, player_html
@@ -28,6 +35,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+active_manifest = REAL_PREVIEW_MANIFEST
+registry_error = None
 with st.sidebar:
     st.title("◈  World Model")
     st.caption("RESULT STUDIO / 实验工作台")
@@ -49,6 +58,13 @@ with st.sidebar:
         key="data_source_real_images",
     )
     st.caption("演示与真实结果独立，绝不混算。")
+    if mode == "真实图像 · 数据预览":
+        try:
+            experiments = available_experiments()
+            experiment = st.selectbox("实验结果集", list(experiments), key="experiment")
+            active_manifest = experiments[experiment]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            registry_error = str(exc)
     manifest = (
         st.text_input("数据清单路径", os.environ.get("RESULT_STUDIO_MANIFEST", ""))
         if mode == "自定义数据清单"
@@ -75,17 +91,28 @@ offset = (
     or 25
 )
 if mode == "真实图像 · 数据预览":
-    if REAL_PREVIEW_MANIFEST.is_file():
+    if registry_error:
+        trials, notes = [], [registry_error]
+    elif active_manifest.is_file():
         try:
-            trials, notes = load_manifest(str(REAL_PREVIEW_MANIFEST), offset), []
+            trials, notes = load_manifest(str(active_manifest), offset), []
         except (OSError, ValueError, KeyError, TypeError) as exc:
             trials, notes = [], [str(exc)]
     else:
         trials, notes = [], []
     loaded = sum(bool(t.reference.frames) for t in trials)
     st.info(
-        f"真实机器人图片 · O{offset} 参考轨迹已接入 {loaded} / 50 条。初始图、目标图和参考轨迹来自服务器数据集；方法成功标签来自评测记录，方法轨迹尚未接入。"
+        f"O{offset} 参考轨迹图片已接入 {loaded} / {len(trials) or 50} 条。初始图、目标图和参考轨迹来自原数据集；方法成功标签来自评测记录。参考轨迹不是方法执行轨迹。"
     )
+    if trials and not any(
+        track.frames or track.video
+        for t in trials
+        for tracks in t.methods.values()
+        for track in tracks.values()
+    ):
+        st.warning(
+            "这组结果未接入方法的执行/预测图片或视频；下方可以比较真实成功标签和 New / Lost，但不能播放方法自身的路径。"
+        )
 elif mode.startswith("交互"):
     trials, notes = demo_trials(offset), []
     st.markdown(
@@ -109,6 +136,9 @@ else:
 for note in notes:
     st.warning(note)
 
+source_key = (
+    str(active_manifest) if mode == "真实图像 · 数据预览" else (manifest or mode)
+)
 names = list(dict.fromkeys(name for trial in trials for name in trial.methods))
 catalog = method_catalog(trials)
 training_names = list(dict.fromkeys(spec.training_method for spec in catalog.values()))
@@ -189,7 +219,7 @@ def comparison_page():
         format_func=lambda i: (
             f"{i + 1:02d} / {len(trials)} · Episode {trials[i].episode:04d}"
         ),
-        key=f"episode_{mode}_{offset}",
+        key=f"episode_{source_key}_{offset}",
     )
     chosen_training = method_col.multiselect(
         "并排比较方法",
@@ -234,6 +264,20 @@ def comparison_page():
         st.caption(
             "New / Lost 仍按方法的实际执行评测结果计算，不代表模型预测轨迹的准确率。"
         )
+    if mode == "真实图像 · 数据预览":
+        with st.expander("三组结果汇总与数据完整性"):
+            rows, import_notes, provenance = manifest_report(
+                str(active_manifest), baseline
+            )
+            if rows:
+                st.caption(
+                    "New / Lost 相对当前 Baseline，按同一测试 identity 配对；样本编号从 01 开始。"
+                )
+                st.dataframe(rows, hide_index=True, width="stretch")
+            for note in import_notes:
+                st.write(note)
+            if provenance:
+                st.json(provenance, expanded=False)
     available_pairs = {
         (catalog[name].training_method, catalog[name].search_method) for name in chosen
     }
@@ -313,7 +357,7 @@ def comparison_page():
                 if i < len(trials):
 
                     def jump(value=i):
-                        st.session_state[f"episode_{mode}_{offset}"] = value
+                        st.session_state[f"episode_{source_key}_{offset}"] = value
 
                     col.button(
                         f"{i + 1:02d}",

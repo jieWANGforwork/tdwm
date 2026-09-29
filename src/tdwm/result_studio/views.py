@@ -125,6 +125,10 @@ def render_analysis(trials, page, names):
     except ValueError as exc:
         st.error(str(exc))
         return
+    if "目标参考轨迹" in groups and len(groups) == 1 and selected_names:
+        st.warning(
+            "当前只能分析原数据集的参考轨迹；所选方法没有保存对应数组，以下分布不代表方法执行或预测结果。"
+        )
     if not groups:
         st.info(
             f"这些真实记录没有 {field} 数组，暂时不能计算分布。成功标签已接入，但不能代替状态或 action。"

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "experiments": [
+    {"label": "P+CEM 与动作扰动风险", "manifest": "effplan_risk/manifest.json"},
+    {"label": "v1-c · f_only / f_plus_g", "manifest": "real_preview/manifest.json"}
+  ]
+}

@@ -101,6 +101,61 @@ def _read_json(path: Path):
     return json.loads(path.read_text())
 
 
+def available_experiments() -> dict[str, Path]:
+    """A private registry keeps unrelated evaluation selections separate."""
+    configured = os.environ.get("RESULT_STUDIO_EXPERIMENTS")
+    path = Path(
+        configured or REPO_ROOT / "data/result_studio/experiments.json"
+    ).expanduser()
+    if not configured and not path.is_file():
+        return {"当前真实数据预览": REAL_PREVIEW_MANIFEST}
+    config = _read_json(path)
+    if config.get("schema_version") != 1 or not config.get("experiments"):
+        raise ValueError("实验目录必须包含 schema_version: 1 和非空 experiments")
+    experiments = {}
+    for item in config["experiments"]:
+        name = item["label"]
+        if not isinstance(name, str) or not name.strip() or name in experiments:
+            raise ValueError("实验名称必须非空且不能重复")
+        experiments[name] = (path.resolve().parent / item["manifest"]).resolve()
+    return experiments
+
+
+def manifest_report(path: str, baseline: str | None):
+    """Summarize saved labels only, without loading images or inferring rollouts."""
+    data = _read_json(Path(path))
+    rows = []
+    for offset in sorted({t["offset"] for t in data["trials"]}):
+        trials = [t for t in data["trials"] if t["offset"] == offset]
+        for name, spec in data.get("method_catalog", {}).items():
+            outcomes, changes = [], {"New": 0, "Lost": 0, "可配对": 0}
+            for trial in trials:
+                methods = trial["methods"]
+                success = methods.get(name, {}).get("executed", {}).get("success")
+                base = methods.get(baseline, {}).get("executed", {}).get("success")
+                if type(success) is bool:
+                    outcomes.append(success)
+                if type(success) is bool and type(base) is bool:
+                    changes["可配对"] += 1
+                    changes["New"] += int(success and not base)
+                    changes["Lost"] += int(base and not success)
+            rows.append(
+                {
+                    "测试组": f"O{offset}",
+                    "训练方法": spec["training_method"],
+                    "搜索方法": spec["search_method"],
+                    "成功 / 已标注": f"{sum(outcomes)} / {len(outcomes)}",
+                    "成功率": f"{sum(outcomes) / len(outcomes):.0%}"
+                    if outcomes
+                    else "未标注",
+                    "New": changes["New"] if changes["可配对"] else None,
+                    "Lost": changes["Lost"] if changes["可配对"] else None,
+                    "可配对": changes["可配对"],
+                }
+            )
+    return rows, data.get("import_notes", []), data.get("provenance", {})
+
+
 def historical_trials(offset: int) -> tuple[list[Trial], list[str]]:
     """Read one known v1-c evaluation per offset; never join by row alone."""
     config_path = os.environ.get("RESULT_STUDIO_HISTORY_CONFIG")

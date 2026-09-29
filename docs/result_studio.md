@@ -87,6 +87,45 @@ episode_selection.json。目录相对于该配置文件，不包含机器私有�
 不适配任意数据集布局。只读服务器数据、流式传输并去重，不保存密码或中间压缩包，
 已有输出目录会拒绝覆盖。此导入工具不运行评测，也不能补出缺失的方法 rollout。
 
+### 多实验与 EffPlan / 动作扰动风险接入
+
+侧栏「实验结果集」在不同测试选择之间切换，样本编号按结果集分别保存。
+使用 `RESULT_STUDIO_EXPERIMENTS` 指定私有目录 JSON，或将其放在仓库的
+`data/result_studio/experiments.json`。格式见
+`configs/result_studio/experiments.example.json`；清单路径相对于这个目录文件。
+列表第一项为默认实验，原有数据不用覆盖。没有目录文件时仍兼容
+`RESULT_STUDIO_MANIFEST` 的单清单模式。
+
+在已有 Lance 数据集的服务器上，可直接导入这类配对结果：
+
+```sh
+python scripts/import_result_studio_effplan.py \
+  --baseline-root /path/to/baseline/total_work \
+  --risk-root /path/to/action_robustness_run \
+  --output /path/to/new_preview_directory
+```
+
+基线目录包含 `EffPlan_O25/O50/O100`，风险目录包含
+`total_work_n10_O25/O50/O100`。每组需要 `result.json`、
+`protocol_manifest.json`、`episode_results.json`。适配器核验完整的 50 条记录、
+成功率、布尔标签、逐条文件一致性、测试 identity、协议、数据集、归一化参数
+和训练 checkpoint 的一致性，发现冲突即拒绝导入。两组在同一训练方法下分别
+标为搜索方式 `P+CEM`、`P+CEM＋动作扰动风险`，默认前者为 Baseline。
+
+工具只从协议指定的 Lance 中读取所选参考片段，逐行核对 episode/step，
+保留原 JPEG 字节，并导出参考状态与 action。只在服务器新增小型选帧展示目录，
+不下载整个数据集、不复制 RGB 缓存、不运行评测，也不修改原结果。全部导入成功
+后才发布 manifest；已有输出目录拒绝覆盖。导入需要已有的 Lance/Python 环境，
+展示进程仍使用独立的轻量环境。具体实验数据及私有目录配置不提交 GitHub。
+
+「三组结果汇总与数据完整性」显示各 offset 的全部结果与相对当前 Baseline 的
+New/Lost（原始记录从 0 编号，界面从 01 编号），并保留导入来源和协议。
+这类结果文件只有最终成功标签，没有方法自身的执行/预测 RGB、逐步状态、
+action、embedding；原数据集参考轨迹不能代替它们。风险诊断的汇总统计也
+不能反推出动作和轨迹；无 episode/step 标识时不按猜测分配到单条测试。
+页面明确提示缺失字段，状态/action 页在只有参考数据时也会提示分析范围。
+环境预算匹配不表示模型计算量匹配；风险版额外调用模型，风险评分不是概率。
+
 ## 扩展与验证
 
 核心模块在 `src/tdwm/result_studio/`。`data.py` 读文件，`models.py` 定义数据，
@@ -98,7 +137,7 @@ episode_selection.json。目录相对于该配置文件，不包含机器私有�
 
 ```sh
 PYTHONPATH=src .venv-result-studio/bin/python -m unittest discover \
-  -s tests/unit -p test_result_studio.py -v
+  -s tests/unit -p 'test_result_studio*.py' -v
 ```
 
 测试使用合成文件 fixture，不依赖私人镜像或网络；如果配置了真实预览清单，
