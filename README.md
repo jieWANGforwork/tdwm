@@ -4,6 +4,11 @@ TDWM 基于固定版本的 `stable-worldmodel[all]==0.1.1` 开展 world model
 基线复现和后续方法研究。锁定的实验协议、数据来源与评测参数见
 [`configs/README.md`](configs/README.md)。
 
+实验可视化工作台 **World Model Result Studio**：对照完整参考/执行/预测轨迹，
+展示初始图、目标图和逐条成功标签，分析状态、表征与 action 分布。
+独立运行，不改训练环境；安装、SSH 访问及数据接入见
+[`docs/result_studio.md`](docs/result_studio.md)。
+
 当前正式运行的方法是 **Aligned E2E MC-GT-LeWM**：不加载 LeWM checkpoint 或 latent
 cache，从 Cube 原始图像和随机初始化开始联合训练 LeWM 与 GoalTailValue。LeWM 原始
 prediction MSE 和 SIGReg 使用 128 条独立的 4-frame clip；另一个 16 条 long-clip 数据流

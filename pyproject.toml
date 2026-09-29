@@ -20,6 +20,17 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Read-only dashboard; install this group alone in its own environment.
+# Does not install or change the research/training dependencies.
+[dependency-groups]
+result-studio = [
+  "streamlit==1.64.0",
+  "numpy>=1.26,<3",
+  "pandas>=2,<3",
+  "plotly==6.9.0",
+  "pillow==12.3.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

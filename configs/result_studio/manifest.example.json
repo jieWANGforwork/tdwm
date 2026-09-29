@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "trials": [
+    {
+      "episode": 638,
+      "offset": 25,
+      "start": 10,
+      "goal": 35,
+      "reference": {
+        "states": "episode638/reference/states.npy",
+        "video": "episode638/reference/trajectory.mp4"
+      },
+      "methods": {
+        "my_method": {
+          "executed": {
+            "success": null,
+            "states": "episode638/my_method/states.npy",
+            "actions": "episode638/my_method/actions.npy",
+            "embeddings": "episode638/my_method/embeddings.npy",
+            "video": "episode638/my_method/rollout.mp4",
+            "attributes": {}
+          },
+          "predicted": {
+            "success": null,
+            "embeddings": "episode638/my_method/predicted_embeddings.npy"
+          }
+        }
+      }
+    }
+  ]
+}
