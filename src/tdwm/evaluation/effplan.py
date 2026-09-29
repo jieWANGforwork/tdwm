@@ -222,6 +222,7 @@ def evaluate_effplan(
     planner_checkpoint: str | Path | None = None,
     planner_manifest: str | Path | None = None,
     video: bool = False,
+    record_rollouts: bool = True,
     eff_score: str | None = None,
     cumulative_weight: float | None = None,
     adaptive_one_shot: bool = False,
@@ -675,11 +676,29 @@ def evaluate_effplan(
                 execution="replan_from_real_observation_until_success_or_total_budget",
             )
             manifest["compute"]["variable_horizon"] = True
+        manifest["rollout_recording"] = dict(enabled=record_rollouts)
+        if record_rollouts:
+            manifest["rollout_recording"].update(
+                manifest="rollouts/manifest.json", status="running",
+                granularity="every_executed_primitive_action", image_format="lossless_rgb_png",
+            )
         write_json_atomic(manifest_path, manifest)
         wc = reference["world"]
         world = None
+        recorder = None
         started = time.monotonic()
         try:
+            if record_rollouts:
+                from tdwm.evaluation.rollout_recording import RolloutRecorder
+
+                recorder = RolloutRecorder(
+                    output / "rollouts", pairs=selection["pairs"], budget=2 * offset,
+                    metadata=dict(method=method, score_mode=score, protocol=f"O{offset}",
+                                  selection_sha256=manifest["selection_sha256"],
+                                  paired_protocol=manifest["paired_protocol"],
+                                  code_revision=manifest["runtime"]["git_revision"],
+                                  checkpoints=checkpoint_records),
+                )
             world = swm.World(
                 wc["env_name"],
                 num_envs=50,
@@ -693,8 +712,9 @@ def evaluate_effplan(
                 visualize_info=wc["visualize_info"],
                 terminate_at_goal=wc["terminate_at_goal"],
                 **({"pre_wrappers": [execution_limits.wrap]} if adaptive_one_shot else {}),
+                **({"extra_wrappers": [recorder.wrap_environment]} if recorder is not None else {}),
             )
-            world.set_policy(policy)
+            world.set_policy(recorder.wrap_policy(policy) if recorder is not None else policy)
             callables = [
                 {
                     "method": "set_state",
@@ -740,6 +760,15 @@ def evaluate_effplan(
                 )
                 for i in range(50)
             ]
+            if recorder is not None:
+                recording = recorder.finish(successes)
+                for episode, recorded in zip(episodes, recording["episodes"], strict=True):
+                    episode.update(
+                        rollout="rollouts/" + recorded["trajectory"],
+                        executed_primitive_steps=recorded["executed_primitive_steps"],
+                    )
+                manifest["rollout_recording"].update(
+                    status="complete", total_executed_actions=recording["total_executed_actions"])
             if adaptive_one_shot:
                 if solver.solve_calls != 1 or len(solver.records) != 50:
                     raise RuntimeError("One-shot evaluation did not plan exactly once per pair.")
@@ -804,6 +833,9 @@ def evaluate_effplan(
         except BaseException as exc:
             manifest["status"] = "failed"
             manifest["error"] = f"{type(exc).__name__}: {exc}"
+            if recorder is not None:
+                recorder.abort(manifest["error"])
+                manifest["rollout_recording"]["status"] = "incomplete"
             raise
         finally:
             if robustness is not None:

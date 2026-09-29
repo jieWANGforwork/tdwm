@@ -178,6 +178,7 @@ def test_formal_evaluator_executes_full_plan_before_replanning(
         eff_checkpoint=eff_checkpoint, eff_manifest=tmp_path / "unused.json",
         planner_checkpoint=planner_checkpoint, planner_manifest=pmeta,
         offset_window=offset_window,
+        record_rollouts=False,  # scheduling-only fixture has no rendered observations
     )
     expected_calls = list(range(0, stop_after or 2*offset, window))
     assert seen["calls"] == expected_calls

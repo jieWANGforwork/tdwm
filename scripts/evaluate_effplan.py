@@ -46,6 +46,10 @@ def main():
     evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
     evaluate.add_argument(
+        "--no-record-rollouts", dest="record_rollouts", action="store_false",
+        help="Explicitly disable default per-primitive-action JSON and observation PNG recording.",
+    )
+    evaluate.add_argument(
         "--action-robustness-config",
         help="Opt-in JSON action perturbation risk settings; fixed H5/RH5 EffPlan only.",
     )
@@ -106,6 +110,7 @@ def main():
             planner_checkpoint=args.planner_checkpoint,
             planner_manifest=args.planner_manifest,
             video=args.video,
+            record_rollouts=args.record_rollouts,
             eff_score=args.eff_score,
             cumulative_weight=args.eff_cumulative_weight,
             adaptive_one_shot=args.adaptive_one_shot,
