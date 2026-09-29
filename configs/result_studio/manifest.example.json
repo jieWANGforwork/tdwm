@@ -1,5 +1,11 @@
 {
   "schema_version": 1,
+  "method_catalog": {
+    "my_method": {
+      "training_method": "My trained model · seed 0",
+      "search_method": "f_plus_g"
+    }
+  },
   "trials": [
     {
       "episode": 638,

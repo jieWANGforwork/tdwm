@@ -1,10 +1,12 @@
 import html
 import os
+from dataclasses import replace
 
 import streamlit as st
 
 from .data import REAL_PREVIEW_MANIFEST, demo_trials, historical_trials, load_manifest
 from .endpoints import endpoint_images_html
+from .models import Trajectory, method_catalog, select_runs
 from .player import CARD_WIDTH, PREVIEW_SIZE, player_html
 
 st.set_page_config(
@@ -106,6 +108,19 @@ for note in notes:
     st.warning(note)
 
 names = list(dict.fromkeys(name for trial in trials for name in trial.methods))
+catalog = method_catalog(trials)
+training_names = list(dict.fromkeys(spec.training_method for spec in catalog.values()))
+search_names = list(dict.fromkeys(spec.search_method for spec in catalog.values()))
+
+
+def selected_tracks(trial, chosen, kind):
+    return [trial.reference] + [
+        replace(
+            trial.methods.get(name, {}).get(kind, Trajectory(name, kind)),
+            name=catalog[name].label,
+        )
+        for name in chosen
+    ]
 
 
 def status_badge(success):
@@ -133,7 +148,7 @@ def overview():
         known = [label for label in labels if label is not None]
         values.append(
             (
-                name,
+                catalog[name].label,
                 f"{sum(known)} / {len(known)}",
                 "成功 / 已标注 · "
                 + ("演示" if mode.startswith("交互") else "真实记录"),
@@ -151,7 +166,7 @@ def comparison_page():
     if not trials:
         st.info("当前组没有可读取的样本。")
         return
-    control, method_col, view_col = st.columns([1.5, 2, 1.3])
+    control, method_col, search_col, view_col = st.columns([1.5, 2, 1.6, 1.5])
     index = control.selectbox(
         "当前测试样本",
         range(len(trials)),
@@ -160,28 +175,48 @@ def comparison_page():
         ),
         key=f"episode_{mode}_{offset}",
     )
-    chosen = method_col.multiselect(
+    chosen_training = method_col.multiselect(
         "并排比较方法",
-        names,
-        default=names[:2],
-        help="不限选择数量。每个画面固定 224 × 224，方法多时自动换行，不随数量拉伸。",
+        training_names,
+        default=training_names[:2],
+        key="training_methods",
+        help="选择不同训练方法/模型版本，不包含 f_only、f_plus_g 等搜索设置。不限数量，画面固定 224 × 224。",
     )
+    chosen_search = search_col.multiselect(
+        "搜索方法",
+        search_names,
+        default=search_names[:2],
+        key="search_methods",
+        help="选择同一训练模型使用的搜索/评分方式，例如 f_only、f_plus_g。可多选并排比较。",
+    )
+    chosen = select_runs(catalog, chosen_training, chosen_search)
     kind = view_col.selectbox(
         "方法轨迹类型",
         ["executed", "predicted"],
         format_func=lambda v: "实际执行轨迹" if v == "executed" else "模型预测轨迹",
+        help="实际执行：动作在环境中执行后的真实记录。模型预测：执行前预测的未来；预测可能只有特征向量，没有图片。",
     )
+    st.caption(
+        "并排比较方法 = 训练方法 / 模型版本；搜索方法 = 同一模型的搜索或评分方式。每张卡片同时标注两者。"
+    )
+    available_pairs = {
+        (catalog[name].training_method, catalog[name].search_method) for name in chosen
+    }
+    missing = [
+        f"{training} · {search}"
+        for training in chosen_training
+        for search in chosen_search
+        if (training, search) not in available_pairs
+    ]
+    if missing:
+        st.info("以下组合尚无结果记录：" + "、".join(missing))
     trial = trials[index]
     st.markdown(f"### 样本 {trial.index:02d}  ·  Episode {trial.episode:04d}")
     st.html(endpoint_images_html(trial))
     st.caption(
         f"参考路径：原始帧 {trial.start} — {trial.goal}，包含中间过程。预测轨迹不自动等同于执行轨迹。"
     )
-    from .models import Trajectory
-
-    tracks = [trial.reference] + [
-        trial.methods.get(name, {}).get(kind, Trajectory(name, kind)) for name in chosen
-    ]
+    tracks = selected_tracks(trial, chosen, kind)
     try:
         st.iframe(player_html(tracks, trial.demo), height="content")
     except (OSError, ValueError) as exc:
@@ -246,10 +281,7 @@ def comparison_page():
         for item in trials[gallery_page * 5 : gallery_page * 5 + 5]:
             st.markdown(f"**{item.index:02d} · Episode {item.episode:04d}**")
             st.html(endpoint_images_html(item))
-            item_tracks = [item.reference] + [
-                item.methods.get(name, {}).get(kind, Trajectory(name, kind))
-                for name in chosen
-            ]
+            item_tracks = selected_tracks(item, chosen, kind)
             try:
                 st.iframe(player_html(item_tracks, item.demo), height="content")
             except (OSError, ValueError) as exc:
@@ -261,7 +293,7 @@ def comparison_page():
             for col, name in zip(cells[1:], names):
                 track = trial.methods.get(name, {}).get("executed")
                 col.markdown(
-                    html.escape(name)
+                    html.escape(catalog[name].label)
                     + "　"
                     + status_badge(track.success if track else None),
                     unsafe_allow_html=True,

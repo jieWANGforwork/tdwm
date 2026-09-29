@@ -36,3 +36,38 @@ class Trial:
     methods: dict[str, dict[str, Trajectory]]
     source: str = ""
     demo: bool = False
+    method_specs: dict[str, "MethodSpec"] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MethodSpec:
+    """A trained model variant and an independently chosen inference/search rule."""
+
+    training_method: str
+    search_method: str
+
+    @property
+    def label(self) -> str:
+        if self.search_method == "未指定":
+            return self.training_method
+        return f"{self.training_method} · {self.search_method}"
+
+
+def method_catalog(trials: list[Trial]) -> dict[str, MethodSpec]:
+    catalog = {}
+    for trial in trials:
+        for key in trial.methods:
+            spec = trial.method_specs.get(key, MethodSpec(key, "未指定"))
+            if key in catalog and catalog[key] != spec:
+                raise ValueError(f"同一运行编号的训练/搜索方法不一致：{key}")
+            catalog[key] = spec
+    return catalog
+
+
+def select_runs(catalog, training_methods, search_methods) -> list[str]:
+    return [
+        key
+        for key, spec in catalog.items()
+        if spec.training_method in training_methods
+        and spec.search_method in search_methods
+    ]

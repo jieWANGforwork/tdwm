@@ -104,6 +104,10 @@ def main():
             "selection": "v1-c f_only / f_plus_g O25/O50/O100, all 50 trials per offset",
         },
         "trials": records,
+        "method_catalog": {
+            name: {"training_method": "v1-c", "search_method": name}
+            for name in ("f_only", "f_plus_g")
+        },
     }
 
     def save_manifest():

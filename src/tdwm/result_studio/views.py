@@ -13,6 +13,7 @@ from .analysis import (
     project_states,
 )
 from .data import REPO_ROOT
+from .models import method_catalog
 
 PALETTE = ["#6A7B93", "#2457DB", "#BA6B25", "#8654C7"]
 
@@ -33,7 +34,9 @@ def plot(fig, key):
 
 def collect_groups(trials, field, kind, selected_names):
     groups, coverage = {}, []
+    catalog = method_catalog(trials)
     for name in ["目标参考轨迹"] + list(selected_names):
+        label = catalog[name].label if name in catalog else name
         arrays, found = [], 0
         for trial in trials:
             track = (
@@ -45,11 +48,11 @@ def collect_groups(trials, field, kind, selected_names):
             if values is not None and len(values):
                 arrays.append(values)
                 found += 1
-        coverage.append({"系列": name, "有数据的轨迹": found, "所选轨迹": len(trials)})
+        coverage.append({"系列": label, "有数据的轨迹": found, "所选轨迹": len(trials)})
         if arrays:
             if len({a.shape[1] for a in arrays}) != 1:
                 raise ValueError(f"{name} 的数组维度不一致，不能合并")
-            groups[name] = np.concatenate(arrays)
+            groups[label] = np.concatenate(arrays)
     return groups, pd.DataFrame(coverage)
 
 
@@ -84,7 +87,13 @@ def render_analysis(trials, page, names):
         ["executed", "predicted"],
         format_func=lambda k: "实际执行" if k == "executed" else "模型预测",
     )
-    selected_names = controls[2].multiselect("分析方法", names, default=names[:2])
+    catalog = method_catalog(trials)
+    selected_names = controls[2].multiselect(
+        "分析组合（训练 · 搜索）",
+        names,
+        default=names[:2],
+        format_func=lambda name: catalog[name].label,
+    )
     selected = trials
     if scope == "单条测试":
         i = st.selectbox(

@@ -20,7 +20,12 @@ from tdwm.result_studio.data import (
     resolve_asset,
 )
 from tdwm.result_studio.endpoints import endpoint_images_html, endpoint_paths
-from tdwm.result_studio.models import Trajectory
+from tdwm.result_studio.models import (
+    MethodSpec,
+    Trajectory,
+    method_catalog,
+    select_runs,
+)
 from tdwm.result_studio.player import CARD_WIDTH, PREVIEW_SIZE, player_html
 
 
@@ -164,6 +169,80 @@ class AnalysisTests(unittest.TestCase):
             app.multiselect[0].set_value(list(trial.methods)).run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.multiselect[0].value), 12)
+
+    def test_training_and_search_are_independent_filters(self):
+        trial = demo_trials(25)[0]
+        trial.methods = {
+            key: {"executed": Trajectory(key, "executed", success)}
+            for key, success in [
+                ("a_f", True),
+                ("a_fg", False),
+                ("b_f", False),
+                ("b_fg", True),
+            ]
+        }
+        trial.method_specs = {
+            "a_f": MethodSpec("Train A", "f_only"),
+            "a_fg": MethodSpec("Train A", "f_plus_g"),
+            "b_f": MethodSpec("Train B", "f_only"),
+            "b_fg": MethodSpec("Train B", "f_plus_g"),
+        }
+        catalog = method_catalog([trial])
+        self.assertEqual(select_runs(catalog, ["Train A"], ["f_plus_g"]), ["a_fg"])
+        self.assertEqual(
+            select_runs(catalog, ["Train A", "Train B"], ["f_only"]), ["a_f", "b_f"]
+        )
+        with patch("tdwm.result_studio.data.demo_trials", return_value=[trial]):
+            app = AppTest.from_file(
+                str(Path(__file__).resolve().parents[2] / "scripts/result_studio.py")
+            ).run(timeout=30)
+            app.sidebar.selectbox[0].set_value("交互演示 · 合成数据").run()
+            self.assertEqual(
+                app.multiselect(key="training_methods").options, ["Train A", "Train B"]
+            )
+            self.assertEqual(
+                app.multiselect(key="search_methods").options, ["f_only", "f_plus_g"]
+            )
+            app.multiselect(key="training_methods").set_value(["Train B"]).run()
+            app.multiselect(key="search_methods").set_value(["f_plus_g"]).run()
+            self.assertFalse(app.exception)
+            cards = [item.proto.srcdoc for item in app.get("iframe")]
+            self.assertIn("Train B", str(cards))
+            self.assertNotIn("Train A", str(cards))
+            self.assertIn("f_plus_g", str(cards))
+            self.assertNotIn("f_only", str(cards))
+            app.toggle[0].set_value(True).run()
+            self.assertFalse(app.exception)
+
+    def test_manifest_explicit_method_metadata_and_legacy_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            record = {
+                "schema_version": 1,
+                "method_catalog": {
+                    "run": {"training_method": "Training X", "search_method": "f_only"}
+                },
+                "trials": [
+                    {
+                        "episode": 1,
+                        "offset": 25,
+                        "start": 0,
+                        "goal": 25,
+                        "methods": {"run": {"executed": {"success": True}}},
+                    }
+                ],
+            }
+            path.write_text(json.dumps(record))
+            self.assertEqual(
+                method_catalog(load_manifest(str(path), 25))["run"],
+                MethodSpec("Training X", "f_only"),
+            )
+            del record["method_catalog"]
+            path.write_text(json.dumps(record))
+            self.assertEqual(
+                method_catalog(load_manifest(str(path), 25))["run"],
+                MethodSpec("run", "未指定"),
+            )
 
     def test_pages_and_sample_navigation(self):
         app = AppTest.from_file(

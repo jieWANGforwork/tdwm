@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .models import Trajectory, Trial
+from .models import MethodSpec, Trajectory, Trial
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 METHODS = ["f_only", "f_plus_g"]
@@ -91,6 +91,7 @@ def demo_trials(offset: int) -> list[Trial]:
                 methods,
                 "确定性合成数据，仅用于界面与函数演示",
                 True,
+                {name: MethodSpec(name, "演示搜索") for name in methods},
             )
         )
     return trials
@@ -148,6 +149,7 @@ def historical_trials(offset: int) -> tuple[list[Trial], list[str]]:
                         attributes={"results_path": str(folder / "results.json")},
                     )
                 }
+                records[identity].method_specs[method] = MethodSpec("v1-c", method)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             notes.append(f"{method}: {exc}")
     return list(records.values()), notes
@@ -210,6 +212,20 @@ def load_manifest(path: str, offset: int) -> list[Trial]:
         )
 
     trials, seen = [], set()
+    specs = {}
+    for run_id, spec in data.get("method_catalog", {}).items():
+        training, search = spec.get("training_method"), spec.get("search_method")
+        if not isinstance(training, str) or not training.strip():
+            raise ValueError("method_catalog 中 training_method 必须是非空字符串")
+        if not isinstance(search, str) or not search.strip():
+            raise ValueError("method_catalog 中 search_method 必须是非空字符串")
+        specs[run_id] = MethodSpec(training, search)
+    # Backward compatibility only for the explicitly identified v1-c preview.
+    # Do not infer training methods from arbitrary names like f_only.
+    if not specs and data.get("provenance", {}).get("selection") == (
+        "v1-c f_only / f_plus_g O25/O50/O100, all 50 trials per offset"
+    ):
+        specs = {name: MethodSpec("v1-c", name) for name in METHODS}
     for item in data["trials"]:
         if int(item["offset"]) != offset:
             continue
@@ -234,6 +250,10 @@ def load_manifest(path: str, offset: int) -> list[Trial]:
                 track(item.get("reference", {}), "目标参考轨迹", "reference"),
                 methods,
                 str(manifest),
+                method_specs={
+                    name: specs.get(name, MethodSpec(name, "未指定"))
+                    for name in methods
+                },
             )
         )
     return trials
