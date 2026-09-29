@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import streamlit as st
 
+from .comparison import COMPARISON_CSS, compare_to_baseline, comparison_html
 from .data import REAL_PREVIEW_MANIFEST, demo_trials, historical_trials, load_manifest
 from .endpoints import endpoint_images_html
 from .models import Trajectory, method_catalog, select_runs
@@ -12,6 +13,7 @@ from .player import CARD_WIDTH, PREVIEW_SIZE, player_html
 st.set_page_config(
     page_title="World Model · Result Studio", page_icon="◈", layout="wide"
 )
+st.markdown(f"<style>{COMPARISON_CSS}</style>", unsafe_allow_html=True)
 st.markdown(
     """<style>
 .block-container{padding-top:2rem;padding-bottom:3rem;max-width:1500px}header[data-testid="stHeader"]{background:transparent}[data-testid="stSidebar"]{background:#12223a;color:#dfe8f7}[data-testid="stSidebar"] *{color:inherit}[data-testid="stSidebar"] h1{font-size:23px!important;letter-spacing:-.5px}[data-testid="stSidebar"] [data-baseweb="select"] *{color:#182840}[data-testid="stSidebar"] hr{border-color:#2b3d57}h1{font-size:30px!important;letter-spacing:-.8px}h2{font-size:21px!important}h3{font-size:17px!important}.eyebrow{color:#6e7e96;font:600 12px sans-serif;letter-spacing:2px;margin-bottom:7px}.subhead{color:#728198;font-size:14px;margin-top:-9px;margin-bottom:20px}.pill{display:inline-block;background:#e8efff;color:#2d56b5;border-radius:5px;padding:5px 10px;font-size:12px}.notice{border-left:3px solid #d39a29;background:#fff6df;padding:11px 15px;color:#755619;font-size:14px;border-radius:0 7px 7px 0;margin:8px 0 18px}.stat{background:#fff;border:1px solid #e1e7f0;border-radius:10px;padding:15px 18px;margin-bottom:18px}.stat-label{color:#6e7d94;font-size:13px}.stat-number{font-size:26px;font-weight:650;margin:5px 0}.stat-note{font-size:12px;color:#8290a4}.badge{border-radius:4px;padding:4px 8px;font-size:13px;display:inline-block;background:#eef1f6;color:#67768c}.success{background:#e5f4ec;color:#167452}.failure{background:#fcedef;color:#b23f50}.card-note{color:#7c899b;font-size:12px}.section-line{border-top:1px solid #dde4ee;margin:20px 0}[data-testid="stButton"] button{border-radius:7px}div[data-testid="stVerticalBlockBorderWrapper"]{background:#fff;border-radius:10px}button:focus-visible{outline:3px solid #6686e5!important}
@@ -166,7 +168,21 @@ def comparison_page():
     if not trials:
         st.info("当前组没有可读取的样本。")
         return
-    control, method_col, search_col, view_col = st.columns([1.5, 2, 1.6, 1.5])
+    # Keep valid choices across groups; don't leave stale names after changing data.
+    for key, options in (
+        ("training_methods", training_names),
+        ("search_methods", search_names),
+    ):
+        if key not in st.session_state:
+            st.session_state[key] = options[:2]
+        else:
+            previous = st.session_state[key]
+            valid = [value for value in previous if value in options]
+            if valid != previous:
+                st.session_state[key] = valid or options[:2]
+    control, method_col, search_col, view_col, baseline_col = st.columns(
+        [1.4, 1.7, 1.5, 1.5, 1.8]
+    )
     index = control.selectbox(
         "当前测试样本",
         range(len(trials)),
@@ -178,14 +194,12 @@ def comparison_page():
     chosen_training = method_col.multiselect(
         "并排比较方法",
         training_names,
-        default=training_names[:2],
         key="training_methods",
         help="选择不同训练方法/模型版本，不包含 f_only、f_plus_g 等搜索设置。不限数量，画面固定 224 × 224。",
     )
     chosen_search = search_col.multiselect(
         "搜索方法",
         search_names,
-        default=search_names[:2],
         key="search_methods",
         help="选择同一训练模型使用的搜索/评分方式，例如 f_only、f_plus_g。可多选并排比较。",
     )
@@ -196,9 +210,30 @@ def comparison_page():
         format_func=lambda v: "实际执行轨迹" if v == "executed" else "模型预测轨迹",
         help="实际执行：动作在环境中执行后的真实记录。模型预测：执行前预测的未来；预测可能只有特征向量，没有图片。",
     )
+    if (
+        "baseline_method" in st.session_state
+        and st.session_state.baseline_method not in names
+    ):
+        del st.session_state["baseline_method"]
+    baseline = baseline_col.selectbox(
+        "Baseline",
+        names,
+        index=0 if names else None,
+        format_func=lambda name: catalog[name].label,
+        key="baseline_method",
+        help="任选一个训练方法 + 搜索方法组合做对照，不受当前并排显示的筛选限制。按同一测试样本的成功/失败比较。",
+    )
+    baseline_label = catalog[baseline].label if baseline is not None else "未设置"
     st.caption(
         "并排比较方法 = 训练方法 / 模型版本；搜索方法 = 同一模型的搜索或评分方式。每张卡片同时标注两者。"
     )
+    st.caption(
+        f"当前 Baseline：{baseline_label}。New = Baseline 失败、当前方法成功；Lost = Baseline 成功、当前方法失败。结果相同显示保持成功／保持失败，缺少标签则无法比较。"
+    )
+    if kind == "predicted":
+        st.caption(
+            "New / Lost 仍按方法的实际执行评测结果计算，不代表模型预测轨迹的准确率。"
+        )
     available_pairs = {
         (catalog[name].training_method, catalog[name].search_method) for name in chosen
     }
@@ -218,7 +253,16 @@ def comparison_page():
     )
     tracks = selected_tracks(trial, chosen, kind)
     try:
-        st.iframe(player_html(tracks, trial.demo), height="content")
+        st.iframe(
+            player_html(
+                tracks,
+                trial.demo,
+                [None]
+                + [compare_to_baseline(trial, name, baseline) for name in chosen],
+                baseline_label,
+            ),
+            height="content",
+        )
     except (OSError, ValueError) as exc:
         st.error(f"轨迹读取失败：{exc}")
     st.caption(
@@ -226,11 +270,20 @@ def comparison_page():
     )
     if any(t.video for t in tracks):
         with st.container(horizontal=True, wrap=True, horizontal_alignment="left"):
-            for track in tracks:
+            for position, track in enumerate(tracks):
                 if track.video:
                     with st.container(width=CARD_WIDTH):
                         st.caption(track.name + " · 完整视频（独立时间轴）")
                         st.video(track.video, width=PREVIEW_SIZE)
+                        if position:
+                            st.html(
+                                comparison_html(
+                                    compare_to_baseline(
+                                        trial, chosen[position - 1], baseline
+                                    ),
+                                    baseline_label,
+                                )
+                            )
     if any(t.frames for t in tracks):
         with st.expander("查看任意原始帧 · 不抽样"):
             image_tracks = [t for t in tracks if t.frames]
@@ -283,7 +336,18 @@ def comparison_page():
             st.html(endpoint_images_html(item))
             item_tracks = selected_tracks(item, chosen, kind)
             try:
-                st.iframe(player_html(item_tracks, item.demo), height="content")
+                st.iframe(
+                    player_html(
+                        item_tracks,
+                        item.demo,
+                        [None]
+                        + [
+                            compare_to_baseline(item, name, baseline) for name in chosen
+                        ],
+                        baseline_label,
+                    ),
+                    height="content",
+                )
             except (OSError, ValueError) as exc:
                 st.warning(f"该条轨迹读取失败：{exc}")
     with st.expander("逐条成功 / 失败标签 · 展开全部", expanded=True):
@@ -297,6 +361,11 @@ def comparison_page():
                     + "　"
                     + status_badge(track.success if track else None),
                     unsafe_allow_html=True,
+                )
+                col.html(
+                    comparison_html(
+                        compare_to_baseline(trial, name, baseline), baseline_label
+                    )
                 )
 
 

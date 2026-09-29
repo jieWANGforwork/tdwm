@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from .comparison import COMPARISON_CSS, BaselineComparison, comparison_html
 from .models import Trajectory
 
 COLORS = ["#6A7B93", "#2457DB", "#BA6B25", "#8654C7"]
@@ -29,7 +30,14 @@ def image_uri(path: str):
     return "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode()
 
 
-def player_html(tracks: list[Trajectory], demo=False):
+def player_html(
+    tracks: list[Trajectory],
+    demo=False,
+    comparisons: list[BaselineComparison | None] | None = None,
+    baseline_label: str = "",
+):
+    if comparisons is not None and len(comparisons) != len(tracks):
+        raise ValueError("Baseline 对比标签必须与轨迹逐一对应")
     payload = []
     for i, track in enumerate(tracks):
         # Only the selected trial is decoded. Hard cap is explicit in the UI.
@@ -56,6 +64,11 @@ def player_html(tracks: list[Trajectory], demo=False):
                 "frames": frames,
                 "indexes": list(map(int, frame_indexes)),
                 "length": track.length,
+                "comparison_html": comparison_html(comparisons[i], baseline_label)
+                if comparisons is not None
+                and comparisons[i] is not None
+                and track.kind != "reference"
+                else "",
             }
         )
     encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace(
@@ -66,12 +79,14 @@ def player_html(tracks: list[Trajectory], demo=False):
         .replace("__DEMO__", "true" if demo else "false")
         .replace("__PREVIEW_SIZE__", str(PREVIEW_SIZE))
         .replace("__CARD_WIDTH__", str(CARD_WIDTH))
+        .replace("__BASELINE_CSS__", COMPARISON_CSS)
     )
 
 
 TEMPLATE = r"""<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>
 *{box-sizing:border-box}
 body{margin:0;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#16263e;background:transparent}
+__BASELINE_CSS__
 button,select,input{font:inherit}button{cursor:pointer}
 .grid{display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:flex-start;gap:16px}
 .card{flex:0 0 __CARD_WIDTH__px;width:__CARD_WIDTH__px;max-width:100%;background:white;border:1px solid #dee5f0;border-radius:12px;overflow:hidden}
@@ -88,7 +103,7 @@ input[type=range]{flex:1;min-width:45px;accent-color:#2457db}.counter{font-varia
 const tracks=__TRACKS__,demo=__DEMO__,images=[];let progress=0,playing=false,last=0;
 const grid=document.getElementById('grid');
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-tracks.forEach((t,i)=>{const label=t.kind==='reference'?'参考路径':t.kind==='predicted'?'预测轨迹':t.status===true?'成功':t.status===false?'失败':'未标注';const state=t.kind==='executed'?(t.status===true?'yes':t.status===false?'no':''):'';grid.insertAdjacentHTML('beforeend',`<div class="card"><div class="title"><span>${escape(t.name)}</span><span class="kind">${t.kind==='reference'?'TARGET':t.kind==='predicted'?'PREDICTED':'EXECUTED'}</span></div><canvas id="c${i}"></canvas><div class="foot"><span class="badge ${state}">${label}${demo&&t.kind==='executed'?' · 演示':''}</span><span class="hint" id="t${i}"></span></div></div>`);images[i]=t.frames.map(src=>{const im=new Image();im.src=src;im.onload=draw;return im})});
+tracks.forEach((t,i)=>{const label=t.kind==='reference'?'参考路径':t.kind==='predicted'?'预测轨迹':t.status===true?'成功':t.status===false?'失败':'未标注';const state=t.kind==='executed'?(t.status===true?'yes':t.status===false?'no':''):'';grid.insertAdjacentHTML('beforeend',`<div class="card"><div class="title"><span>${escape(t.name)}</span><span class="kind">${t.kind==='reference'?'TARGET':t.kind==='predicted'?'PREDICTED':'EXECUTED'}</span></div><canvas id="c${i}"></canvas><div class="foot"><span class="badge ${state}">${label}${demo&&t.kind==='executed'?' · 演示':''}</span><span class="hint" id="t${i}"></span></div>${t.comparison_html}</div>`);images[i]=t.frames.map(src=>{const im=new Image();im.src=src;im.onload=draw;return im})});
 const all=tracks.flatMap(t=>t.coords).filter(p=>p.every(Number.isFinite));let bounds=[0,1,0,1];if(all.length){bounds=[Math.min(...all.map(p=>p[0])),Math.max(...all.map(p=>p[0])),Math.min(...all.map(p=>p[1])),Math.max(...all.map(p=>p[1]))]};
 function draw(){tracks.forEach((t,i)=>{const c=document.getElementById('c'+i),r=c.getBoundingClientRect(),w=r.width,h=r.height,dpr=devicePixelRatio||1;c.width=w*dpr;c.height=h*dpr;const ctx=c.getContext('2d');ctx.scale(dpr,dpr);const idx=Math.round(progress*Math.max(0,t.length-1));document.getElementById('t'+i).textContent=t.length?`帧 ${idx} / ${t.length-1}`:'未接入轨迹';
 if(images[i].length){let at=0;for(let j=1;j<t.indexes.length;j++){if(Math.abs(t.indexes[j]-idx)<Math.abs(t.indexes[at]-idx))at=j};const im=images[i][at];if(im.complete&&im.naturalWidth){const scale=Math.min(1,w/im.width,h/im.height);ctx.drawImage(im,(w-im.width*scale)/2,(h-im.height*scale)/2,im.width*scale,im.height*scale)}return}

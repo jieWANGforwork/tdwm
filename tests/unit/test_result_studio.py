@@ -12,6 +12,7 @@ from tdwm.result_studio.analysis import (
     distribution_histogram,
     project_states,
 )
+from tdwm.result_studio.comparison import compare_to_baseline, comparison_html
 from tdwm.result_studio.data import (
     REAL_PREVIEW_MANIFEST,
     demo_trials,
@@ -206,13 +207,114 @@ class AnalysisTests(unittest.TestCase):
             app.multiselect(key="training_methods").set_value(["Train B"]).run()
             app.multiselect(key="search_methods").set_value(["f_plus_g"]).run()
             self.assertFalse(app.exception)
-            cards = [item.proto.srcdoc for item in app.get("iframe")]
-            self.assertIn("Train B", str(cards))
-            self.assertNotIn("Train A", str(cards))
-            self.assertIn("f_plus_g", str(cards))
-            self.assertNotIn("f_only", str(cards))
+            cards = json.loads(
+                app.get("iframe")[0]
+                .proto.srcdoc.split("const tracks=", 1)[1]
+                .split(",demo=", 1)[0]
+            )
+            self.assertEqual(
+                [card["name"] for card in cards], ["目标参考轨迹", "Train B · f_plus_g"]
+            )
             app.toggle[0].set_value(True).run()
             self.assertFalse(app.exception)
+
+    def test_baseline_comparison_truth_table_and_missing(self):
+        trial = demo_trials(25)[0]
+        for base_success in (True, False, None):
+            for success in (True, False, None):
+                trial.methods = {
+                    "base": {"executed": Trajectory("base", "executed", base_success)},
+                    "candidate": {
+                        "executed": Trajectory("candidate", "executed", success)
+                    },
+                }
+                expected = (
+                    "无法比较"
+                    if base_success is None or success is None
+                    else "New"
+                    if success and not base_success
+                    else "Lost"
+                    if base_success and not success
+                    else "保持成功"
+                    if success
+                    else "保持失败"
+                )
+                self.assertEqual(
+                    compare_to_baseline(trial, "candidate", "base").label, expected
+                )
+                self.assertEqual(
+                    compare_to_baseline(trial, "base", "base").label, "Baseline"
+                )
+        self.assertEqual(
+            compare_to_baseline(trial, "missing", "base").label, "无法比较"
+        )
+        self.assertEqual(
+            compare_to_baseline(trial, "candidate", "missing").label, "无法比较"
+        )
+        self.assertEqual(
+            compare_to_baseline(trial, "candidate", None).label, "无法比较"
+        )
+        comparison = compare_to_baseline(trial, "candidate", "base")
+        self.assertNotIn("<script>", comparison_html(comparison, '<script>"</script>'))
+
+    def test_baseline_switch_updates_cards_gallery_and_ignores_predictions(self):
+        trial = demo_trials(25)[0]
+        trial.methods = {
+            "base": {
+                "executed": Trajectory("base", "executed", False),
+                "predicted": Trajectory("base", "predicted", True),
+            },
+            "candidate": {
+                "executed": Trajectory("candidate", "executed", True),
+                "predicted": Trajectory("candidate", "predicted", False),
+            },
+        }
+        trial.method_specs = {
+            "base": MethodSpec("Model", "f_only"),
+            "candidate": MethodSpec("Model", "f_plus_g"),
+        }
+
+        def cards(app, index=0):
+            return json.loads(
+                app.get("iframe")[index]
+                .proto.srcdoc.split("const tracks=", 1)[1]
+                .split(",demo=", 1)[0]
+            )
+
+        with patch("tdwm.result_studio.data.demo_trials", return_value=[trial]):
+            app = AppTest.from_file(
+                str(Path(__file__).resolve().parents[2] / "scripts/result_studio.py")
+            ).run(timeout=30)
+            app.sidebar.selectbox[0].set_value("交互演示 · 合成数据").run()
+            self.assertEqual(
+                app.selectbox(key="baseline_method").options,
+                ["Model · f_only", "Model · f_plus_g"],
+            )
+            self.assertEqual(cards(app)[0]["comparison_html"], "")
+            self.assertIn(">Baseline</span>", cards(app)[1]["comparison_html"])
+            self.assertIn(">New</span>", cards(app)[2]["comparison_html"])
+            app.multiselect(key="search_methods").set_value(["f_plus_g"]).run()
+            self.assertEqual(app.selectbox(key="baseline_method").value, "base")
+            self.assertEqual(len(app.selectbox(key="baseline_method").options), 2)
+            self.assertIn(">New</span>", cards(app)[1]["comparison_html"])
+            app.selectbox(key="baseline_method").set_value("candidate").run()
+            self.assertIn(">Baseline</span>", cards(app)[1]["comparison_html"])
+            app.multiselect(key="search_methods").set_value(
+                ["f_only", "f_plus_g"]
+            ).run()
+            self.assertIn(">Lost</span>", cards(app)[1]["comparison_html"])
+            next(
+                element for element in app.selectbox if element.label == "方法轨迹类型"
+            ).set_value("predicted").run()
+            self.assertIn(">Lost</span>", cards(app)[1]["comparison_html"])
+            self.assertTrue(
+                any("不代表模型预测轨迹的准确率" in item.value for item in app.caption)
+            )
+            app.toggle[0].set_value(True).run()
+            self.assertFalse(app.exception)
+            self.assertIn(">Lost</span>", cards(app, 1)[1]["comparison_html"])
+            self.assertFalse(trial.methods["base"]["executed"].success)
+            self.assertTrue(trial.methods["candidate"]["executed"].success)
 
     def test_manifest_explicit_method_metadata_and_legacy_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
