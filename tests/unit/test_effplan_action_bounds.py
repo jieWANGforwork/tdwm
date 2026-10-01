@@ -47,6 +47,14 @@ def test_bad_action_shape_or_nan_is_not_silently_repaired():
         box.project_(torch.full((1, 25), float("nan")))
 
 
+def test_projection_accepts_public_solver_inference_tensor():
+    with torch.inference_mode():
+        actions = torch.full((1, 5, 25), 100.0)
+    ActionBox(MEAN, SCALE).project_(actions)
+    raw = actions.reshape(-1, 5) * torch.tensor(SCALE) + torch.tensor(MEAN)
+    assert raw.min() >= -1 and raw.max() <= 1
+
+
 class Cost(torch.nn.Module):
     def __init__(self):
         super().__init__()

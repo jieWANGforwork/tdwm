@@ -40,7 +40,7 @@ class ActionBox:
         hi = actions.new_tensor(upper).repeat(repeats)
         return torch.nextafter(lo, hi), torch.nextafter(hi, lo)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def project_(self, actions):
         if not torch.isfinite(actions).all():
             raise FloatingPointError("Nonfinite CEM action; bounds cannot repair NaNs.")
