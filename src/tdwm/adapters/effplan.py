@@ -299,6 +299,7 @@ class EffPlanSolver:
         dynamics_coefficient: float,
         safety: PlannerSafety | None = None,
         planning_horizon: int = 5,
+        action_bounds=None,
     ) -> None:
         if type(planning_horizon) is not int or planning_horizon not in (5, 10, 20):
             raise ValueError("EffPlan fixed horizon must be 5, 10 or 20 blocks.")
@@ -317,8 +318,13 @@ class EffPlanSolver:
         self.epsilon = epsilon
         self.dynamics_coefficient = dynamics_coefficient
         self.safety = safety
+        self.action_bounds = action_bounds
+        bounded_cost = model
+        if action_bounds is not None:
+            from tdwm.adapters.action_bounds import BoundedCEMCost
+            bounded_cost = BoundedCEMCost(model, action_bounds)
         self.inner = swm.solver.CEMSolver(
-            model=model,
+            model=bounded_cost,
             batch_size=batch_size,
             num_samples=candidates,
             topk=elites,
@@ -368,11 +374,15 @@ class EffPlanSolver:
                 safety=safety,
             )
             actions = init_action
+            if actions is not None and self.action_bounds is not None:
+                actions = self.action_bounds.project_(actions.clone())
             output: dict[str, Any] = {}
             for index, iterations in enumerate(self.search_iterations):
                 self.inner.n_steps = iterations
                 search_info = dict(info, effplan_nodes=nodes)
                 output = self.inner.solve(search_info, init_action=actions)
+                if self.action_bounds is not None:
+                    self.action_bounds.project_(output["actions"])
                 actions = output["actions"].to(self.device)
                 if index + 1 == len(self.search_iterations):
                     break

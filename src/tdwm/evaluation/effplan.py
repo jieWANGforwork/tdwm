@@ -208,6 +208,23 @@ def _read_eff_for_evaluation(config, checkpoint, manifest_path, device):
     return model, payload
 
 
+def diagnostic_pair_subset(selection, sample_numbers):
+    """Subset an already validated formal draw by original one-based row number."""
+    if sample_numbers is None:
+        return selection
+    numbers = list(sample_numbers)
+    count = selection["episodes"]
+    if (not numbers or len(set(numbers)) != len(numbers)
+            or any(type(n) is not int or not 1 <= n <= count for n in numbers)):
+        raise ValueError("Diagnostic sample numbers must be unique one-based rows.")
+    return dict(
+        selection, format="tdwm-eff-diagnostic-subset-v1", episodes=len(numbers),
+        source_sample_numbers=numbers,
+        pairs={key: [values[n-1] for n in numbers]
+               for key, values in selection["pairs"].items()},
+    )
+
+
 def evaluate_effplan(
     *,
     config_path: str | Path,
@@ -232,9 +249,17 @@ def evaluate_effplan(
     adaptive_local_distance_limit: float | None = None,
     adaptive_distance_only: bool = False,
     action_robustness_path: str | Path | None = None,
+    execution_action_bounds: bool = False,
+    sample_numbers: tuple[int, ...] | None = None,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
+    if (execution_action_bounds or sample_numbers is not None) and (
+        method != "EffPlan" or adaptive_one_shot or adaptive_rolling or offset_window
+        or action_robustness_path is not None or adaptive_distance_only
+        or adaptive_efficiency_threshold is not None or adaptive_local_distance_limit is not None
+    ):
+        raise ValueError("Action bounds/subset diagnosis requires plain fixed EffPlan.")
     robustness = None
     if action_robustness_path is not None:
         from tdwm.adapters.effplan_robust import load_action_robustness
@@ -314,6 +339,11 @@ def evaluate_effplan(
     validate_selection(
         selection, source_sha256=config["source"]["dataset_source_sha256"]
     )
+    parent_selection_sha256 = sha256_file(selection_path)
+    selection = diagnostic_pair_subset(selection, sample_numbers)
+    episode_count = selection["episodes"]
+    selection_sha256 = (parent_selection_sha256 if sample_numbers is None
+                        else canonical_sha256(selection))
     offset = selection["goal_offset"]
     receding = ev["receding_horizons"][str(offset)]
     if type(receding) is not int or receding != 5:
@@ -428,6 +458,18 @@ def evaluate_effplan(
         processor, action_stats = _load_action_processor(
             dataset, output / "action_normalization.json"
         )
+        action_bounds = None
+        if execution_action_bounds:
+            from tdwm.adapters.action_bounds import ActionBox
+            action_bounds = ActionBox(tuple(processor.mean_), tuple(processor.scale_))
+            overrides["execution_action_bounds"] = action_bounds.manifest()
+        if sample_numbers is not None:
+            overrides["diagnostic_subset"] = dict(
+                source_sample_numbers=list(sample_numbers),
+                parent_selection_sha256=parent_selection_sha256,
+                formal_50_episode_result=False,
+                rng_note="seed 42 restarted for this subset; not the historical full-50 RNG position",
+            )
         image = reference["image_preprocessing"]
         transform = transforms.Compose(
             [
@@ -540,10 +582,13 @@ def evaluate_effplan(
                 dynamics_coefficient=ev["effplan_dynamics_coefficient"],
                 safety=planner_safety,
                 planning_horizon=horizon,
+                **({"action_bounds": action_bounds} if action_bounds is not None else {}),
             )
             score = "state_path_tracking_offset_window" if offset_window else "state_path_tracking"
             if robustness is not None:
                 score = "state_path_tracking_action_robustness_v1"
+            if action_bounds is not None:
+                score = "state_path_tracking_execution_box_v1"
             extra_rerolls = len(allocation) - 1
         else:
             if method == "Eff" and ev["eff_score"] not in EFF_SCORE_MODES:
@@ -616,12 +661,12 @@ def evaluate_effplan(
             "checkpoints": checkpoint_records,
             "dataset": provenance,
             "selection": selection,
-            "selection_sha256": sha256_file(selection_path),
+            "selection_sha256": selection_sha256,
             "baseline_pairs_sha256": selection.get("baseline_pairs_sha256"),
             "evaluation_pair_protocol": selection.get("selection_protocol", "episode_heldout"),
             "paired_protocol": {
                 "goal_offset": offset,
-                "episodes": 50,
+                "episodes": episode_count,
                 "planning_seed": 42,
                 "receding_horizon": receding,
                 "horizon": horizon,
@@ -701,7 +746,7 @@ def evaluate_effplan(
                 )
             world = swm.World(
                 wc["env_name"],
-                num_envs=50,
+                num_envs=episode_count,
                 image_shape=(wc["image_size"], wc["image_size"]),
                 max_episode_steps=2 * offset,
                 env_type=wc["env_type"],
@@ -741,9 +786,9 @@ def evaluate_effplan(
                     video=output / "videos" if video else None,
                 )
             successes = np.asarray(metrics["episode_successes"], dtype=bool)
-            if successes.shape != (50,):
+            if successes.shape != (episode_count,):
                 raise ValueError(
-                    "Formal evaluation did not return all 50 episode outcomes."
+                    "Evaluation did not return every requested episode outcome."
                 )
             rate = float(successes.mean() * 100)
             if not np.isclose(rate, metrics["success_rate"]):
@@ -758,8 +803,11 @@ def evaluate_effplan(
                     goal=pairs["goal_steps"][i],
                     success=bool(successes[i]),
                 )
-                for i in range(50)
+                for i in range(episode_count)
             ]
+            if sample_numbers is not None:
+                for episode, sample in zip(episodes, sample_numbers, strict=True):
+                    episode["source_sample_number"] = sample
             if recorder is not None:
                 recording = recorder.finish(successes)
                 for episode, recorded in zip(episodes, recording["episodes"], strict=True):
@@ -769,6 +817,17 @@ def evaluate_effplan(
                     )
                 manifest["rollout_recording"].update(
                     status="complete", total_executed_actions=recording["total_executed_actions"])
+                if action_bounds is not None:
+                    for episode, rows in zip(episodes, recorder.records, strict=True):
+                        executed = np.asarray([row["action"] for row in rows])
+                        if not executed.size:
+                            continue
+                        if not np.isfinite(executed).all() or np.any(np.abs(executed) > 1):
+                            raise RuntimeError("Bounded CEM emitted an out-of-box executed action.")
+                        episode["executed_action_range"] = dict(
+                            minimum=executed.min(axis=0).tolist(),
+                            maximum=executed.max(axis=0).tolist(), outside_count=0,
+                        )
             if adaptive_one_shot:
                 if solver.solve_calls != 1 or len(solver.records) != 50:
                     raise RuntimeError("One-shot evaluation did not plan exactly once per pair.")
@@ -817,14 +876,14 @@ def evaluate_effplan(
                 "protocol": f"O{offset}",
                 "score_mode": score,
                 "successes": int(successes.sum()),
-                "episodes": 50,
+                "episodes": episode_count,
                 "success_rate": rate,
                 "episode_results": episodes,
                 "selection_sha256": manifest["selection_sha256"],
                 "paired_protocol": manifest["paired_protocol"],
                 "metrics": _jsonable(metrics),
                 "elapsed_seconds": time.monotonic() - started,
-                "formal": True,
+                "formal": sample_numbers is None,
             }
             write_json_atomic(output / "result.json", result)
             write_json_atomic(output / "episode_results.json", {"episodes": episodes})
@@ -838,6 +897,9 @@ def evaluate_effplan(
                 manifest["rollout_recording"]["status"] = "incomplete"
             raise
         finally:
+            if action_bounds is not None:
+                write_json_atomic(output / "action_bounds_diagnostics.json",
+                                  solver.inner.model.diagnostics())
             if robustness is not None:
                 write_json_atomic(output / "action_robustness_diagnostics.json", model.diagnostics())
             if world is not None:

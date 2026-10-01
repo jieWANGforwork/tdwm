@@ -46,6 +46,14 @@ def main():
     evaluate.add_argument("--eff-cumulative-weight", type=float)
     evaluate.add_argument("--video", action="store_true")
     evaluate.add_argument(
+        "--execution-action-bounds", action="store_true",
+        help="Opt-in plain EffPlan CEM bounds: inverse-standardized actions in [-1,1].",
+    )
+    evaluate.add_argument(
+        "--sample-numbers", type=int, nargs="+",
+        help="Diagnostic subset of the validated 50-pair draw, one-based (e.g. 49 50).",
+    )
+    evaluate.add_argument(
         "--no-record-rollouts", dest="record_rollouts", action="store_false",
         help="Explicitly disable default per-primitive-action JSON and observation PNG recording.",
     )
@@ -120,6 +128,8 @@ def main():
             adaptive_local_distance_limit=args.adaptive_local_distance_limit,
             adaptive_distance_only=args.adaptive_distance_only,
             action_robustness_path=args.action_robustness_config,
+            execution_action_bounds=args.execution_action_bounds,
+            sample_numbers=None if args.sample_numbers is None else tuple(args.sample_numbers),
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
