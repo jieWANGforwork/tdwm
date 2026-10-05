@@ -1,0 +1,6 @@
+{
+  "noise_beta": 2.0,
+  "alpha": 0.1,
+  "n_elite_keep": 5,
+  "return_mean": false
+}

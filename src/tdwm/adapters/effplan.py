@@ -279,8 +279,8 @@ def distribute_cem_iterations(
 class EffPlanSolver:
     """Learned state planning alternating with public SWM action CEM.
 
-    CEM is not differentiated. After each search, reroll the RETURNED mean
-    actions for dynamics feedback, never reuse the best candidate's states.
+    Search is not differentiated. After each search, reroll the RETURNED
+    actions (CEM mean, opt-in iCEM best) for dynamics feedback.
     After the last state update there is a final action search for that path.
     """
 
@@ -300,6 +300,7 @@ class EffPlanSolver:
         safety: PlannerSafety | None = None,
         planning_horizon: int = 5,
         action_bounds=None,
+        icem_settings=None,
     ) -> None:
         if type(planning_horizon) is not int or planning_horizon not in (5, 10, 20):
             raise ValueError("EffPlan fixed horizon must be 5, 10 or 20 blocks.")
@@ -319,11 +320,13 @@ class EffPlanSolver:
         self.dynamics_coefficient = dynamics_coefficient
         self.safety = safety
         self.action_bounds = action_bounds
+        if icem_settings is not None and (action_bounds is not None or planning_horizon != 5):
+            raise ValueError("iCEM is an independent unbounded H5 comparison")
         bounded_cost = model
         if action_bounds is not None:
             from tdwm.adapters.action_bounds import BoundedCEMCost
             bounded_cost = BoundedCEMCost(model, action_bounds)
-        self.inner = swm.solver.CEMSolver(
+        search_kwargs = dict(
             model=bounded_cost,
             batch_size=batch_size,
             num_samples=candidates,
@@ -333,6 +336,11 @@ class EffPlanSolver:
             device=device,
             seed=seed,
         )
+        if icem_settings is None:
+            self.inner = swm.solver.CEMSolver(**search_kwargs)
+        else:
+            from tdwm.adapters.effplan_icem import PrimitiveICEMSolver
+            self.inner = PrimitiveICEMSolver(settings=icem_settings, **search_kwargs)
         self.searches_per_solve = len(search_iterations)
         self.rollouts_per_solve = candidates * sum(search_iterations)
         self.last_diagnostics: dict[str, Any] = {}
@@ -391,7 +399,7 @@ class EffPlanSolver:
                     for key, val in search_info.items()
                     if torch.is_tensor(val)
                 }
-                # Mean action sequence is not generally the best sampled plan.
+                # Always use the actual returned sequence, not another candidate.
                 future = self.model.future_states(expanded, actions[:, None])[
                     :, 0
                 ].clone()

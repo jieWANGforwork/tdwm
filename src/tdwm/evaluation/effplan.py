@@ -249,11 +249,21 @@ def evaluate_effplan(
     adaptive_local_distance_limit: float | None = None,
     adaptive_distance_only: bool = False,
     action_robustness_path: str | Path | None = None,
+    icem_path: str | Path | None = None,
     execution_action_bounds: bool = False,
     sample_numbers: tuple[int, ...] | None = None,
 ) -> dict:
     """Full public SWM world.evaluate call; no reduced/smoke score substituted."""
     config = load_eff_protocol(config_path, stage="evaluation")
+    icem_settings = None
+    if icem_path is not None:
+        from tdwm.adapters.effplan_icem import load_effplan_icem
+        if (method != "EffPlan" or adaptive_one_shot or adaptive_rolling or offset_window
+                or action_robustness_path is not None or execution_action_bounds
+                or adaptive_distance_only or adaptive_efficiency_threshold is not None
+                or adaptive_local_distance_limit is not None or sample_numbers is not None):
+            raise ValueError("iCEM requires a full plain fixed EffPlan comparison, without other ablations")
+        icem_settings = load_effplan_icem(icem_path)
     if (execution_action_bounds or sample_numbers is not None) and (
         method != "EffPlan" or adaptive_one_shot or adaptive_rolling or offset_window
         or action_robustness_path is not None or adaptive_distance_only
@@ -303,6 +313,8 @@ def evaluate_effplan(
         "eff_cumulative_weight": 1.0,
     }
     overrides: dict[str, object] = {}
+    if icem_settings is not None:
+        overrides["action_solver"] = icem_settings.manifest()
     for name, value in (
         ("eff_score", eff_score),
         ("eff_cumulative_weight", cumulative_weight),
@@ -583,12 +595,15 @@ def evaluate_effplan(
                 safety=planner_safety,
                 planning_horizon=horizon,
                 **({"action_bounds": action_bounds} if action_bounds is not None else {}),
+                **({"icem_settings": icem_settings} if icem_settings is not None else {}),
             )
             score = "state_path_tracking_offset_window" if offset_window else "state_path_tracking"
             if robustness is not None:
                 score = "state_path_tracking_action_robustness_v1"
             if action_bounds is not None:
                 score = "state_path_tracking_execution_box_v1"
+            if icem_settings is not None:
+                score = "state_path_tracking_icem_primitive_v1"
             extra_rerolls = len(allocation) - 1
         else:
             if method == "Eff" and ev["eff_score"] not in EFF_SCORE_MODES:
@@ -698,6 +713,12 @@ def evaluate_effplan(
             },
         }
         manifest_path = output / "protocol_manifest.json"
+        if icem_settings is not None:
+            manifest["icem_config_sha256"] = sha256_file(icem_path)
+            manifest["compute"].update(
+                total_f_rollouts_per_decision=9000 + extra_rerolls,
+                matched_model_compute=True,
+            )
         if robustness is not None:
             perturbations = (9000 * robustness.samples * min(robustness.shortlist or 300, 300) // 300
                              if robustness.active else 0)

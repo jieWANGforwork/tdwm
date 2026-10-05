@@ -62,6 +62,10 @@ def main():
         help="Opt-in JSON action perturbation risk settings; fixed H5/RH5 EffPlan only.",
     )
     evaluate.add_argument(
+        "--icem-config",
+        help="Independent P+iCEM comparison using public SWM iCEM on primitive time, no action clipping.",
+    )
+    evaluate.add_argument(
         "--adaptive-distance-only", action="store_true",
         help="Independent distance-only stopping; requires a local distance limit, no efficiency threshold.",
     )
@@ -128,6 +132,7 @@ def main():
             adaptive_local_distance_limit=args.adaptive_local_distance_limit,
             adaptive_distance_only=args.adaptive_distance_only,
             action_robustness_path=args.action_robustness_config,
+            icem_path=args.icem_config,
             execution_action_bounds=args.execution_action_bounds,
             sample_numbers=None if args.sample_numbers is None else tuple(args.sample_numbers),
         )
